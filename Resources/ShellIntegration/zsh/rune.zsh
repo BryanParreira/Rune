@@ -55,7 +55,8 @@ __rune_precmd_last() {
 
   if [[ "$RUNE_HONOR_PROMPT" == 1 ]]; then
     if [[ "$PS1" != *'133;B'* ]]; then
-      PS1=$'%{\e]133;A\a%}\n'"$PS1"$'%{\e]133;B\a%}'
+      # Show the cursor: Rune hides it while the shell starts.
+      PS1=$'%{\e]133;A\a%}\n'"$PS1"$'%{\e]133;B\a\e[?25h%}'
     fi
   else
     # Rune shows the context (cwd, git branch) itself, so the shell prompt is empty.

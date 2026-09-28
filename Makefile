@@ -10,10 +10,20 @@ DMG           := $(BUILD_DIR)/$(APP_NAME).dmg
 INSTALL_DIR   ?= /Applications
 PREFIX        ?= $(HOME)/.local
 
+# Signing: uses your "Developer ID Application" certificate when one is installed, otherwise
+# ad-hoc. Override with SIGN_IDENTITY="-" (ad-hoc) or a specific identity name.
+SIGN_IDENTITY ?= $(shell security find-identity -v -p codesigning 2>/dev/null | grep -m1 "Developer ID Application" | sed -E 's/.*"(.*)"/\1/')
+ifeq ($(strip $(SIGN_IDENTITY)),)
+SIGN_IDENTITY := -
+endif
+# Notarization credentials stored with:
+#   xcrun notarytool store-credentials rune-notary --apple-id <you> --team-id <TEAM>
+NOTARY_PROFILE ?= rune-notary
+
 XCODEBUILD := xcodebuild -project $(PROJECT) -scheme $(SCHEME) -derivedDataPath $(DERIVED) \
 	-skipPackagePluginValidation -skipMacroValidation
 
-.PHONY: all gen build run release install dmg cli uninstall-cli test clean distclean
+.PHONY: all gen build run release install dmg notarize cli uninstall-cli test clean distclean
 
 all: build
 
@@ -31,11 +41,11 @@ run: build
 test: gen
 	$(XCODEBUILD) -configuration Debug test -quiet
 
-# Universal (arm64 + x86_64) Release build, ad-hoc signed.
+# Universal (arm64 + x86_64) Release build, signed inside-out.
 release: gen
 	$(XCODEBUILD) -configuration Release -destination 'generic/platform=macOS' \
 		ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO build -quiet
-	codesign --force --deep --sign - "$(RELEASE_APP)"
+	sh scripts/sign.sh "$(RELEASE_APP)" "$(SIGN_IDENTITY)"
 	@lipo -info "$(RELEASE_APP)/Contents/MacOS/$(APP_NAME)"
 
 install: release
@@ -44,14 +54,12 @@ install: release
 	@echo "Installed $(INSTALL_DIR)/$(APP_NAME).app"
 
 dmg: release
-	rm -rf "$(DIST_DIR)" "$(DMG)"
-	mkdir -p "$(DIST_DIR)"
-	ditto "$(RELEASE_APP)" "$(DIST_DIR)/$(APP_NAME).app"
-	ln -s /Applications "$(DIST_DIR)/Applications"
-	cp INSTALL.md "$(DIST_DIR)/INSTALL.md"
-	hdiutil create -volname "$(APP_NAME)" -srcfolder "$(DIST_DIR)" -ov -format UDZO "$(DMG)" -quiet
-	rm -rf "$(DIST_DIR)"
-	@echo "Created $(DMG)"
+	sh scripts/make-dmg.sh "$(RELEASE_APP)" "$(DMG)" "$(SIGN_IDENTITY)"
+
+# Notarizes and staples the app, rebuilds the DMG around it, then notarizes and staples the DMG.
+notarize: release
+	@test "$(SIGN_IDENTITY)" != "-" || { echo "Notarization needs a Developer ID Application certificate"; exit 1; }
+	sh scripts/notarize.sh "$(RELEASE_APP)" "$(DMG)" "$(SIGN_IDENTITY)" "$(NOTARY_PROFILE)"
 
 # Installs the `rune` command. Override with: make cli PREFIX=/usr/local
 cli:

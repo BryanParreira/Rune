@@ -28,6 +28,11 @@ enum MainMenu {
     private static func appMenu() -> NSMenu {
         let menu = NSMenu(title: "Rune")
         menu.addItem(item("About Rune", #selector(NSApplication.orderFrontStandardAboutPanel(_:))))
+        if UpdateController.shared.isAvailable {
+            let update = item("Check for Updates…", #selector(UpdateController.checkForUpdates(_:)))
+            update.target = UpdateController.shared
+            menu.addItem(update)
+        }
         menu.addItem(.separator())
         menu.addItem(item("Settings…", #selector(AppDelegate.openSettings(_:)), ","))
         menu.addItem(item("Open config.json", #selector(AppDelegate.openConfig(_:))))

@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = MainMenu.build()
+        UpdateController.shared.start()
         let store = ConfigStore()
         configStore = store
         ConfigStore.current = store

@@ -152,7 +152,7 @@ enum SettingsIndex {
         case .sync:
             return ["Sync folder", "iCloud", "dotfiles", "This Mac only", "machine", "hosts", "per-machine"]
         case .about:
-            return ["Version", "License", "Config file", "local-first", "privacy", "telemetry"]
+            return ["Version", "License", "Config file", "local-first", "privacy", "telemetry", "Updates", "Check for updates", "Automatically check for updates"]
         }
     }
 }
@@ -758,6 +758,38 @@ struct SyncPage: View {
     }
 }
 
+/// Update status and the automatic-check switch.
+struct UpdateRows: View {
+    @ObservedObject var model: SettingsModel
+    @ObservedObject private var updates = UpdateController.shared
+
+    var body: some View {
+        let p = model.palette
+        if updates.isAvailable {
+            SettingRow(model: model, title: "Updates", detail: lastCheckedText) {
+                LinkButton(title: "Check for updates", palette: p) { updates.checkForUpdates(nil) }
+                    .disabled(!updates.canCheck)
+                    .opacity(updates.canCheck ? 1 : 0.5)
+            }
+            SettingRow(model: model, title: "Automatically check for updates",
+                       detail: "Once a day Rune downloads the release feed and asks before installing anything. Nothing about you or your machine is sent.") {
+                SwitchControl(isOn: $updates.automaticallyChecks)
+            }
+        } else {
+            SettingRow(model: model, title: "Updates", detail: "This build has no update feed (local or development build).") {
+                EmptyView()
+            }
+        }
+    }
+
+    private var lastCheckedText: String {
+        guard let date = updates.lastChecked else { return "Not checked yet." }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return "Last checked \(formatter.localizedString(for: date, relativeTo: Date()))."
+    }
+}
+
 struct AboutPage: View {
     @ObservedObject var model: SettingsModel
 
@@ -781,6 +813,7 @@ struct AboutPage: View {
 
             SettingsDivider(palette: p)
 
+            UpdateRows(model: model)
             SettingRow(model: model, title: "Version") {
                 HStack(spacing: 8) {
                     Text("\(version) (\(build))")

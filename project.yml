@@ -16,7 +16,8 @@ settings:
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
     DEVELOPMENT_TEAM: ""
-    ENABLE_HARDENED_RUNTIME: NO
+    # Required for notarization; Rune needs no runtime exceptions.
+    ENABLE_HARDENED_RUNTIME: YES
     DEAD_CODE_STRIPPING: YES
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
@@ -30,6 +31,9 @@ packages:
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm
     exactVersion: 1.20.0
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.0
 
 targets:
   RuneKit:
@@ -60,6 +64,7 @@ targets:
       - target: RuneKit
         embed: true
       - package: SwiftTerm
+      - package: Sparkle
     info:
       path: Resources/Info.plist
       properties:
@@ -75,6 +80,13 @@ targets:
         NSSupportsAutomaticTermination: false
         NSSupportsSuddenTermination: false
         NSHumanReadableCopyright: "Rune — local-first terminal"
+        # In-app updates (Sparkle). The feed is the publisher's release channel; forks can
+        # override RUNE_FEED_URL / RUNE_UPDATE_PUBLIC_KEY or leave them empty to disable updates.
+        SUFeedURL: $(RUNE_FEED_URL)
+        SUPublicEDKey: $(RUNE_UPDATE_PUBLIC_KEY)
+        SUEnableAutomaticChecks: true
+        SUScheduledCheckInterval: 86400
+        SUVerifyUpdateBeforeExtraction: true
         CFBundleDocumentTypes:
           - CFBundleTypeName: Folder
             CFBundleTypeRole: Viewer
@@ -85,6 +97,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.rune.Rune
         PRODUCT_NAME: Rune
+        RUNE_FEED_URL: https://github.com/BryanParreira/rune-releases/releases/latest/download/appcast.xml
+        RUNE_UPDATE_PUBLIC_KEY: cHr50kOJ2kLrVtbwVnNzmRPNq/M9a7KEqpcpM7ks+ZA=
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
         COMBINE_HIDPI_IMAGES: YES

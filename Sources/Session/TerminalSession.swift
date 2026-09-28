@@ -174,9 +174,14 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             ShellEnvironment.addZshIntegration(to: &env, integrationDirectory: integrationDir,
                                                honorPrompt: config.honorPrompt, typeInShell: typeInShell)
             integration = .pending
+            // Keep the caret hidden while zsh loads; the integration shows it when it's
+            // actually needed (at the real prompt, or when a command runs). Without this the
+            // caret blinks at the top-left for the second or two a heavy .zshrc takes.
+            terminalView.feed(text: "\u{1b}[?25l")
             let timeout = DispatchWorkItem { [weak self] in
                 guard let self, self.integration == .pending else { return }
                 self.integration = .unavailable
+                self.terminalView.feed(text: "\u{1b}[?25h")
                 self.updateMode()
             }
             integrationTimeout = timeout
