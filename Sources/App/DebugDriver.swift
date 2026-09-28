@@ -28,6 +28,8 @@ enum DebugDriver {
             case "@clear": session.clearScreen()
             case "@wait": break
             case "@settings": NSApp.sendAction(#selector(AppDelegate.openSettings(_:)), to: nil, from: nil)
+            case "@tree":
+                NSApp.sendAction(#selector(MainWindowController.toggleFileTree(_:)), to: nil, from: nil)
             case "@dump":
                 let c = session.view.conversation
                 let t = session.terminalView.getTerminal()

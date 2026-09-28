@@ -77,6 +77,8 @@ enum MainMenu {
 
     private static func viewMenu() -> NSMenu {
         let menu = NSMenu(title: "View")
+        menu.addItem(item("Toggle File Tree", #selector(MainWindowController.toggleFileTree(_:)), "b"))
+        menu.addItem(.separator())
         menu.addItem(item("Select Previous Block", #selector(MainWindowController.selectPreviousBlock(_:)), "\u{F700}"))
         menu.addItem(item("Select Next Block", #selector(MainWindowController.selectNextBlock(_:)), "\u{F701}"))
         menu.addItem(.separator())

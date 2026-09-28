@@ -35,6 +35,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private let tabsModel: TabsModel
     private let warningModel: WarningModel
     private let contentArea = NSView()
+    private let fileTree = FileTreeModel()
+    private var fileTreeHost: NSHostingView<FileTreeView>?
+    private var fileTreeWidth: NSLayoutConstraint?
+    static let fileTreeDefaultWidth: CGFloat = 250
 
     /// Called after the window closes so the app can drop its reference.
     var onClose: ((MainWindowController) -> Void)?
@@ -93,7 +97,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         tabBar.safeAreaRegions = []
         banner.safeAreaRegions = []
 
-        for view in [tabBar, banner, contentArea] {
+        let treeHost = NSHostingView(rootView: FileTreeView(model: fileTree, palette: ChromePalette(theme: configStore.snapshot.theme)))
+        treeHost.safeAreaRegions = []
+        treeHost.isHidden = true
+        fileTreeHost = treeHost
+        let treeWidth = treeHost.widthAnchor.constraint(equalToConstant: 0)
+        fileTreeWidth = treeWidth
+
+        for view in [tabBar, banner, treeHost, contentArea] {
             view.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(view)
         }
@@ -108,8 +119,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             banner.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             banner.trailingAnchor.constraint(equalTo: root.trailingAnchor),
 
+            treeHost.topAnchor.constraint(equalTo: banner.bottomAnchor),
+            treeHost.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            treeHost.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            treeWidth,
+
             contentArea.topAnchor.constraint(equalTo: banner.bottomAnchor),
-            contentArea.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            contentArea.leadingAnchor.constraint(equalTo: treeHost.trailingAnchor),
             contentArea.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             contentArea.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
@@ -122,6 +138,25 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         tabsModel.onSelect = { [weak self] id in self?.selectTab(id: id) }
         tabsModel.onClose = { [weak self] id in self?.closeTab(id: id) }
         tabsModel.onNew = { [weak self] in self?.newTab(nil) }
+        tabsModel.onToggleSidebar = { [weak self] in self?.toggleFileTree(nil) }
+        fileTree.onInsertPath = { [weak self] path in
+            guard let session = self?.fileTreeSession else { return }
+            let quoted = FileListing.shellQuoted(path)
+            if session.mode == .editor {
+                session.view.inputArea.insertAtCaret(quoted + " ")
+            } else {
+                session.terminalView.sendToShell(Array((quoted + " ").utf8))
+            }
+        }
+        fileTree.onChangeDirectory = { [weak self] path in
+            guard let session = self?.fileTreeSession, session.mode == .editor || session.mode == .shellPrompt else { return }
+            if session.mode == .editor {
+                session.submit("cd " + FileListing.shellQuoted(path))
+            } else {
+                session.terminalView.sendToShell(Array(("cd " + FileListing.shellQuoted(path) + "\r").utf8))
+            }
+        }
+        fileTree.onNewTab = { [weak self] path in self?.addTab(directory: path) }
         warningModel.onOpenConfig = { [weak self] in self?.openSettingsTab() }
     }
 
@@ -133,6 +168,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             warningModel.warnings = snapshot.warnings
             warningModel.dismissed = false
         }
+        fileTreeHost?.rootView = FileTreeView(model: fileTree, palette: palette)
         window?.backgroundColor = palette.background
         window?.contentView?.layer?.backgroundColor = palette.background.cgColor
         for tab in tabs {
@@ -232,9 +268,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         select(index: min(next, tabs.count - 1))
     }
 
+    /// The terminal the file tree follows: the selected one, or the last terminal tab.
+    private var fileTreeSession: TerminalSession? { directorySource }
+
     private func refreshTabs() {
         tabsModel.tabs = tabs.map { TabItem(id: $0.id, title: $0.title) }
         tabsModel.selectedID = selectedTab?.id
+        if let directory = fileTreeSession?.currentDirectory {
+            fileTree.setRoot(directory)
+        }
         window?.title = selectedTab?.title ?? "Rune"
     }
 
@@ -264,6 +306,32 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         // Tag 1–8 select that tab; 9 selects the last tab, like browsers.
         let index = sender.tag == 9 ? tabs.count - 1 : sender.tag - 1
         select(index: index)
+    }
+
+    @objc func toggleFileTree(_ sender: Any?) {
+        guard let host = fileTreeHost, let width = fileTreeWidth else { return }
+        let show = host.isHidden
+        tabsModel.sidebarVisible = show
+        fileTree.isActive = show
+        if show { host.isHidden = false }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.18
+            context.allowsImplicitAnimation = true
+            width.animator().constant = show ? Self.fileTreeDefaultWidth : 0
+            window?.contentView?.layoutSubtreeIfNeeded()
+        }, completionHandler: { [weak self] in
+            if !show { host.isHidden = true }
+            if !show { self?.selectedTab?.focus() }
+        })
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["RUNE_DEBUG_SCRIPT"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard let self else { return }
+                print("TREE visible=\(!host.isHidden) width=\(host.frame.width) root=\(self.fileTree.root ?? "-") rows=\(self.fileTree.rows.count) first=\(self.fileTree.rows.prefix(6).map(\.entry.name))")
+                fflush(stdout)
+            }
+        }
+        #endif
     }
 
     @objc func selectPreviousBlock(_ sender: Any?) {

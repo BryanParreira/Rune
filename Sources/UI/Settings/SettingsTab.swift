@@ -176,6 +176,7 @@ struct KeyboardShortcut: Identifiable {
         .init(action: "Select previous block", keys: ["⌘", "↑"]),
         .init(action: "Select next block", keys: ["⌘", "↓"]),
         .init(action: "Clear screen", keys: ["⌘", "K"]),
+        .init(action: "Toggle file tree", keys: ["⌘", "B"]),
         .init(action: "New tab", keys: ["⌘", "T"]),
         .init(action: "Close tab", keys: ["⌘", "W"]),
         .init(action: "Switch to tab 1–8 / last tab", keys: ["⌘", "1…9"]),

@@ -12,6 +12,8 @@ final class TabsModel: ObservableObject {
     @Published var selectedID: UUID?
     @Published var palette: ChromePalette
 
+    @Published var sidebarVisible = false
+    var onToggleSidebar: () -> Void = {}
     var onSelect: (UUID) -> Void = { _ in }
     var onClose: (UUID) -> Void = { _ in }
     var onNew: () -> Void = {}
@@ -28,6 +30,8 @@ struct TabBarView: View {
 
     var body: some View {
         HStack(spacing: 0) {
+            SidebarToggle(isOn: model.sidebarVisible, palette: model.palette, action: model.onToggleSidebar)
+                .padding(.trailing, 8)
             Divider(palette: model.palette)
             ForEach(model.tabs) { tab in
                 TabSegment(
@@ -63,6 +67,28 @@ struct TabBarView: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color(nsColor: model.palette.separator)).frame(height: 1)
         }
+    }
+}
+
+/// Shows/hides the file tree (⌘B).
+private struct SidebarToggle: View {
+    let isOn: Bool
+    let palette: ChromePalette
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "sidebar.left")
+                .font(.system(size: 13))
+                .foregroundColor(Color(nsColor: isOn ? palette.text : (hovering ? palette.text : palette.secondary)))
+                .frame(width: 28, height: 26)
+                .background(RoundedRectangle(cornerRadius: 5).fill(Color(nsColor: isOn ? palette.tabSelected : (hovering ? palette.tabHover : .clear))))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(isOn ? "Hide file tree (⌘B)" : "Show file tree (⌘B)")
     }
 }
 

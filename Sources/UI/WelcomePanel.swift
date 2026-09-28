@@ -24,7 +24,8 @@ struct WelcomePanel: View {
         Shortcut(keys: ["⇧", "↵"], text: "add a new line to your command"),
         Shortcut(keys: ["⇥"], text: "complete files and folders"),
         Shortcut(keys: ["⌘", "↑"], text: "select and jump between blocks"),
-        Shortcut(keys: ["⌘", "K"], text: "clear the screen"),
+        Shortcut(keys: ["⌘", "↵"], text: "ask AI (runs on your Mac)"),
+        Shortcut(keys: ["⌘", "B"], text: "show files and folders"),
         Shortcut(keys: ["⌘", ","], text: "open settings"),
     ]
 

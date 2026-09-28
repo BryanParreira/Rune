@@ -280,6 +280,12 @@ extension InputAreaView: CommandTextViewDelegate {
         textDidChange(Notification(name: NSText.didChangeNotification))
     }
 
+    /// Inserts text at the caret (e.g. a path from the file tree).
+    func insertAtCaret(_ text: String) {
+        focusEditor()
+        editor.insertText(text, replacementRange: editor.selectedRange())
+    }
+
     func setText(_ text: String) {
         editor.string = text
         editor.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
