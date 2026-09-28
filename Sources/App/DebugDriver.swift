@@ -9,6 +9,8 @@ import AppKit
 ///   @wait           → extra pause
 ///   @settings       → open the Settings window
 ///   @type:text      → type into the editor without submitting
+///   @ai:question    → ask the AI
+///   @dump           → print AI conversation state to stdout
 enum DebugDriver {
     static func runIfRequested(session: TerminalSession) {
         guard let script = ProcessInfo.processInfo.environment["RUNE_DEBUG_SCRIPT"], !script.isEmpty else { return }
@@ -26,6 +28,13 @@ enum DebugDriver {
             case "@clear": session.clearScreen()
             case "@wait": break
             case "@settings": NSApp.sendAction(#selector(AppDelegate.openSettings(_:)), to: nil, from: nil)
+            case "@dump":
+                let c = session.view.conversation
+                print("DUMP state=\(c.state) model=\(c.model) context=\(c.contextLabel ?? "-")")
+                print("DUMP reply<<\(c.reply)>>")
+                print("DUMP command<<\(c.command ?? "nil")>>")
+                print("DUMP service ready=\(AIService.shared.isReady) active=\(AIService.shared.activeModel ?? "nil") status=\(AIService.shared.status)")
+                fflush(stdout)
             case let question where question.hasPrefix("@ai:"):
                 session.askAI(String(question.dropFirst(4)))
             case let typed where typed.hasPrefix("@type:"):

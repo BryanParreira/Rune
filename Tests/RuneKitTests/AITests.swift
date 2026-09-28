@@ -183,6 +183,8 @@ final class AIPromptTests: XCTestCase {
         XCTAssertEqual(c.aiModel, "llama3")
         XCTAssertEqual(c.ollamaEndpoint, "http://x")
         XCTAssertFalse(c.aiIncludeBlockContext)
+        XCTAssertTrue(c.aiEnabled, "AI defaults to on")
         XCTAssertEqual(warnings, [])
+        XCTAssertFalse(RuneConfig(dictionary: ["aiEnabled": false], warnings: &warnings).aiEnabled)
     }
 }

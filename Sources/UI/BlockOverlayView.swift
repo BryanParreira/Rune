@@ -188,7 +188,7 @@ final class BlockOverlayView: NSView {
         }
         actionBar.palette = palette
         actionBar.canRerun = session.mode == .editor
-        actionBar.showsExplain = hovered.block.isFailed
+        actionBar.showsExplain = hovered.block.isFailed && AIService.shared.isEnabled
         let size = actionBar.fittingSize
         let right = bounds.width - session.terminalView.frame.minX + 6
         let y = max(hovered.headerRect.minY, session.terminalView.frame.minY)

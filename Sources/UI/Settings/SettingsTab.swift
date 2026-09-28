@@ -709,11 +709,18 @@ struct AIPage: View {
         let p = model.palette
         VStack(alignment: .leading, spacing: 0) {
             PageTitle(text: "AI", palette: p)
-            Text("Rune talks to Ollama on your own Mac. Press ⌘↵ in the input to ask; suggested commands always wait for you to press Run. AI is optional: without Ollama, Rune is a complete terminal.")
+            Text("Rune is a terminal first: Enter always runs your command in the shell. Only ⌘↵ (or Explain on a failed block) sends a question to Ollama on your own Mac, and suggested commands always wait for you to press Run.")
                 .font(.system(size: 12))
                 .foregroundColor(Color(nsColor: p.secondary))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, 18)
+
+            SettingRow(model: model, title: "Enable AI", key: "aiEnabled",
+                       detail: "Off: Rune never contacts Ollama and hides the model chip, ⌘↵ and Explain.") {
+                SwitchControl(isOn: model.binding("aiEnabled", { $0.aiEnabled }))
+            }
+
+            if model.config.aiEnabled {
 
             SettingRow(model: model, title: "Status", detail: statusDetail) {
                 HStack(spacing: 14) {
@@ -762,6 +769,7 @@ struct AIPage: View {
                 .frame(width: 240, height: 28)
                 .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(nsColor: p.foreground.withAlphaComponent(0.16)), lineWidth: 1))
                 .onAppear { endpointDraft = model.config.ollamaEndpoint ?? "" }
+            }
             }
         }
         .onAppear { ai.refresh() }

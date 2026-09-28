@@ -15,6 +15,8 @@ final class AIService: ObservableObject {
     @Published private(set) var activeModel: String?
     /// Shown when the chosen model disappeared and another was picked.
     @Published private(set) var fallbackNotice: String?
+    /// The user's master switch. When off, nothing is ever sent to Ollama.
+    @Published private(set) var isEnabled = true
 
     private var preferredModel: String?
     private var cancellables: Set<AnyCancellable> = []
@@ -25,11 +27,22 @@ final class AIService: ObservableObject {
     /// Starts following config changes and checks Ollama once.
     func start(store: ConfigStore) {
         store.$snapshot
-            .map { ($0.config.ollamaEndpoint, $0.config.aiModel) }
+            .map { ($0.config.aiEnabled, $0.config.ollamaEndpoint, $0.config.aiModel) }
             .removeDuplicates { $0 == $1 }
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] endpointValue, model in
+            .sink { [weak self] enabled, endpointValue, model in
                 guard let self else { return }
+                let wasEnabled = self.isEnabled
+                self.isEnabled = enabled
+                guard enabled else {
+                    // Forget everything so no UI offers AI.
+                    self.status = .notInstalled
+                    self.activeModel = nil
+                    self.fallbackNotice = nil
+                    self.hasChecked = false
+                    return
+                }
+                if !wasEnabled { self.hasChecked = false }
                 let newEndpoint = OllamaEndpoint.resolve(configValue: endpointValue, environment: ProcessInfo.processInfo.environment)
                 let endpointChanged = newEndpoint != self.endpoint
                 self.endpoint = newEndpoint
@@ -45,7 +58,7 @@ final class AIService: ObservableObject {
 
     var client: OllamaClient { OllamaClient(baseURL: endpoint.url) }
 
-    var isReady: Bool { activeModel != nil && !status.models.isEmpty }
+    var isReady: Bool { isEnabled && activeModel != nil && !status.models.isEmpty }
 
     var activeModelInfo: OllamaModel? {
         status.models.first { $0.name == activeModel }
@@ -53,6 +66,7 @@ final class AIService: ObservableObject {
 
     /// Re-checks the machine: server, installed app/CLI, and models.
     func refresh(completion: (() -> Void)? = nil) {
+        guard isEnabled else { completion?(); return }
         isChecking = true
         let endpoint = endpoint
         let client = client

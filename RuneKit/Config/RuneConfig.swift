@@ -34,6 +34,8 @@ public struct RuneConfig: Equatable, Sendable {
     public var honorPrompt: Bool = false
     /// Rune editor, or type straight into zsh.
     public var inputMode: InputStyle = .editor
+    /// Master switch for AI. Off: Rune never contacts Ollama and hides every AI affordance.
+    public var aiEnabled: Bool = true
     /// Explicit Ollama URL; nil means $OLLAMA_HOST or http://localhost:11434.
     public var ollamaEndpoint: String?
     /// The model the user picked; falls back to the first installed model if it's gone.
@@ -54,7 +56,7 @@ public struct RuneConfig: Equatable, Sendable {
     public static let knownKeys: Set<String> = [
         "fontFamily", "fontSize", "lineHeight", "theme", "paddingX", "paddingY", "cursorStyle",
         "cursorBlink", "scrollback", "optionAsMeta", "showWelcome", "honorPrompt", "inputMode", "shell",
-        "ollamaEndpoint", "aiModel", "aiIncludeBlockContext",
+        "aiEnabled", "ollamaEndpoint", "aiModel", "aiIncludeBlockContext",
         "syncPath", "hosts",
     ]
 
@@ -75,6 +77,7 @@ public struct RuneConfig: Equatable, Sendable {
       "honorPrompt": false,
       "inputMode": "editor",
       "shell": null,
+      "aiEnabled": true,
       "ollamaEndpoint": null,
       "aiModel": null,
       "aiIncludeBlockContext": true,
@@ -118,6 +121,7 @@ extension RuneConfig {
             }
         }
         shell = reader.optionalString("shell")
+        if let v = reader.bool("aiEnabled") { aiEnabled = v }
         ollamaEndpoint = reader.optionalString("ollamaEndpoint")
         aiModel = reader.optionalString("aiModel")
         if let v = reader.bool("aiIncludeBlockContext") { aiIncludeBlockContext = v }

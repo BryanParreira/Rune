@@ -398,6 +398,7 @@ struct ContextChip: View {
 
 struct InputHintLine: View {
     @ObservedObject var model: InputChromeModel
+    @ObservedObject var ai = AIService.shared
 
     var body: some View {
         Group {
@@ -407,9 +408,11 @@ struct InputHintLine: View {
             } else {
                 switch model.hint {
                 case .idle:
-                    hint("↑ history   ⌘↵ ask AI   ⇧↵ new line   ⇥ complete   ⌘↑ blocks")
+                    hint(ai.isEnabled ? "↑ history   ⌘↵ ask AI   ⇧↵ new line   ⇥ complete   ⌘↑ blocks"
+                                      : "↑ history   ⇧↵ new line   ⇥ complete   ⌘↑ blocks")
                 case .typing:
-                    hint("↵ run   ⌘↵ ask AI   → accept suggestion   ⇧↵ new line")
+                    hint(ai.isEnabled ? "↵ run   ⌘↵ ask AI   → accept suggestion   ⇧↵ new line"
+                                      : "↵ run   → accept suggestion   ⇧↵ new line   ⇥ complete")
                 case .running:
                     hint("⌃C interrupt   keystrokes go to the running program")
                 }

@@ -289,6 +289,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         let trimmed = request.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let service = AIService.shared
+        guard service.isEnabled else { NSSound.beep(); return }
         let conversation = view.conversation
         view.dismissWelcomeForSession()
 
@@ -403,15 +404,17 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         let rerunItem = BlockMenuItem(title: "Re-run Command", block: block) { [weak self] in self?.rerun($0) }
         rerunItem.isEnabled = mode == .editor
         menu.addItem(rerunItem)
-        if block.isFailed {
+        if block.isFailed, AIService.shared.isEnabled {
             menu.addItem(BlockMenuItem(title: "Explain This Error", block: block) { [weak self] in self?.explain($0) })
         }
+        if AIService.shared.isEnabled {
         menu.addItem(BlockMenuItem(title: "Ask AI About This Block…", block: block) { [weak self] b in
             guard let self else { return }
             self.selectedBlockID = b.id
             self.view.blocksDidChange()
             self.view.inputArea.focusEditor()
         })
+        }
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: ""))
         return menu
