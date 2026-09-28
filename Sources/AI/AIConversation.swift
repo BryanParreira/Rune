@@ -29,6 +29,8 @@ final class AIConversation: ObservableObject {
     @Published private(set) var contextLabel: String?
     /// Earlier exchanges in this conversation (oldest first).
     @Published private(set) var earlier: [Exchange] = []
+    /// Shrunk to a one-line bar so command output has room (e.g. after running a command).
+    @Published var isCollapsed = false
 
     /// Messages sent so far (user turns include the environment summary).
     private var history: [OllamaClient.ChatMessage] = []
@@ -72,6 +74,7 @@ final class AIConversation: ObservableObject {
         prompt = context.request
         reply = ""
         isThinking = false
+        isCollapsed = false
         self.model = model
         self.contextLabel = contextLabel ?? (followUp ? self.contextLabel : nil)
         state = .waiting
@@ -119,8 +122,22 @@ final class AIConversation: ObservableObject {
         }
     }
 
+    /// Keeps the conversation (for follow-ups) but gets out of the way.
+    func collapse() {
+        guard isVisible, state != .setup else {
+            if state == .setup { dismiss() }
+            return
+        }
+        isCollapsed = true
+    }
+
+    func expand() {
+        isCollapsed = false
+    }
+
     func dismiss() {
         cancel()
+        isCollapsed = false
         history.removeAll()
         earlier.removeAll()
         reply = ""

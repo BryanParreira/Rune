@@ -15,6 +15,52 @@ struct AIPanel: View {
     var onOpenSettings: () -> Void
 
     var body: some View {
+        if conversation.isCollapsed {
+            collapsedBar
+        } else {
+            expandedCard
+        }
+    }
+
+    /// One line: the latest question, with Show / close. Keeps the conversation for follow-ups.
+    private var collapsedBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sparkle")
+                .font(.system(size: fontSize - 3, weight: .semibold))
+                .foregroundColor(Color(nsColor: palette.accent))
+            Text(conversation.prompt)
+                .font(.system(size: fontSize - 2))
+                .foregroundColor(Color(nsColor: palette.secondary))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if conversation.isActive {
+                ProgressView().controlSize(.mini)
+            }
+            Spacer(minLength: 8)
+            Text("⌘↵ follow up")
+                .font(.system(size: fontSize - 3))
+                .foregroundColor(Color(nsColor: palette.hint))
+            Button("Show") { conversation.expand() }
+                .buttonStyle(.plain)
+                .font(.system(size: fontSize - 2, weight: .medium))
+                .foregroundColor(Color(nsColor: palette.accent))
+            Button { conversation.dismiss() } label: {
+                Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)).foregroundColor(Color(nsColor: palette.hint))
+                    .frame(width: 18, height: 18).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Close (esc)")
+        }
+        .padding(.horizontal, horizontalPadding)
+        .frame(height: 30)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: palette.surface1))
+        .overlay(alignment: .top) { Rectangle().fill(Color(nsColor: palette.outline)).frame(height: 1) }
+        .contentShape(Rectangle())
+        .onTapGesture { conversation.expand() }
+    }
+
+    private var expandedCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
             switch conversation.state {

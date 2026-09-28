@@ -63,11 +63,19 @@ final class SessionView: NSView {
         terminalContainer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         welcomeHost.setContentHuggingPriority(.required, for: .vertical)
         aiHost.setContentHuggingPriority(.required, for: .vertical)
+        aiHost.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         inputArea.setContentHuggingPriority(.required, for: .vertical)
         inputArea.setContentCompressionResistancePriority(.required, for: .vertical)
 
         addSubview(stack)
+        // The AI card never takes more than ~45% of the tab; output always keeps room.
+        let aiCap = aiHost.heightAnchor.constraint(lessThanOrEqualTo: heightAnchor, multiplier: 0.45)
+        aiCap.priority = .required
+        let terminalFloor = terminalContainer.heightAnchor.constraint(greaterThanOrEqualToConstant: 90)
+        terminalFloor.priority = .defaultHigh
         NSLayoutConstraint.activate([
+            aiCap,
+            terminalFloor,
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -157,7 +165,6 @@ final class SessionView: NSView {
             fontSize: CGFloat(snapshot.config.fontSize),
             horizontalPadding: CGFloat(snapshot.config.paddingX),
             onRun: { [weak self] command in
-                self?.conversation.dismiss()
                 self?.session?.submit(command)
             },
             onEdit: { [weak self] command in

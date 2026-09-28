@@ -34,6 +34,7 @@ enum DebugDriver {
                 let c = session.view.conversation
                 let t = session.terminalView.getTerminal()
                 let g = session.geometry
+                print("DUMP layout terminalHeight=\(session.terminalView.frame.height) sessionHeight=\(session.view.frame.height) aiVisible=\(c.isVisible) collapsed=\(c.isCollapsed)")
                 print("DUMP screen cursorY=\(t.getCursorLocation().y) rows=\(t.rows) lines=\(g.lineCount) top=\(g.topVisibleRow) mode=\(session.mode)")
                 for b in session.tracker.blocks { print("DUMP block \(b.command) header=\(b.headerRow) out=\(b.outputStartRow) end=\(b.endRow ?? -1) screenTop=\(g.linesTrimmed + g.screenTop)") }
                 print("DUMP state=\(c.state) model=\(c.model) context=\(c.contextLabel ?? "-")")

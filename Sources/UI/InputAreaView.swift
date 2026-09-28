@@ -287,8 +287,9 @@ extension InputAreaView: CommandTextViewDelegate {
         let text = editor.string
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             // ⌘↵ on an empty line runs a finished suggestion, like pressing its Run button.
-            if sessionView.conversation.state == .done, let command = sessionView.conversation.command {
-                sessionView.conversation.dismiss()
+            if sessionView.conversation.isCollapsed {
+                sessionView.conversation.expand()
+            } else if sessionView.conversation.state == .done, let command = sessionView.conversation.command {
                 session.submit(command)
             }
             return

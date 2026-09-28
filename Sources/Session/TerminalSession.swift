@@ -269,6 +269,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         historyNavigator.reset()
         selectedBlockID = nil
         view.dismissWelcomeForSession()
+        // Make room for the output; the conversation stays available for follow-ups.
+        view.conversation.collapse()
 
         var bytes: [UInt8] = []
         if terminalView.getTerminal().bracketedPasteMode {
