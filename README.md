@@ -117,7 +117,6 @@ Requirements: Xcode 15+, [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`bre
 
 ```sh
 make run        # debug build and launch
-make test       # unit tests
 make install    # universal release build → /Applications
 make dmg        # signed disk image
 make notarize   # notarized, stapled DMG (Developer ID required)
