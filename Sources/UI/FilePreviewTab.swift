@@ -105,7 +105,7 @@ final class FilePreviewView: NSView {
         textView.isRichText = false
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
-        textView.textContainerInset = NSSize(width: 14, height: 16)
+        textView.textContainerInset = NSSize(width: 8, height: 16)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = true
         textView.autoresizingMask = [.width]
@@ -571,8 +571,11 @@ final class LineNumberRuler: NSRulerView {
             if index < text.length || text.hasSuffix("\n") { starts.append(index) }
         }
         lineStarts = starts
-        let digits = max(3, String(starts.count).count)
-        ruleThickness = CGFloat(digits) * (font.maximumAdvancement.width + 0.5) + 28
+        // Width of the widest line number actually needed (min 2 digits) plus even padding.
+        let digits = max(2, String(starts.count).count)
+        let sample = String(repeating: "8", count: digits) as NSString
+        let width = ceil(sample.size(withAttributes: [.font: font]).width)
+        ruleThickness = width + 22
         needsDisplay = true
     }
 
@@ -606,7 +609,7 @@ final class LineNumberRuler: NSRulerView {
             let label = "\(line)" as NSString
             let size = label.size(withAttributes: attributes)
             let y = fragmentRect.minY + inset - visible.minY + (fragmentRect.height - size.height) / 2
-            label.draw(at: NSPoint(x: self.bounds.maxX - size.width - 8, y: y), withAttributes: attributes)
+            label.draw(at: NSPoint(x: self.bounds.maxX - size.width - 10, y: y), withAttributes: attributes)
         }
     }
 
