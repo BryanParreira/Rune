@@ -3,11 +3,11 @@
 #   scripts/release.sh <version> ["release notes"]
 #
 # Steps: bump version + build number → universal Release build → Developer ID signing →
-# notarize + staple → Sparkle-signed appcast → GitHub Release on the public releases repo →
+# notarize + staple → Sparkle-signed appcast → GitHub Release on this repo →
 # commit + tag the version bump.
 #
 # Environment:
-#   RELEASES_REPO   owner/name of the public releases repo (default: <your gh user>/rune-releases)
+#   RELEASES_REPO   owner/name of the repo to publish to (default: this repository's GitHub repo)
 #   NOTARY_PROFILE  notarytool keychain profile (default: rune-notary)
 set -eu
 
@@ -16,7 +16,7 @@ NOTES="${2:-Rune $VERSION}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-RELEASES_REPO="${RELEASES_REPO:-$(gh api user -q .login)/rune-releases}"
+RELEASES_REPO="${RELEASES_REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
 SPARKLE_BIN="build/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin"
 TAG="v$VERSION"
 
@@ -52,5 +52,5 @@ gh release create "$TAG" --repo "$RELEASES_REPO" --title "Rune $VERSION" --notes
 git add project.yml
 git commit -m "Release $VERSION"
 git tag "$TAG"
-git push --follow-tags 2>/dev/null || echo "(push skipped: no upstream configured)"
+git push && git push origin "$TAG"
 echo "Published https://github.com/$RELEASES_REPO/releases/tag/$TAG"
