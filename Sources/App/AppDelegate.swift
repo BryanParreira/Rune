@@ -10,7 +10,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = MainMenu.build()
-        configStore = ConfigStore()
+        let store = ConfigStore()
+        configStore = store
+        ConfigStore.current = store
         didFinishLaunching = true
 
         let initial = pendingDirectories.isEmpty ? [Self.launchDirectory()] : pendingDirectories
@@ -87,6 +89,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func newTab(_ sender: Any?) {
         makeWindow(directory: NSHomeDirectory())
+    }
+
+    /// Reached only when no Rune window is key (the window controller handles it otherwise).
+    @objc func openSettings(_ sender: Any?) {
+        if frontController() == nil {
+            makeWindow(directory: NSHomeDirectory())
+        }
+        frontController()?.openSettingsTab()
+        frontController()?.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate()
     }
 
     @objc func openConfig(_ sender: Any?) {

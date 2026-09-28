@@ -13,10 +13,13 @@ See [INSTALL.md](INSTALL.md) for installing and building.
 ```
 project.yml          XcodeGen project (make gen)
 Makefile             build / run / test / install / dmg / cli
-RuneKit/             UI-free logic: config, themes, shell resolution (unit tested)
+RuneKit/             UI-free logic (unit tested): config + writer, themes, shell resolution,
+                     OSC 133 parser, block tracker, input routing, history, path completion, git
+Resources/ShellIntegration/zsh/   ZDOTDIR bootstrap + hooks (never touches your dotfiles)
 Sources/App/         app lifecycle, menus, config store
-Sources/Session/     PTY session wrapping SwiftTerm's LocalProcessTerminalView
-Sources/UI/          window, tab bar, terminal container, banners
+Sources/Session/     PTY session, shell-integration handling, buffer geometry, history store
+Sources/UI/          window + tabs, block overlay, input area, welcome panel, Settings tab
+docs/DESIGN.md       layout/color/behavior spec
 Tests/RuneKitTests/  XCTest suite
 scripts/             `rune` CLI launcher, icon generator
 ```
@@ -24,8 +27,9 @@ scripts/             `rune` CLI launcher, icon generator
 ## Status
 
 - Phase 1 (terminal, tabs, config, packaging): done
-- Phase 2: shell integration + blocks
-- Phase 3: input editor
+- Phase 2 (zsh integration, OSC 133 blocks, block actions): done
+- Phase 3 (bottom input editor, history, completion, keystroke routing): done
+- Settings tab, Nerd Font icon fallback, new app icon: done
 - Phase 4: palette, splits, workflows, SSH
 - Phase 5: local AI via Ollama
 

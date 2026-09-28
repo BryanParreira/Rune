@@ -1,0 +1,81 @@
+import Foundation
+
+/// Events reported by Rune's shell integration through OSC sequences.
+///
+/// Standard FinalTerm/OSC 133 marks:
+/// - `A` prompt start, `B` command (input) start, `C` output start, `D[;exit]` command finished.
+///
+/// Rune's private OSC 6973 carries metadata as `key=value` (value percent-encoded):
+/// - `hello=<version>` integration loaded, `cwd=<path>`, `cmd=<command text>`.
+public enum ShellMark: Equatable, Sendable {
+    case promptStart
+    case commandStart
+    case outputStart
+    case commandFinished(exitCode: Int32?)
+    case integrationReady(version: String)
+    case currentDirectory(String)
+    case commandText(String)
+}
+
+public enum ShellMarkParser {
+    public static let runeOSC = 6973
+
+    /// Parses the payload of an OSC 133 sequence (everything after `133;`).
+    public static func parse133(_ payload: String) -> ShellMark? {
+        let fields = payload.split(separator: ";", omittingEmptySubsequences: false)
+        guard let action = fields.first, action.count == 1 else { return nil }
+        switch action {
+        case "A": return .promptStart
+        case "B": return .commandStart
+        case "C": return .outputStart
+        case "D":
+            // "D", "D;0", "D;127", or "D;;aid=…" — options after the exit code are ignored.
+            let code = fields.count > 1 ? Int32(fields[1]) : nil
+            return .commandFinished(exitCode: code)
+        default: return nil
+        }
+    }
+
+    /// Parses the payload of Rune's private OSC (everything after `6973;`).
+    public static func parseRune(_ payload: String) -> ShellMark? {
+        guard let eq = payload.firstIndex(of: "=") else { return nil }
+        let key = payload[..<eq]
+        let raw = String(payload[payload.index(after: eq)...])
+        let value = percentDecode(raw)
+        switch key {
+        case "hello": return .integrationReady(version: value)
+        case "cwd": return value.isEmpty ? nil : .currentDirectory(value)
+        case "cmd": return .commandText(value)
+        default: return nil
+        }
+    }
+
+    /// Decodes `%XX` escapes; malformed escapes are kept literally. Works on bytes so
+    /// multi-byte UTF-8 split across escapes decodes correctly.
+    public static func percentDecode(_ s: String) -> String {
+        guard s.contains("%") else { return s }
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(s.utf8.count)
+        var iterator = Array(s.utf8)[...]
+        while let byte = iterator.popFirst() {
+            if byte == UInt8(ascii: "%"), iterator.count >= 2,
+               let hi = hexValue(iterator[iterator.startIndex]),
+               let lo = hexValue(iterator[iterator.startIndex + 1]) {
+                bytes.append(hi << 4 | lo)
+                iterator = iterator.dropFirst(2)
+            } else {
+                bytes.append(byte)
+            }
+        }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+
+    private static func hexValue(_ c: UInt8) -> UInt8? {
+        switch c {
+        case UInt8(ascii: "0")...UInt8(ascii: "9"): return c - UInt8(ascii: "0")
+        case UInt8(ascii: "a")...UInt8(ascii: "f"): return c - UInt8(ascii: "a") + 10
+        case UInt8(ascii: "A")...UInt8(ascii: "F"): return c - UInt8(ascii: "A") + 10
+        default: return nil
+        }
+    }
+}

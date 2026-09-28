@@ -67,6 +67,23 @@ public enum ShellEnvironment {
         return env
     }
 
+    /// Adds the variables that make zsh load Rune's integration from `integrationDirectory`
+    /// while still reading the user's own dotfiles (see Resources/ShellIntegration/zsh/.zshenv).
+    public static func addZshIntegration(
+        to env: inout [String: String],
+        integrationDirectory: String,
+        honorPrompt: Bool
+    ) {
+        if let userZdotdir = env["ZDOTDIR"], !userZdotdir.isEmpty {
+            env["RUNE_USER_ZDOTDIR"] = userZdotdir
+        } else {
+            env.removeValue(forKey: "RUNE_USER_ZDOTDIR")
+        }
+        env["ZDOTDIR"] = integrationDirectory
+        env["RUNE_INTEGRATION_DIR"] = integrationDirectory
+        env["RUNE_HONOR_PROMPT"] = honorPrompt ? "1" : "0"
+    }
+
     /// `KEY=value` array form expected by forkpty/execve, sorted for determinism.
     public static func toArray(_ env: [String: String]) -> [String] {
         env.keys.sorted().compactMap { key in env[key].map { "\(key)=\($0)" } }

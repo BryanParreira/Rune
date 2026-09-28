@@ -31,6 +31,8 @@ public struct Theme: Equatable, Sendable {
     public var cursor: RGB
     public var selectionBackground: RGB
     public var selectionForeground: RGB
+    /// UI accent (focus rings, selected block, editor caret).
+    public var accent: RGB
     /// 16 ANSI colors: 0–7 normal, 8–15 bright.
     public var ansi: [RGB]
 
@@ -40,8 +42,10 @@ public struct Theme: Equatable, Sendable {
         background: RGB(0x0A, 0x0A, 0x0A),
         foreground: RGB(0xE4, 0xE4, 0xE4),
         cursor: RGB(0xF2, 0xF2, 0xF2),
-        selectionBackground: RGB(0x2A, 0x3A, 0x55),
+        // rgb(118,167,250) at 40% over the background.
+        selectionBackground: RGB(0x35, 0x49, 0x6A),
         selectionForeground: RGB(0xF2, 0xF2, 0xF2),
+        accent: RGB(0x5B, 0x9C, 0xFF),
         ansi: [
             "#1c1c1c", "#ff5f59", "#5fd787", "#f0c674", "#6ea8fe", "#c792ea", "#56d4dd", "#cfcfcf",
             "#4d4d4d", "#ff7b72", "#7ee2a0", "#ffd787", "#8fbcff", "#d8a8ff", "#7ee8f0", "#ffffff",
@@ -71,6 +75,7 @@ extension Theme {
         if let c = color("cursor") { cursor = c }
         if let c = color("selectionBackground") { selectionBackground = c }
         if let c = color("selectionForeground") { selectionForeground = c }
+        if let c = color("accent") { accent = c }
         if let raw = dict["ansi"] {
             let parsed = (raw as? [String])?.compactMap(RGB.init(hex:)) ?? []
             if parsed.count == 16 {

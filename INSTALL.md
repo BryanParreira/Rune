@@ -51,6 +51,11 @@ make dmg       # build/Rune.dmg to copy to other Macs
 - `"syncPath": "~/path/to/folder"` makes Rune read `config.json` and `themes/` from that folder instead. Point it at iCloud Drive or a dotfiles repo to share settings between Macs.
 - `"hosts": { "<machine name>": { "fontSize": 15 } }` holds per-machine overrides. The machine name is the one shown in System Settings → General → Sharing → Local hostname, without `.local`.
 
+Rune → Settings… (⌘,) edits the same file through a UI.
+
+If you use icon-heavy tools (eza, Starship, lsd), install any Nerd Font; Rune borrows its icon
+glyphs automatically even when your main font is something else.
+
 A config file with mistakes never stops Rune from starting. Invalid values fall back to defaults, and a small banner explains what was wrong.
 
 ## AI features

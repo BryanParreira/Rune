@@ -13,12 +13,17 @@ public struct RuneConfig: Equatable, Sendable {
     public var fontFamily: String = "SF Mono"
     public var fontSize: Double = 13
     public var theme: String = "rune-dark"
-    public var paddingX: Double = 20
+    public var lineHeight: Double = 1.2
+    public var paddingX: Double = 16
     public var paddingY: Double = 12
     public var cursorStyle: CursorShape = .bar
     public var cursorBlink: Bool = false
     public var scrollback: Int = 10_000
     public var optionAsMeta: Bool = true
+    /// Show the "New session" panel above the input editor.
+    public var showWelcome: Bool = true
+    /// Show the shell's own prompt (PS1) in each block instead of Rune's context chips.
+    public var honorPrompt: Bool = false
     /// Explicit shell path. `nil` means use $SHELL / the account's login shell.
     public var shell: String?
     /// Folder (iCloud Drive, dotfiles repo, …) to read config/themes/workflows from.
@@ -31,8 +36,9 @@ public struct RuneConfig: Equatable, Sendable {
     /// Keys understood at the top level of config.json. Anything else produces a warning
     /// (keys starting with `_` or `$` are allowed for comments / schema hints).
     public static let knownKeys: Set<String> = [
-        "fontFamily", "fontSize", "theme", "paddingX", "paddingY", "cursorStyle",
-        "cursorBlink", "scrollback", "optionAsMeta", "shell", "syncPath", "hosts",
+        "fontFamily", "fontSize", "lineHeight", "theme", "paddingX", "paddingY", "cursorStyle",
+        "cursorBlink", "scrollback", "optionAsMeta", "showWelcome", "honorPrompt", "shell",
+        "syncPath", "hosts",
     ]
 
     /// Written to ~/.config/rune/config.json on first launch.
@@ -40,13 +46,16 @@ public struct RuneConfig: Equatable, Sendable {
     {
       "fontFamily": "SF Mono",
       "fontSize": 13,
+      "lineHeight": 1.2,
       "theme": "rune-dark",
-      "paddingX": 20,
+      "paddingX": 16,
       "paddingY": 12,
       "cursorStyle": "bar",
       "cursorBlink": false,
       "scrollback": 10000,
       "optionAsMeta": true,
+      "showWelcome": true,
+      "honorPrompt": false,
       "shell": null,
       "syncPath": null,
       "hosts": {}
@@ -64,6 +73,7 @@ extension RuneConfig {
 
         if let v = reader.string("fontFamily"), !v.isEmpty { fontFamily = v }
         if let v = reader.number("fontSize", range: 6...72) { fontSize = v }
+        if let v = reader.number("lineHeight", range: 0.8...3) { lineHeight = v }
         if let v = reader.string("theme"), !v.isEmpty { theme = v }
         if let v = reader.number("paddingX", range: 0...200) { paddingX = v }
         if let v = reader.number("paddingY", range: 0...200) { paddingY = v }
@@ -77,6 +87,8 @@ extension RuneConfig {
         if let v = reader.bool("cursorBlink") { cursorBlink = v }
         if let v = reader.number("scrollback", range: 0...1_000_000) { scrollback = Int(v) }
         if let v = reader.bool("optionAsMeta") { optionAsMeta = v }
+        if let v = reader.bool("showWelcome") { showWelcome = v }
+        if let v = reader.bool("honorPrompt") { honorPrompt = v }
         shell = reader.optionalString("shell")
         syncPath = reader.optionalString("syncPath")
 

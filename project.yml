@@ -52,6 +52,10 @@ targets:
       - path: Resources
         excludes:
           - Info.plist
+          - "ShellIntegration/**"
+      - path: Resources/ShellIntegration
+        type: folder
+        buildPhase: resources
     dependencies:
       - target: RuneKit
         embed: true

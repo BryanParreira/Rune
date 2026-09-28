@@ -1,11 +1,20 @@
 import AppKit
 import SwiftTerm
 
-/// Hosts a terminal view with padding around it, painted in the theme background.
+/// Hosts a terminal view with padding around it, painted in the theme background, with the
+/// block overlay layered on top.
 final class TerminalContainerView: NSView {
     let terminalView: TerminalView
 
-    var padding = NSEdgeInsets(top: 12, left: 20, bottom: 12, right: 20) {
+    var overlay: NSView? {
+        didSet {
+            oldValue?.removeFromSuperview()
+            if let overlay { addSubview(overlay, positioned: .above, relativeTo: terminalView) }
+            needsLayout = true
+        }
+    }
+
+    var padding = NSEdgeInsets(top: 12, left: 16, bottom: 10, right: 16) {
         didSet { needsLayout = true }
     }
 
@@ -39,6 +48,7 @@ final class TerminalContainerView: NSView {
         if terminalView.frame != rect {
             terminalView.frame = rect
         }
+        overlay?.frame = bounds
     }
 
     /// Clicks in the padding focus the terminal.

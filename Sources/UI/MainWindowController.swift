@@ -3,18 +3,38 @@ import Combine
 import RuneKit
 import SwiftUI
 
-/// One Rune window: custom tab bar in the titlebar, config warning strip, and the active terminal.
+/// Something that can live in a tab: a terminal session or the Settings page.
+protocol TabContent: AnyObject {
+    var id: UUID { get }
+    var title: String { get }
+    var contentView: NSView { get }
+    func focus()
+    func apply(_ snapshot: ConfigSnapshot)
+    func closeContent()
+}
+
+extension TerminalSession: TabContent {
+    var contentView: NSView { view }
+    func focus() { view.focusPreferredResponder() }
+    func closeContent() {
+        onChange = nil
+        onRequestClose = nil
+        terminate()
+    }
+}
+
+/// One Rune window: custom tab bar in the titlebar, config warning strip, and the active tab.
 final class MainWindowController: NSWindowController, NSWindowDelegate {
     static let tabBarHeight: CGFloat = 38
 
     private let configStore: ConfigStore
-    private var sessions: [TerminalSession] = []
+    private var tabs: [TabContent] = []
     private var selectedIndex = 0
     private var cancellables: Set<AnyCancellable> = []
 
     private let tabsModel: TabsModel
     private let warningModel: WarningModel
-    private let terminalArea = NSView()
+    private let contentArea = NSView()
 
     /// Called after the window closes so the app can drop its reference.
     var onClose: ((MainWindowController) -> Void)?
@@ -73,7 +93,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         tabBar.safeAreaRegions = []
         banner.safeAreaRegions = []
 
-        for view in [tabBar, banner, terminalArea] {
+        for view in [tabBar, banner, contentArea] {
             view.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(view)
         }
@@ -88,10 +108,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             banner.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             banner.trailingAnchor.constraint(equalTo: root.trailingAnchor),
 
-            terminalArea.topAnchor.constraint(equalTo: banner.bottomAnchor),
-            terminalArea.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            terminalArea.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            terminalArea.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            contentArea.topAnchor.constraint(equalTo: banner.bottomAnchor),
+            contentArea.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            contentArea.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            contentArea.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
 
         window.contentView = root
@@ -102,10 +122,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         tabsModel.onSelect = { [weak self] id in self?.selectTab(id: id) }
         tabsModel.onClose = { [weak self] id in self?.closeTab(id: id) }
         tabsModel.onNew = { [weak self] in self?.newTab(nil) }
-        warningModel.onOpenConfig = { [weak self] in
-            guard let self else { return }
-            AppDelegate.openInEditor(self.configStore.paths.configFile)
-        }
+        warningModel.onOpenConfig = { [weak self] in self?.openSettingsTab() }
     }
 
     private func applySnapshot(_ snapshot: ConfigSnapshot) {
@@ -118,112 +135,147 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         }
         window?.backgroundColor = palette.background
         window?.contentView?.layer?.backgroundColor = palette.background.cgColor
-        for session in sessions {
-            session.apply(snapshot)
+        for tab in tabs {
+            tab.apply(snapshot)
         }
     }
 
     // MARK: - Tabs
 
+    private var selectedTab: TabContent? {
+        tabs.indices.contains(selectedIndex) ? tabs[selectedIndex] : nil
+    }
+
     var selectedSession: TerminalSession? {
-        sessions.indices.contains(selectedIndex) ? sessions[selectedIndex] : nil
+        selectedTab as? TerminalSession
+    }
+
+    /// The session new tabs inherit their directory from (the selected one, or the last terminal).
+    private var directorySource: TerminalSession? {
+        selectedSession ?? tabs.compactMap { $0 as? TerminalSession }.last
     }
 
     func addTab(directory: String) {
-        let snapshot = configStore.snapshot
-        let session = TerminalSession(snapshot: snapshot, directory: directory)
+        let session = TerminalSession(snapshot: configStore.snapshot, directory: directory)
         session.onChange = { [weak self] in self?.refreshTabs() }
         session.onRequestClose = { [weak self, weak session] in
             guard let self, let session else { return }
             self.closeTab(id: session.id)
         }
-
-        let container = session.container
-        container.translatesAutoresizingMaskIntoConstraints = false
-        container.isHidden = true
-        terminalArea.addSubview(container)
-        NSLayoutConstraint.activate([
-            container.topAnchor.constraint(equalTo: terminalArea.topAnchor),
-            container.leadingAnchor.constraint(equalTo: terminalArea.leadingAnchor),
-            container.trailingAnchor.constraint(equalTo: terminalArea.trailingAnchor),
-            container.bottomAnchor.constraint(equalTo: terminalArea.bottomAnchor),
-        ])
-
-        let insertAt = sessions.isEmpty ? 0 : selectedIndex + 1
-        sessions.insert(session, at: insertAt)
-        select(index: insertAt)
+        insert(session)
 
         // Size the view before the shell starts so it gets the right winsize immediately.
-        terminalArea.layoutSubtreeIfNeeded()
-        session.start(snapshot: snapshot)
+        contentArea.layoutSubtreeIfNeeded()
+        session.start()
+        session.focus()
+        #if DEBUG
+        if tabs.count == 1 { DebugDriver.runIfRequested(session: session) }
+        #endif
+    }
+
+    /// Shows the Settings tab, creating it next to the current tab if needed.
+    func openSettingsTab() {
+        if let index = tabs.firstIndex(where: { $0 is SettingsTab }) {
+            select(index: index)
+            return
+        }
+        insert(SettingsTab(store: configStore))
+    }
+
+    private func insert(_ tab: TabContent) {
+        let view = tab.contentView
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.isHidden = true
+        contentArea.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: contentArea.topAnchor),
+            view.leadingAnchor.constraint(equalTo: contentArea.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: contentArea.trailingAnchor),
+            view.bottomAnchor.constraint(equalTo: contentArea.bottomAnchor),
+        ])
+        let insertAt = tabs.isEmpty ? 0 : selectedIndex + 1
+        tabs.insert(tab, at: insertAt)
+        select(index: insertAt)
     }
 
     private func select(index: Int) {
-        guard sessions.indices.contains(index) else { return }
+        guard tabs.indices.contains(index) else { return }
         selectedIndex = index
-        for (i, session) in sessions.enumerated() {
-            session.container.isHidden = i != index
+        for (i, tab) in tabs.enumerated() {
+            tab.contentView.isHidden = i != index
         }
         refreshTabs()
-        if let session = selectedSession {
-            window?.makeFirstResponder(session.terminalView)
-        }
+        selectedTab?.focus()
     }
 
     private func selectTab(id: UUID) {
-        if let index = sessions.firstIndex(where: { $0.id == id }) {
+        if let index = tabs.firstIndex(where: { $0.id == id }) {
             select(index: index)
         }
     }
 
     private func closeTab(id: UUID) {
-        guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
-        let session = sessions.remove(at: index)
-        session.onChange = nil
-        session.onRequestClose = nil
-        session.terminate()
-        session.container.removeFromSuperview()
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let tab = tabs.remove(at: index)
+        tab.closeContent()
+        tab.contentView.removeFromSuperview()
 
-        if sessions.isEmpty {
+        if tabs.isEmpty {
             window?.close()
             return
         }
-        let next = index < selectedIndex || selectedIndex >= sessions.count ? max(0, selectedIndex - 1) : selectedIndex
-        select(index: min(next, sessions.count - 1))
+        let next = index < selectedIndex || selectedIndex >= tabs.count ? max(0, selectedIndex - 1) : selectedIndex
+        select(index: min(next, tabs.count - 1))
     }
 
     private func refreshTabs() {
-        tabsModel.tabs = sessions.map { TabItem(id: $0.id, title: $0.title) }
-        tabsModel.selectedID = selectedSession?.id
-        window?.title = selectedSession?.title ?? "Rune"
+        tabsModel.tabs = tabs.map { TabItem(id: $0.id, title: $0.title) }
+        tabsModel.selectedID = selectedTab?.id
+        window?.title = selectedTab?.title ?? "Rune"
     }
 
     // MARK: - Menu actions (responder chain)
 
     @objc func newTab(_ sender: Any?) {
-        addTab(directory: selectedSession?.currentDirectory ?? NSHomeDirectory())
+        addTab(directory: directorySource?.currentDirectory ?? NSHomeDirectory())
     }
 
     @objc func closeTab(_ sender: Any?) {
-        if let session = selectedSession {
-            closeTab(id: session.id)
+        if let tab = selectedTab {
+            closeTab(id: tab.id)
         }
+    }
+
+    @objc func openSettings(_ sender: Any?) {
+        openSettingsTab()
     }
 
     @objc func selectTabByNumber(_ sender: NSMenuItem) {
         // Tag 1–8 select that tab; 9 selects the last tab, like browsers.
-        let index = sender.tag == 9 ? sessions.count - 1 : sender.tag - 1
+        let index = sender.tag == 9 ? tabs.count - 1 : sender.tag - 1
         select(index: index)
     }
 
+    @objc func selectPreviousBlock(_ sender: Any?) {
+        selectedSession?.selectAdjacentBlock(previous: true)
+    }
+
+    @objc func selectNextBlock(_ sender: Any?) {
+        selectedSession?.selectAdjacentBlock(previous: false)
+    }
+
+    @objc func clearScreen(_ sender: Any?) {
+        selectedSession?.clearScreen()
+    }
+
     @objc func selectNextTab(_ sender: Any?) {
-        guard !sessions.isEmpty else { return }
-        select(index: (selectedIndex + 1) % sessions.count)
+        guard !tabs.isEmpty else { return }
+        select(index: (selectedIndex + 1) % tabs.count)
     }
 
     @objc func selectPreviousTab(_ sender: Any?) {
-        guard !sessions.isEmpty else { return }
-        select(index: (selectedIndex - 1 + sessions.count) % sessions.count)
+        guard !tabs.isEmpty else { return }
+        select(index: (selectedIndex - 1 + tabs.count) % tabs.count)
     }
 
     // MARK: - NSWindowDelegate
@@ -238,15 +290,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     func windowDidBecomeKey(_ notification: Notification) {
         if let window { TrafficLights.position(in: window, barHeight: Self.tabBarHeight) }
+        selectedTab?.focus()
     }
 
     func windowWillClose(_ notification: Notification) {
         cancellables.removeAll()
-        for session in sessions {
-            session.onRequestClose = nil
-            session.terminate()
-        }
-        sessions.removeAll()
+        tabs.forEach { $0.closeContent() }
+        tabs.removeAll()
         onClose?(self)
     }
 }

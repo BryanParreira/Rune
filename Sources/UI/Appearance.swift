@@ -26,21 +26,50 @@ extension CursorShape {
     }
 }
 
-/// Chrome colors derived from the terminal theme.
-struct ChromePalette {
+/// Chrome colors derived from the terminal theme (see docs/DESIGN.md, "Color system").
+struct ChromePalette: Equatable {
     let background: NSColor
     let foreground: NSColor
+    /// Main text: foreground @ 90%.
+    let text: NSColor
+    /// Secondary text: foreground @ 60%.
     let secondary: NSColor
+    /// Hints and placeholders: foreground @ 40%.
+    let hint: NSColor
+    /// Disabled: foreground @ 20%.
+    let disabled: NSColor
+    /// Surfaces: background blended with foreground @ 5 / 10 / 15%.
+    let surface1: NSColor
+    let surface2: NSColor
+    let surface3: NSColor
+    /// Hairlines and borders: foreground @ 10%.
+    let outline: NSColor
     let tabSelected: NSColor
     let tabHover: NSColor
-    let separator: NSColor
+    let accent: NSColor
+    let error: NSColor
+    let success: NSColor
 
     init(theme: Theme) {
-        background = theme.background.nsColor
-        foreground = theme.foreground.nsColor
-        secondary = theme.foreground.nsColor.withAlphaComponent(0.6)
-        tabSelected = theme.foreground.nsColor.withAlphaComponent(0.06)
-        tabHover = theme.foreground.nsColor.withAlphaComponent(0.03)
-        separator = theme.foreground.nsColor.withAlphaComponent(0.09)
+        let fg = theme.foreground.nsColor
+        let bg = theme.background.nsColor
+        background = bg
+        foreground = fg
+        text = fg.withAlphaComponent(0.9)
+        secondary = fg.withAlphaComponent(0.6)
+        hint = fg.withAlphaComponent(0.4)
+        disabled = fg.withAlphaComponent(0.2)
+        surface1 = bg.blended(withFraction: 0.05, of: fg) ?? bg
+        surface2 = bg.blended(withFraction: 0.10, of: fg) ?? bg
+        surface3 = bg.blended(withFraction: 0.15, of: fg) ?? bg
+        outline = fg.withAlphaComponent(0.10)
+        tabSelected = fg.withAlphaComponent(0.06)
+        tabHover = fg.withAlphaComponent(0.03)
+        accent = theme.accent.nsColor
+        error = theme.ansi.count > 1 ? theme.ansi[1].nsColor : NSColor(srgbRed: 188 / 255, green: 54 / 255, blue: 42 / 255, alpha: 1)
+        success = theme.ansi.count > 2 ? theme.ansi[2].nsColor : NSColor(srgbRed: 28 / 255, green: 160 / 255, blue: 90 / 255, alpha: 1)
     }
+
+    /// Kept for the tab bar, which predates the token names.
+    var separator: NSColor { outline }
 }

@@ -10,13 +10,20 @@ struct ConfigSnapshot: Equatable {
     var warnings: [String]
 }
 
-/// Loads config on launch, creates a default file if needed, and republishes on file changes.
+/// Loads config on launch, creates a default file if needed, republishes on file changes, and
+/// writes individual settings back for the Settings window.
 final class ConfigStore {
+    /// The app's store (set by AppDelegate), for views that write settings.
+    static weak var current: ConfigStore?
+
     let paths: ConfigPaths
     private let loader: ConfigLoader
     private var watcher: DirectoryWatcher?
+    private(set) var loaded: LoadedConfig
 
     @Published private(set) var snapshot: ConfigSnapshot
+    /// Set when writing a setting fails; shown in the Settings window.
+    @Published private(set) var lastWriteError: String?
 
     init(paths: ConfigPaths = .standard()) {
         self.paths = paths
@@ -28,7 +35,8 @@ final class ConfigStore {
         } catch {
             setupWarnings.append("Could not create \(paths.configFile.path): \(error.localizedDescription)")
         }
-        let (snapshot, watched) = Self.makeSnapshot(loader: loader)
+        let (loaded, snapshot, watched) = Self.load(loader)
+        self.loaded = loaded
         var initial = snapshot
         initial.warnings.insert(contentsOf: setupWarnings, at: 0)
         self.snapshot = initial
@@ -39,21 +47,66 @@ final class ConfigStore {
     }
 
     func reload() {
-        let (next, watched) = Self.makeSnapshot(loader: loader)
+        let (loaded, next, watched) = Self.load(loader)
+        self.loaded = loaded
         watcher?.watch(watched)
         if next != snapshot {
             snapshot = next
         }
     }
 
-    private static func makeSnapshot(loader: ConfigLoader) -> (ConfigSnapshot, [URL]) {
+    /// The machine name used for `hosts` overrides.
+    var hostName: String {
+        HostIdentity.configMatchNames().last ?? HostIdentity.displayHostname()
+    }
+
+    /// File that settings are written to (the synced config when a sync folder is active).
+    var writableConfigFile: URL {
+        ConfigWriter.target(for: loaded, paths: paths)
+    }
+
+    /// Writes one setting and reloads immediately (the file watcher would also catch it).
+    func write(key: String, value: Any?, thisMachineOnly: Bool = false) {
+        let writer = ConfigWriter(file: writableConfigFile)
+        do {
+            try writer.set(key, to: value, scope: thisMachineOnly ? .host(hostName) : .allMachines)
+            lastWriteError = nil
+            reload()
+        } catch {
+            lastWriteError = error.localizedDescription
+        }
+    }
+
+    /// Removes a per-machine override so the shared value applies again.
+    func clearMachineOverride(key: String) {
+        write(key: key, value: nil, thisMachineOnly: true)
+    }
+
+    func hasMachineOverride(key: String) -> Bool {
+        ConfigWriter(file: writableConfigFile).value(key, scope: .host(hostName)) != nil
+    }
+
+    /// Built-in themes plus any `themes/*.json` in the config or sync folder.
+    func availableThemes() -> [String] {
+        var names = Set(Theme.builtIn.keys)
+        for dir in loaded.resourceDirectories {
+            let themes = dir.appendingPathComponent("themes", isDirectory: true)
+            let files = (try? FileManager.default.contentsOfDirectory(atPath: themes.path)) ?? []
+            for file in files where file.hasSuffix(".json") {
+                names.insert(String(file.dropLast(5)))
+            }
+        }
+        return names.sorted()
+    }
+
+    private static func load(_ loader: ConfigLoader) -> (LoadedConfig, ConfigSnapshot, [URL]) {
         let loaded = loader.load()
         var warnings = loaded.warnings
         let theme = ThemeLoader.load(named: loaded.config.theme, resourceDirectories: loaded.resourceDirectories, warnings: &warnings)
         let font = FontResolver.font(family: loaded.config.fontFamily, size: loaded.config.fontSize, warnings: &warnings)
         let themeDirs = loaded.resourceDirectories.map { $0.appendingPathComponent("themes", isDirectory: true) }
         let snapshot = ConfigSnapshot(config: loaded.config, theme: theme, font: font, warnings: warnings)
-        return (snapshot, loaded.watchedDirectories + themeDirs)
+        return (loaded, snapshot, loaded.watchedDirectories + themeDirs)
     }
 }
 
@@ -62,6 +115,10 @@ enum FontResolver {
     private static let systemAliases: Set<String> = ["sf mono", "sfmono", "system", "monospace", "ui-monospace"]
 
     static func font(family: String, size: Double, warnings: inout [String]) -> NSFont {
+        withIconFallback(baseFont(family: family, size: size, warnings: &warnings))
+    }
+
+    private static func baseFont(family: String, size: Double, warnings: inout [String]) -> NSFont {
         let pointSize = CGFloat(size)
         let system = NSFont.monospacedSystemFont(ofSize: pointSize, weight: .regular)
         let trimmed = family.trimmingCharacters(in: .whitespaces)
@@ -77,5 +134,47 @@ enum FontResolver {
         }
         warnings.append("Font \"\(trimmed)\" is not installed; using the system monospaced font")
         return system
+    }
+
+    /// An installed Nerd Font to borrow icon glyphs from, preferring symbol-only and Mono variants.
+    static let iconFallbackFamily: String? = {
+        let families = NSFontManager.shared.availableFontFamilies.filter { $0.localizedCaseInsensitiveContains("Nerd Font") }
+        let ranked = families.sorted { rank($0) < rank($1) }
+        return ranked.first
+    }()
+
+    private static func rank(_ family: String) -> Int {
+        if family.hasPrefix("Symbols Nerd Font Mono") { return 0 }
+        if family.hasPrefix("Symbols Nerd Font") { return 1 }
+        if family.hasSuffix("Nerd Font Mono") { return 2 }
+        return 3
+    }
+
+    /// Adds an installed Nerd Font to the font's cascade list so Powerline/devicon glyphs
+    /// render even when the main font lacks them. No-op if the font already is a Nerd Font.
+    static func withIconFallback(_ font: NSFont) -> NSFont {
+        guard let familyName = font.familyName, !familyName.localizedCaseInsensitiveContains("Nerd Font"),
+              let fallback = iconFallbackFamily,
+              let fallbackFont = NSFontManager.shared.font(withFamily: fallback, traits: [], weight: 5, size: font.pointSize)
+        else { return font }
+        let descriptor = font.fontDescriptor.addingAttributes([.cascadeList: [fallbackFont.fontDescriptor]])
+        return NSFont(descriptor: descriptor, size: font.pointSize) ?? font
+    }
+
+    /// Installed fixed-pitch font families, for the Settings picker.
+    static func monospacedFamilies() -> [String] {
+        let manager = NSFontManager.shared
+        let families = manager.availableFontFamilies.filter { family in
+            guard let font = manager.font(withFamily: family, traits: [], weight: 5, size: 13) else { return false }
+            return font.isFixedPitch || manager.traits(of: font).contains(.fixedPitchFontMask)
+        }
+        return (["SF Mono"] + families.filter { $0 != "SF Mono" }).removingDuplicates()
+    }
+}
+
+private extension Array where Element: Hashable {
+    func removingDuplicates() -> [Element] {
+        var seen = Set<Element>()
+        return filter { seen.insert($0).inserted }
     }
 }

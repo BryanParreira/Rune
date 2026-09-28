@@ -6,6 +6,7 @@ enum MainMenu {
         main.addItem(submenu(appMenu()))
         main.addItem(submenu(shellMenu()))
         main.addItem(submenu(editMenu()))
+        main.addItem(submenu(viewMenu()))
         let window = windowMenu()
         main.addItem(submenu(window))
         NSApp.windowsMenu = window
@@ -28,7 +29,8 @@ enum MainMenu {
         let menu = NSMenu(title: "Rune")
         menu.addItem(item("About Rune", #selector(NSApplication.orderFrontStandardAboutPanel(_:))))
         menu.addItem(.separator())
-        menu.addItem(item("Settings…", #selector(AppDelegate.openConfig(_:)), ","))
+        menu.addItem(item("Settings…", #selector(AppDelegate.openSettings(_:)), ","))
+        menu.addItem(item("Open config.json", #selector(AppDelegate.openConfig(_:))))
         menu.addItem(item("Reveal Config Folder", #selector(AppDelegate.revealConfigFolder(_:))))
         menu.addItem(item("Reload Config", #selector(AppDelegate.reloadConfig(_:)), "r", [.command, .shift]))
         menu.addItem(.separator())
@@ -65,6 +67,15 @@ enum MainMenu {
         let find = item("Find…", #selector(NSResponder.performTextFinderAction(_:)), "f")
         find.tag = NSTextFinder.Action.showFindInterface.rawValue
         menu.addItem(find)
+        return menu
+    }
+
+    private static func viewMenu() -> NSMenu {
+        let menu = NSMenu(title: "View")
+        menu.addItem(item("Select Previous Block", #selector(MainWindowController.selectPreviousBlock(_:)), "\u{F700}"))
+        menu.addItem(item("Select Next Block", #selector(MainWindowController.selectNextBlock(_:)), "\u{F701}"))
+        menu.addItem(.separator())
+        menu.addItem(item("Clear Screen", #selector(MainWindowController.clearScreen(_:)), "k"))
         return menu
     }
 

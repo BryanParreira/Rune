@@ -45,7 +45,7 @@ final class ConfigMergeTests: XCTestCase {
 
     func testDefaultsMatchSpec() {
         let c = RuneConfig.defaults
-        XCTAssertEqual(c.paddingX, 20)
+        XCTAssertEqual(c.paddingX, 16)
         XCTAssertEqual(c.cursorStyle, .bar)
         XCTAssertFalse(c.cursorBlink)
         XCTAssertNil(c.shell)
@@ -60,7 +60,7 @@ final class ConfigMergeTests: XCTestCase {
         XCTAssertEqual(c.fontSize, 15)
         XCTAssertEqual(c.cursorStyle, .block)
         XCTAssertEqual(c.theme, "mine")
-        XCTAssertEqual(c.paddingX, 20, "unspecified keys keep defaults")
+        XCTAssertEqual(c.paddingX, 16, "unspecified keys keep defaults")
     }
 
     func testInvalidJSONFallsBackToDefaultsWithWarning() throws {
