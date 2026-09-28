@@ -4,6 +4,8 @@ import SwiftUI
 struct TabItem: Identifiable, Equatable {
     let id: UUID
     var title: String
+    /// A file preview that the next clicked file will replace (shown in italics).
+    var isPreview = false
 }
 
 /// State shared between the window controller and the SwiftUI tab bar.
@@ -37,6 +39,7 @@ struct TabBarView: View {
             ForEach(model.tabs) { tab in
                 TabSegment(
                     title: tab.title,
+                    italic: tab.isPreview,
                     isSelected: tab.id == model.selectedID,
                     palette: model.palette,
                     onSelect: { model.onSelect(tab.id) },
@@ -105,6 +108,7 @@ private struct Divider: View {
 /// Flat, full-height tab with a centered title; the close button appears on hover.
 private struct TabSegment: View {
     let title: String
+    let italic: Bool
     let isSelected: Bool
     let palette: ChromePalette
     let onSelect: () -> Void
@@ -116,6 +120,7 @@ private struct TabSegment: View {
         ZStack {
             Text(title)
                 .font(.system(size: 13))
+                .italic(italic)
                 .foregroundColor(Color(nsColor: isSelected || hovering ? palette.foreground : palette.secondary))
                 .lineLimit(1)
                 .truncationMode(.head)

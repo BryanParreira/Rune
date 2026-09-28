@@ -28,6 +28,12 @@ enum DebugDriver {
             case "@clear": session.clearScreen()
             case "@wait": break
             case "@settings": NSApp.sendAction(#selector(AppDelegate.openSettings(_:)), to: nil, from: nil)
+            case let open where open.hasPrefix("@open:") || open.hasPrefix("@pin:"):
+                let pinned = open.hasPrefix("@pin:")
+                let path = String(open.drop(while: { $0 != ":" }).dropFirst())
+                (session.view.window?.windowController as? MainWindowController)?.openFile(path: path, pinned: pinned)
+            case "@tabs":
+                (session.view.window?.windowController as? MainWindowController)?.debugDumpTabs()
             case "@tree":
                 NSApp.sendAction(#selector(MainWindowController.toggleFileTree(_:)), to: nil, from: nil)
             case "@dump":

@@ -166,6 +166,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             }
         }
         fileTree.onNewTab = { [weak self] path in self?.addTab(directory: path) }
+        fileTree.onOpenFile = { [weak self] path, pinned in self?.openFile(path: path, pinned: pinned) }
         warningModel.onOpenConfig = { [weak self] in self?.openSettingsTab() }
     }
 
@@ -231,6 +232,35 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         insert(SettingsTab(store: configStore))
     }
 
+    #if DEBUG
+    func debugDumpTabs() {
+        for (i, tab) in tabs.enumerated() {
+            let kind = tab is FilePreviewTab ? ((tab as? FilePreviewTab)?.isPinned == true ? "file(pinned)" : "file(preview)") : String(describing: type(of: tab))
+            print("TABS \(i)\(i == selectedIndex ? "*" : " ") \(kind) \(tab.title)")
+        }
+        if let preview = selectedTab as? FilePreviewTab, let view = preview.contentView as? FilePreviewView {
+            print("TABS preview " + view.debugSummary)
+        }
+        fflush(stdout)
+    }
+    #endif
+
+    /// Shows a file in a Rune tab. Unpinned opens reuse the current preview tab.
+    func openFile(path: String, pinned: Bool) {
+        if let index = tabs.firstIndex(where: { ($0 as? FilePreviewTab)?.path == path }) {
+            if pinned, let tab = tabs[index] as? FilePreviewTab { tab.isPinned = true }
+            select(index: index)
+            return
+        }
+        if !pinned, let index = tabs.firstIndex(where: { ($0 as? FilePreviewTab)?.isPinned == false }),
+           let preview = tabs[index] as? FilePreviewTab {
+            preview.show(path: path)
+            select(index: index)
+            return
+        }
+        insert(FilePreviewTab(path: path, pinned: pinned, snapshot: configStore.snapshot))
+    }
+
     private func insert(_ tab: TabContent) {
         let view = tab.contentView
         view.translatesAutoresizingMaskIntoConstraints = false
@@ -281,7 +311,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private var fileTreeSession: TerminalSession? { directorySource }
 
     private func refreshTabs() {
-        tabsModel.tabs = tabs.map { TabItem(id: $0.id, title: $0.title) }
+        tabsModel.tabs = tabs.map { TabItem(id: $0.id, title: $0.title, isPreview: ($0 as? FilePreviewTab)?.isPinned == false) }
         tabsModel.selectedID = selectedTab?.id
         if let directory = fileTreeSession?.currentDirectory {
             fileTree.setRoot(directory)

@@ -34,6 +34,9 @@ final class FileTreeModel: ObservableObject {
     var onInsertPath: (String) -> Void = { _ in }
     var onChangeDirectory: (String) -> Void = { _ in }
     var onNewTab: (String) -> Void = { _ in }
+    /// Opens a file in a Rune tab; `pinned` false reuses the preview tab.
+    var onOpenFile: (String, Bool) -> Void = { _, _ in }
+    @Published private(set) var branch: String?
 
     var isActive = false {
         didSet { isActive ? reloadAll() : watcher?.stop() }
@@ -129,6 +132,7 @@ final class FileTreeModel: ObservableObject {
     private func refreshGitStatus() {
         guard let root, let repo = GitInfo.repositoryRoot(for: root) else {
             git = GitStatusSnapshot()
+            branch = nil
             return
         }
         if gitRunning { gitRequestedAgain = true; return }
@@ -159,9 +163,13 @@ final class FileTreeModel: ObservableObject {
                 process.waitUntilExit()
                 if process.terminationStatus == 0 { snapshot = GitStatusSnapshot.parse(porcelain: data, repoRoot: repo) }
             }
+            let branch = GitInfo.branch(at: repo)
             DispatchQueue.main.async {
                 self.gitRunning = false
-                if let snapshot, self.root.flatMap({ GitInfo.repositoryRoot(for: $0) }) == repo { self.git = snapshot }
+                if let snapshot, self.root.flatMap({ GitInfo.repositoryRoot(for: $0) }) == repo {
+                    self.git = snapshot
+                    self.branch = branch
+                }
                 if self.gitRequestedAgain {
                     self.gitRequestedAgain = false
                     self.refreshGitStatus()
@@ -221,8 +229,8 @@ final class FileTreeModel: ObservableObject {
 
     // MARK: Actions
 
-    func open(_ entry: FileListing.Entry) {
-        guard !entry.isDirectory else { return }
+    /// Opens with the default app for its type (Xcode, VS Code, Preview…).
+    func openExternally(_ entry: FileListing.Entry) {
         NSWorkspace.shared.open(URL(fileURLWithPath: entry.path))
     }
 
@@ -251,6 +259,7 @@ struct FileTreeView: View {
                 .padding(.horizontal, 10)
                 .padding(.bottom, 8)
             content
+            footer
         }
         .background(Color(nsColor: palette.background))
         .overlay(alignment: .trailing) { ResizeHandle(palette: palette, onResize: onResize, onEnded: onResizeEnded) }
@@ -262,6 +271,10 @@ struct FileTreeView: View {
                 .font(.system(size: 13))
                 .foregroundColor(Color(nsColor: palette.ansiBlue))
             VStack(alignment: .leading, spacing: 1) {
+                Text("FILES")
+                    .font(.system(size: 9, weight: .semibold))
+                    .kerning(1.2)
+                    .foregroundColor(Color(nsColor: palette.hint))
                 Text(model.root.map { ($0 as NSString).lastPathComponent }.map { $0.isEmpty ? "/" : $0 } ?? "Files")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(Color(nsColor: palette.text))
@@ -282,7 +295,30 @@ struct FileTreeView: View {
         }
         .padding(.leading, 14)
         .padding(.trailing, 8)
-        .frame(height: 48)
+        .frame(height: 56)
+    }
+
+    /// Branch and number of changed files.
+    @ViewBuilder
+    private var footer: some View {
+        if let branch = model.branch {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch").font(.system(size: 10))
+                Text(branch).lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 4)
+                if model.git.changedFileCount > 0 {
+                    Text("\(model.git.changedFileCount) changed")
+                        .foregroundColor(Color(nsColor: palette.ansiYellow.withAlphaComponent(0.9)))
+                } else {
+                    Text("clean")
+                }
+            }
+            .font(.system(size: 11))
+            .foregroundColor(Color(nsColor: palette.secondary))
+            .padding(.horizontal, 14)
+            .frame(height: 30)
+            .overlay(alignment: .top) { Rectangle().fill(Color(nsColor: palette.outline)).frame(height: 1) }
+        }
     }
 
     @ViewBuilder
@@ -470,10 +506,14 @@ private struct FileRow: View {
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .onTapGesture(count: 2) { if !entry.isDirectory { model.open(entry) } }
+        .onTapGesture(count: 2) { if !entry.isDirectory { model.onOpenFile(entry.path, true) } }
         .simultaneousGesture(TapGesture().onEnded {
             model.selection = entry.path
-            if entry.isDirectory && row.relativePath == nil { model.toggle(entry) }
+            if entry.isDirectory {
+                if row.relativePath == nil { model.toggle(entry) }
+            } else {
+                model.onOpenFile(entry.path, false)
+            }
         })
         .help(entry.path)
         .contextMenu {
@@ -481,7 +521,8 @@ private struct FileRow: View {
                 Button("cd Into Folder") { model.onChangeDirectory(entry.path) }
                 Button("New Tab Here") { model.onNewTab(entry.path) }
             } else {
-                Button("Open") { model.open(entry) }
+                Button("Open in Rune") { model.onOpenFile(entry.path, true) }
+                Button("Open with Default App") { model.openExternally(entry) }
             }
             Button("Insert Path in Input") { model.onInsertPath(entry.path) }
             Divider()
