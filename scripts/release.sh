@@ -46,11 +46,14 @@ printf '%s\n' "$NOTES" > "$STAGE/Rune-$VERSION.md"
   --embed-release-notes \
   "$STAGE"
 
-gh release create "$TAG" --repo "$RELEASES_REPO" --title "Rune $VERSION" --notes "$NOTES" \
-  "$STAGE/Rune-$VERSION.dmg" "$STAGE/appcast.xml"
-
+# Commit and tag the version bump first, so the release points at the commit that built it.
 git add project.yml
 git commit -m "Release $VERSION"
 git tag "$TAG"
-git push && git push origin "$TAG"
+git push
+git push origin "$TAG"
+
+gh release create "$TAG" --repo "$RELEASES_REPO" --verify-tag --title "Rune $VERSION" --notes "$NOTES" \
+  "$STAGE/Rune-$VERSION.dmg" "$STAGE/appcast.xml"
+
 echo "Published https://github.com/$RELEASES_REPO/releases/tag/$TAG"
