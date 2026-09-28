@@ -56,7 +56,10 @@ final class SettingsModel: ObservableObject {
     init(store: ConfigStore) {
         self.store = store
         snapshot = store.snapshot
-        store.$snapshot.receive(on: DispatchQueue.main).sink { [weak self] in self?.snapshot = $0 }.store(in: &cancellables)
+        store.$snapshot.receive(on: DispatchQueue.main).sink { [weak self] in
+            self?.snapshot = $0
+            self?.refreshOverrides()
+        }.store(in: &cancellables)
         store.$lastWriteError.receive(on: DispatchQueue.main).sink { [weak self] in self?.writeError = $0 }.store(in: &cancellables)
         refreshLists()
     }
@@ -90,10 +93,22 @@ final class SettingsModel: ObservableObject {
 
     func set(_ key: String, _ value: Any?) {
         store.write(key: key, value: value, thisMachineOnly: thisMachineOnly)
+        refreshOverrides()
     }
 
-    func isOverridden(_ key: String) -> Bool { store.hasMachineOverride(key: key) }
-    func clearOverride(_ key: String) { store.clearMachineOverride(key: key) }
+    /// Keys overridden for this Mac, recomputed when the config changes (not on every render).
+    @Published private(set) var overriddenKeys: Set<String> = []
+
+    private func refreshOverrides() {
+        let keys = RuneConfig.knownKeys.filter { store.hasMachineOverride(key: $0) }
+        if keys != overriddenKeys { overriddenKeys = keys }
+    }
+
+    func isOverridden(_ key: String) -> Bool { overriddenKeys.contains(key) }
+    func clearOverride(_ key: String) {
+        store.clearMachineOverride(key: key)
+        refreshOverrides()
+    }
 
     func binding<Value: Equatable>(_ key: String, _ get: @escaping (RuneConfig) -> Value, encode: @escaping (Value) -> Any? = { $0 }) -> Binding<Value> {
         Binding(
@@ -207,8 +222,9 @@ struct SettingsView: View {
             HStack(spacing: 0) {
                 SettingsSidebar(model: model)
                     .frame(width: Self.sidebarWidth)
+                    .frame(maxHeight: .infinity, alignment: .top)
                 Rectangle().fill(Color(nsColor: palette.outline)).frame(width: 1)
-                ScrollView {
+                ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: 0) {
                         if let error = model.writeError {
                             SettingsNotice(text: error, palette: palette)
@@ -219,10 +235,14 @@ struct SettingsView: View {
                     .padding(.horizontal, 28)
                     .padding(.top, 22)
                     .padding(.bottom, 40)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .top)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
+            .frame(maxHeight: .infinity, alignment: .top)
         }
+        // Fill the whole tab; otherwise AppKit centers the content vertically in tall windows.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: palette.background))
         .tint(Color(nsColor: palette.accent))
     }

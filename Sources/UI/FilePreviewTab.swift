@@ -1,6 +1,7 @@
 import AppKit
 import RuneKit
 import SwiftUI
+import WebKit
 
 /// A read-only file viewer in a tab: code with line numbers and syntax colors, images, or a
 /// friendly message for binaries. Reloads when the file changes on disk.
@@ -34,10 +35,19 @@ final class FilePreviewTab: TabContent {
 }
 
 final class FilePreviewHeaderModel: ObservableObject {
+    enum Mode: String { case preview = "Preview", source = "Source" }
+
     @Published var path = ""
     @Published var detail = ""
     @Published var note: String?
     @Published var palette = ChromePalette(theme: .runeDark)
+    /// Rendered/source switch (Markdown only).
+    @Published var mode: Mode? = nil
+    /// Line wrapping for the text view (nil when not applicable).
+    @Published var wraps: Bool? = nil
+
+    var onModeChange: (Mode) -> Void = { _ in }
+    var onToggleWrap: () -> Void = {}
 }
 
 final class FilePreviewView: NSView {
@@ -47,6 +57,29 @@ final class FilePreviewView: NSView {
     private let textView = NSTextView()
     private let ruler: LineNumberRuler
     private let imageView = NSImageView()
+    private lazy var webView: WKWebView = {
+        let configuration = WKWebViewConfiguration()
+        // Rendered documents never run scripts.
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        // Belt and braces: never load anything from the network in the viewer.
+        configuration.websiteDataStore = .nonPersistent()
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        view.navigationDelegate = linkHandler
+        view.setValue(false, forKey: "drawsBackground")
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.isHidden = true
+        addSubview(view)
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: header.bottomAnchor),
+            view.leadingAnchor.constraint(equalTo: leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: trailingAnchor),
+            view.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        return view
+    }()
+    private let linkHandler = PreviewLinkHandler()
+    private var currentText = ""
+    private var wrapLines = false
     private let messageHost = NSHostingView(rootView: AnyView(EmptyView()))
     private var snapshot: ConfigSnapshot
     private var palette: ChromePalette
@@ -72,7 +105,7 @@ final class FilePreviewView: NSView {
         textView.isRichText = false
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
-        textView.textContainerInset = NSSize(width: 10, height: 10)
+        textView.textContainerInset = NSSize(width: 14, height: 16)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = true
         textView.autoresizingMask = [.width]
@@ -103,7 +136,7 @@ final class FilePreviewView: NSView {
             header.topAnchor.constraint(equalTo: topAnchor),
             header.leadingAnchor.constraint(equalTo: leadingAnchor),
             header.trailingAnchor.constraint(equalTo: trailingAnchor),
-            header.heightAnchor.constraint(equalToConstant: 44),
+            header.heightAnchor.constraint(equalToConstant: 56),
             scrollView.topAnchor.constraint(equalTo: header.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -117,6 +150,14 @@ final class FilePreviewView: NSView {
             messageHost.trailingAnchor.constraint(equalTo: trailingAnchor),
             messageHost.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        headerModel.onModeChange = { [weak self] mode in
+            self?.headerModel.mode = mode
+            self?.showCurrentTextMode()
+        }
+        headerModel.onToggleWrap = { [weak self] in
+            guard let self else { return }
+            self.setWrapping(!self.wrapLines)
+        }
         apply(snapshot)
     }
 
@@ -141,10 +182,11 @@ final class FilePreviewView: NSView {
         textView.insertionPointColor = palette.accent
         textView.selectedTextAttributes = [.backgroundColor: palette.accent.withAlphaComponent(0.3)]
         ruler.font = NSFont.monospacedDigitSystemFont(ofSize: max(9, snapshot.font.pointSize - 2), weight: .regular)
-        ruler.textColor = palette.hint
+        ruler.textColor = palette.foreground.withAlphaComponent(0.28)
         ruler.backgroundColor = palette.background
-        ruler.separatorColor = palette.outline
+        ruler.separatorColor = .clear
         restyleText()
+        if headerModel.mode == .preview { renderMarkdown() }
     }
 
     // MARK: Loading
@@ -169,28 +211,38 @@ final class FilePreviewView: NSView {
         let sizeText = size.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) }
         headerModel.note = nil
         switch preview {
-        case .text(let text, let language, let truncated):
+        case .text(var text, let language, let truncated):
+            let languageChanged = language != self.language || headerModel.mode == nil && language == .markdown
             self.language = language
+            if language == .json, let pretty = Self.prettyJSONIfMinified(text) {
+                text = pretty
+                headerModel.note = "Formatted"
+            }
             let lines = text.reduce(into: 1) { count, ch in if ch == "\n" { count += 1 } }
             headerModel.detail = [language.displayName, "\(lines) line\(lines == 1 ? "" : "s")", sizeText].compactMap { $0 }.joined(separator: " · ")
             if truncated { headerModel.note = "Showing the first 2 MB" }
-            let wraps = language == .markdown || language == .plain
-            textView.isHorizontallyResizable = !wraps
-            textView.textContainer?.widthTracksTextView = wraps
-            textView.textContainer?.containerSize = NSSize(width: wraps ? scrollView.contentSize.width : CGFloat.greatestFiniteMagnitude,
-                                                           height: CGFloat.greatestFiniteMagnitude)
+            if languageChanged {
+                // Prose wraps by default; code keeps its lines.
+                setWrapping(language == .markdown || language == .plain, restyle: false)
+                headerModel.mode = language == .markdown ? .preview : nil
+            }
             let visible = scrollView.contentView.bounds.origin
-            let reloadingSameFile = textView.string.isEmpty == false && textView.window != nil
+            let reloadingSameFile = !textView.string.isEmpty && textView.window != nil
+            currentText = text
             textView.string = text
             restyleText()
             ruler.invalidateLineIndex()
             if reloadingSameFile { scrollView.contentView.scroll(to: visible) }
-            showOnly(scrollView)
+            showCurrentTextMode()
         case .image:
+            headerModel.mode = nil
+            headerModel.wraps = nil
             headerModel.detail = ["Image", sizeText].compactMap { $0 }.joined(separator: " · ")
             imageView.image = NSImage(contentsOfFile: currentPath)
             showOnly(imageView)
         case .binary:
+            headerModel.mode = nil
+            headerModel.wraps = nil
             headerModel.detail = ["Binary file", sizeText].compactMap { $0 }.joined(separator: " · ")
             showMessage(symbol: "doc.zipper", text: "This file isn't text, so Rune can't preview it.", action: "Open with Default App")
         case .unreadable(let reason):
@@ -203,6 +255,77 @@ final class FilePreviewView: NSView {
         scrollView.isHidden = view !== scrollView
         imageView.isHidden = view !== imageView
         messageHost.isHidden = view !== messageHost
+        if view !== webView, webView.superview != nil { webView.isHidden = true }
+        if view === webView { webView.isHidden = false }
+    }
+
+    private func showCurrentTextMode() {
+        if headerModel.mode == .preview {
+            renderMarkdown()
+            showOnly(webView)
+        } else {
+            showOnly(scrollView)
+        }
+    }
+
+    private func setWrapping(_ wraps: Bool, restyle: Bool = true) {
+        wrapLines = wraps
+        headerModel.wraps = wraps
+        textView.isHorizontallyResizable = !wraps
+        textView.textContainer?.widthTracksTextView = wraps
+        textView.textContainer?.containerSize = NSSize(
+            width: wraps ? max(100, scrollView.contentSize.width - ruler.ruleThickness) : CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude)
+        if wraps { textView.frame.size.width = scrollView.contentSize.width }
+        scrollView.hasHorizontalScroller = !wraps
+        if restyle { ruler.needsDisplay = true }
+    }
+
+    /// Pretty-prints JSON whose lines are too long to read (minified files).
+    static func prettyJSONIfMinified(_ text: String) -> String? {
+        guard text.split(separator: "\n", omittingEmptySubsequences: false).contains(where: { $0.count > 400 }),
+              let data = text.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
+              let pretty = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .withoutEscapingSlashes])
+        else { return nil }
+        return String(decoding: pretty, as: UTF8.self)
+    }
+
+    private func renderMarkdown() {
+        let body = Self.inlineLocalImages(MarkdownRenderer.html(from: currentText), relativeTo: (currentPath as NSString).deletingLastPathComponent)
+        let page = MarkdownPage.document(body: body, palette: palette, font: snapshot.font)
+        #if DEBUG
+        if let out = ProcessInfo.processInfo.environment["RUNE_DEBUG_HTML"] { try? page.write(toFile: out, atomically: true, encoding: .utf8) }
+        #endif
+        webView.loadHTMLString(page, baseURL: nil)
+    }
+
+    /// Relative <img src> paths become data URIs so images in a README show up. Remote images
+    /// become small labeled chips instead: previewing a file never touches the network.
+    static func inlineLocalImages(_ html: String, relativeTo folder: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: #"src="([^"]+)""#),
+              let remote = try? NSRegularExpression(pattern: #"<img\b[^>]*\bsrc="https?://[^"]*"[^>]*>"#, options: [.caseInsensitive]),
+              let alt = try? NSRegularExpression(pattern: #"\balt="([^"]*)""#)
+        else { return html }
+        var html = html
+        for match in remote.matches(in: html, range: NSRange(location: 0, length: (html as NSString).length)).reversed() {
+            let tag = (html as NSString).substring(with: match.range)
+            let label = alt.firstMatch(in: tag, range: NSRange(location: 0, length: (tag as NSString).length))
+                .map { (tag as NSString).substring(with: $0.range(at: 1)) } ?? "image"
+            html = (html as NSString).replacingCharacters(in: match.range, with: "<span class=\"remote-image\" title=\"Remote image not loaded\">\(label)</span>")
+        }
+        var result = html
+        for match in regex.matches(in: result, range: NSRange(location: 0, length: (result as NSString).length)).reversed() {
+            let src = (result as NSString).substring(with: match.range(at: 1))
+            guard !src.hasPrefix("http"), !src.hasPrefix("data:") else { continue }
+            let path = src.hasPrefix("/") ? src : (folder as NSString).appendingPathComponent(src)
+            guard let data = FileManager.default.contents(atPath: path), data.count < 8_000_000 else { continue }
+            let ext = (path as NSString).pathExtension.lowercased()
+            let mime = ext == "svg" ? "image/svg+xml" : ext == "jpg" || ext == "jpeg" ? "image/jpeg" : ext == "gif" ? "image/gif" : "image/png"
+            let replacement = "src=\"data:\(mime);base64,\(data.base64EncodedString())\""
+            result = (result as NSString).replacingCharacters(in: match.range, with: replacement)
+        }
+        return result
     }
 
     private func showMessage(symbol: String, text: String, action: String?) {
@@ -264,6 +387,18 @@ final class FilePreviewView: NSView {
     }
 
     #if DEBUG
+    func debugWebSnapshot(to path: String) {
+        webView.takeSnapshot(with: nil) { image, error in
+            guard let image, let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+                  let png = rep.representation(using: .png, properties: [:]) else {
+                print("WEBSHOT failed \(String(describing: error))"); fflush(stdout); return
+            }
+            try? png.write(to: URL(fileURLWithPath: path))
+            print("WEBSHOT ok \(Int(image.size.width))x\(Int(image.size.height)) mode=\(self.headerModel.mode?.rawValue ?? "-") webHidden=\(self.webView.isHidden)")
+            fflush(stdout)
+        }
+    }
+
     var debugSummary: String {
         "language=\(language.displayName) chars=\((textView.string as NSString).length) detail=\(headerModel.detail) textVisible=\(!scrollView.isHidden) colored=\(CodeHighlighter.tokens(in: textView.string, language: language).count)"
     }
@@ -281,38 +416,58 @@ struct FilePreviewHeader: View {
     var body: some View {
         let p = model.palette
         let url = URL(fileURLWithPath: model.path)
-        HStack(spacing: 10) {
-            Image(systemName: FileIcon.symbol(for: FileListing.Entry(name: url.lastPathComponent, path: model.path, isDirectory: false, isHidden: false), expanded: false))
-                .font(.system(size: 13))
-                .foregroundColor(Color(nsColor: FileIcon.color(for: FileListing.Entry(name: url.lastPathComponent, path: model.path, isDirectory: false, isHidden: false), palette: p)))
-            VStack(alignment: .leading, spacing: 1) {
+        let entry = FileListing.Entry(name: url.lastPathComponent, path: model.path, isDirectory: false, isHidden: false)
+        HStack(spacing: 12) {
+            Image(systemName: FileIcon.symbol(for: entry, expanded: false))
+                .font(.system(size: 15))
+                .foregroundColor(Color(nsColor: FileIcon.color(for: entry, palette: p)))
+                .frame(width: 30, height: 30)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color(nsColor: p.surface1)))
+            VStack(alignment: .leading, spacing: 2) {
                 Text(url.lastPathComponent)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13.5, weight: .semibold))
                     .foregroundColor(Color(nsColor: p.text))
-                Text(TabTitle.abbreviate(path: url.deletingLastPathComponent().path, home: NSHomeDirectory()))
-                    .font(.system(size: 10.5))
+                    .lineLimit(1)
+                Text(breadcrumb(url))
+                    .font(.system(size: 11))
                     .foregroundColor(Color(nsColor: p.hint))
                     .lineLimit(1)
                     .truncationMode(.head)
             }
-            Spacer(minLength: 12)
+            Spacer(minLength: 16)
             if let note = model.note {
-                Text(note).font(.system(size: 11)).foregroundColor(Color(nsColor: p.ansiYellow))
+                MetaChip(text: note, palette: p, color: p.ansiYellow)
             }
-            Text(model.detail)
-                .font(.system(size: 11))
-                .foregroundColor(Color(nsColor: p.hint))
-            HeaderAction(title: openTitle(url), palette: p) { NSWorkspace.shared.open(url) }
-            HeaderAction(title: "Reveal", palette: p) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-            HeaderAction(title: "Copy Path", palette: p) {
+            ForEach(model.detail.components(separatedBy: " · ").filter { !$0.isEmpty }, id: \.self) { item in
+                MetaChip(text: item, palette: p, color: nil)
+            }
+            if let mode = model.mode {
+                ModeSwitch(mode: mode, palette: p, onChange: model.onModeChange)
+            }
+            if let wraps = model.wraps, model.mode != .preview {
+                IconAction(symbol: wraps ? "text.alignleft" : "arrow.left.and.right", help: wraps ? "Don't wrap lines" : "Wrap long lines",
+                           palette: p, isOn: wraps, action: model.onToggleWrap)
+            }
+            Rectangle().fill(Color(nsColor: p.outline)).frame(width: 1, height: 18).padding(.horizontal, 2)
+            IconAction(symbol: "arrow.up.forward.app", help: openTitle(url), palette: p) { NSWorkspace.shared.open(url) }
+            IconAction(symbol: "folder", help: "Reveal in Finder", palette: p) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+            IconAction(symbol: "doc.on.doc", help: "Copy path", palette: p) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(model.path, forType: .string)
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 18)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: p.background))
         .overlay(alignment: .bottom) { Rectangle().fill(Color(nsColor: p.outline)).frame(height: 1) }
+    }
+
+    /// "Rune › Sources › UI" style path to the file's folder.
+    private func breadcrumb(_ url: URL) -> String {
+        let folder = TabTitle.abbreviate(path: url.deletingLastPathComponent().path, home: NSHomeDirectory())
+        let parts = folder.split(separator: "/").map(String.init)
+        let shown = parts.count > 4 ? ["…"] + parts.suffix(4) : parts
+        return (folder.hasPrefix("/") && parts.count <= 4 ? "/ " : "") + shown.joined(separator: "  ›  ")
     }
 
     private func openTitle(_ url: URL) -> String {
@@ -321,24 +476,66 @@ struct FilePreviewHeader: View {
     }
 }
 
-private struct HeaderAction: View {
-    let title: String
+private struct MetaChip: View {
+    let text: String
     let palette: ChromePalette
+    let color: NSColor?
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10.5, weight: .medium))
+            .foregroundColor(Color(nsColor: color ?? palette.secondary))
+            .padding(.horizontal, 7)
+            .frame(height: 20)
+            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color(nsColor: (color ?? palette.foreground).withAlphaComponent(0.07))))
+    }
+}
+
+private struct ModeSwitch: View {
+    let mode: FilePreviewHeaderModel.Mode
+    let palette: ChromePalette
+    let onChange: (FilePreviewHeaderModel.Mode) -> Void
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach([FilePreviewHeaderModel.Mode.preview, .source], id: \.rawValue) { option in
+                Button { onChange(option) } label: {
+                    Text(option.rawValue)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(Color(nsColor: option == mode ? palette.text : palette.secondary))
+                        .padding(.horizontal, 10)
+                        .frame(height: 22)
+                        .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color(nsColor: option == mode ? palette.surface3 : .clear)))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color(nsColor: palette.surface1)))
+    }
+}
+
+private struct IconAction: View {
+    let symbol: String
+    let help: String
+    let palette: ChromePalette
+    var isOn = false
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(.system(size: 11.5, weight: .medium))
-                .foregroundColor(Color(nsColor: hovering ? palette.text : palette.secondary))
-                .padding(.horizontal, 9)
-                .frame(height: 24)
-                .background(RoundedRectangle(cornerRadius: 5).fill(Color(nsColor: hovering ? palette.surface2 : palette.surface1)))
+            Image(systemName: symbol)
+                .font(.system(size: 12))
+                .foregroundColor(Color(nsColor: hovering || isOn ? palette.text : palette.secondary))
+                .frame(width: 28, height: 28)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(nsColor: hovering ? palette.surface2 : (isOn ? palette.surface1 : .clear))))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .help(help)
     }
 }
 
@@ -375,7 +572,7 @@ final class LineNumberRuler: NSRulerView {
         }
         lineStarts = starts
         let digits = max(3, String(starts.count).count)
-        ruleThickness = CGFloat(digits) * (font.maximumAdvancement.width + 0.5) + 22
+        ruleThickness = CGFloat(digits) * (font.maximumAdvancement.width + 0.5) + 28
         needsDisplay = true
     }
 
@@ -409,9 +606,74 @@ final class LineNumberRuler: NSRulerView {
             let label = "\(line)" as NSString
             let size = label.size(withAttributes: attributes)
             let y = fragmentRect.minY + inset - visible.minY + (fragmentRect.height - size.height) / 2
-            label.draw(at: NSPoint(x: self.bounds.maxX - size.width - 12, y: y), withAttributes: attributes)
+            label.draw(at: NSPoint(x: self.bounds.maxX - size.width - 8, y: y), withAttributes: attributes)
         }
     }
 
     override var isFlipped: Bool { true }
+}
+
+/// Opens links from rendered documents outside the viewer.
+final class PreviewLinkHandler: NSObject, WKNavigationDelegate {
+    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if action.navigationType == .linkActivated, let url = action.request.url {
+            if url.fragment != nil, url.scheme == nil || url.absoluteString.hasPrefix("about:") {
+                decisionHandler(.allow) // in-page anchor
+                return
+            }
+            NSWorkspace.shared.open(url)
+            decisionHandler(.cancel)
+            return
+        }
+        decisionHandler(.allow)
+    }
+}
+
+/// HTML shell and stylesheet for rendered Markdown, matched to Rune's theme.
+enum MarkdownPage {
+    static func css(_ color: NSColor) -> String {
+        let c = color.usingColorSpace(.sRGB) ?? color
+        return String(format: "rgba(%d,%d,%d,%.3f)", Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255), c.alphaComponent)
+    }
+
+    static func document(body: String, palette p: ChromePalette, font: NSFont) -> String {
+        let mono = font.familyName ?? "SF Mono"
+        return """
+        <!doctype html><html><head><meta charset="utf-8">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:">
+        <style>
+        :root { color-scheme: dark; }
+        html { background: \(css(p.background)); }
+        body { margin: 0; padding: 36px 48px 64px; color: \(css(p.text));
+               font: 14.5px/1.65 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; -webkit-font-smoothing: antialiased; }
+        main { max-width: 780px; margin: 0 auto; }
+        h1, h2, h3, h4, h5, h6 { color: \(css(p.foreground)); line-height: 1.25; margin: 1.6em 0 0.6em; font-weight: 650; letter-spacing: -0.01em; }
+        h1 { font-size: 2em; padding-bottom: .3em; border-bottom: 1px solid \(css(p.outline)); }
+        h2 { font-size: 1.5em; padding-bottom: .25em; border-bottom: 1px solid \(css(p.outline)); }
+        h3 { font-size: 1.2em; } h4 { font-size: 1em; }
+        main > :first-child { margin-top: 0; }
+        p, ul, ol, table, pre, blockquote { margin: 0 0 1em; }
+        a { color: \(css(p.accent)); text-decoration: none; } a:hover { text-decoration: underline; }
+        strong { color: \(css(p.foreground)); font-weight: 650; }
+        code { font-family: "\(mono)", ui-monospace, Menlo, monospace; font-size: 0.88em; background: \(css(p.surface2));
+               padding: .15em .4em; border-radius: 5px; }
+        pre { background: \(css(p.surface1)); border: 1px solid \(css(p.outline)); border-radius: 8px; padding: 14px 16px; overflow-x: auto; }
+        pre code { background: none; padding: 0; font-size: 12.5px; line-height: 1.55; color: \(css(p.text)); }
+        blockquote { margin-left: 0; padding: .2em 1em; color: \(css(p.secondary)); border-left: 3px solid \(css(p.accent.withAlphaComponent(0.6))); }
+        ul, ol { padding-left: 1.6em; } li { margin: .25em 0; } li > input { margin-right: .4em; }
+        hr { border: 0; height: 1px; background: \(css(p.outline)); margin: 2em 0; }
+        table { border-collapse: collapse; display: block; overflow-x: auto; }
+        th, td { border: 1px solid \(css(p.outline)); padding: 7px 13px; }
+        th { background: \(css(p.surface1)); font-weight: 600; }
+        tr:nth-child(even) td { background: \(css(p.surface1.withAlphaComponent(0.5))); }
+        img { max-width: 100%; border-radius: 6px; }
+        del { color: \(css(p.hint)); }
+        sub, sup { color: \(css(p.secondary)); }
+        .remote-image { display: inline-block; font-size: 11px; line-height: 18px; padding: 0 7px; margin: 2px 2px;
+                        border-radius: 4px; background: \(css(p.surface2)); color: \(css(p.secondary)); }
+        </style></head><body><main>
+        \(body)
+        </main></body></html>
+        """
+    }
 }

@@ -406,6 +406,34 @@ private struct HeaderButton: View {
     }
 }
 
+/// Transparent AppKit view that reports clicks (with their click count) and supplies a
+/// context menu. Used where SwiftUI tap gestures are unreliable.
+struct ClickCatcher: NSViewRepresentable {
+    let onClick: (Int) -> Void
+    let menu: () -> NSMenu?
+
+    final class CatcherView: NSView {
+        var onClick: (Int) -> Void = { _ in }
+        var menuProvider: () -> NSMenu? = { nil }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override func mouseDown(with event: NSEvent) { onClick(event.clickCount) }
+        override func menu(for event: NSEvent) -> NSMenu? { menuProvider() }
+    }
+
+    func makeNSView(context: Context) -> CatcherView {
+        let view = CatcherView()
+        view.onClick = onClick
+        view.menuProvider = menu
+        return view
+    }
+
+    func updateNSView(_ view: CatcherView, context: Context) {
+        view.onClick = onClick
+        view.menuProvider = menu
+    }
+}
+
 /// Thin draggable strip on the sidebar's right edge (also its border line).
 private struct ResizeHandle: View {
     let palette: ChromePalette
@@ -504,31 +532,34 @@ private struct FileRow: View {
                 .fill(Color(nsColor: selected ? palette.accent.withAlphaComponent(0.2) : (hovering ? palette.surface1 : .clear)))
                 .padding(.horizontal, 6)
         )
-        .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .onTapGesture(count: 2) { if !entry.isDirectory { model.onOpenFile(entry.path, true) } }
-        .simultaneousGesture(TapGesture().onEnded {
+        // Clicks are handled in AppKit: reliable single/double clicks, first click works in an
+        // inactive window, and the right-click menu is attached to the same view.
+        .overlay(ClickCatcher(onClick: { clicks in
             model.selection = entry.path
             if entry.isDirectory {
-                if row.relativePath == nil { model.toggle(entry) }
+                if row.relativePath == nil, clicks == 1 { model.toggle(entry) }
             } else {
-                model.onOpenFile(entry.path, false)
+                model.onOpenFile(entry.path, clicks >= 2)
             }
-        })
+        }, menu: { contextMenu(for: entry) }))
         .help(entry.path)
-        .contextMenu {
-            if entry.isDirectory {
-                Button("cd Into Folder") { model.onChangeDirectory(entry.path) }
-                Button("New Tab Here") { model.onNewTab(entry.path) }
-            } else {
-                Button("Open in Rune") { model.onOpenFile(entry.path, true) }
-                Button("Open with Default App") { model.openExternally(entry) }
-            }
-            Button("Insert Path in Input") { model.onInsertPath(entry.path) }
-            Divider()
-            Button("Copy Path") { model.copyPath(entry) }
-            Button("Reveal in Finder") { model.reveal(entry) }
+    }
+
+    private func contextMenu(for entry: FileListing.Entry) -> NSMenu {
+        let menu = NSMenu()
+        if entry.isDirectory {
+            menu.addItem(ClosureMenuItem(title: "cd Into Folder") { model.onChangeDirectory(entry.path) })
+            menu.addItem(ClosureMenuItem(title: "New Tab Here") { model.onNewTab(entry.path) })
+        } else {
+            menu.addItem(ClosureMenuItem(title: "Open in Rune") { model.onOpenFile(entry.path, true) })
+            menu.addItem(ClosureMenuItem(title: "Open with Default App") { model.openExternally(entry) })
         }
+        menu.addItem(ClosureMenuItem(title: "Insert Path in Input") { model.onInsertPath(entry.path) })
+        menu.addItem(.separator())
+        menu.addItem(ClosureMenuItem(title: "Copy Path") { model.copyPath(entry) })
+        menu.addItem(ClosureMenuItem(title: "Reveal in Finder") { model.reveal(entry) })
+        return menu
     }
 
     /// Faint vertical lines marking each nesting level.

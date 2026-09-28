@@ -1,5 +1,6 @@
 #if DEBUG
 import AppKit
+import RuneKit
 
 /// Debug builds only: runs a scripted sequence against the first session so the UI can be
 /// exercised without synthetic key events. Set RUNE_DEBUG_SCRIPT to steps separated by "||":
@@ -16,6 +17,63 @@ enum DebugDriver {
         guard let script = ProcessInfo.processInfo.environment["RUNE_DEBUG_SCRIPT"], !script.isEmpty else { return }
         let steps = script.components(separatedBy: "||")
         run(steps[...], session: session, delay: 3)
+    }
+
+    /// Drives every Settings control's write path and checks the result took effect.
+    private static func runSettingsSelfTest(session: TerminalSession) {
+        guard let store = ConfigStore.current else { return }
+        let model = SettingsModel(store: store)
+        var failures = 0
+        func check(_ name: String, _ ok: Bool) {
+            print("SETTINGS \(ok ? "PASS" : "FAIL") \(name)")
+            if !ok { failures += 1 }
+        }
+        func set(_ key: String, _ value: Any?, _ verify: (RuneConfig) -> Bool) {
+            model.set(key, value)
+            check(key, verify(store.snapshot.config))
+        }
+        set("fontSize", 15) { $0.fontSize == 15 }
+        set("fontFamily", "Menlo") { $0.fontFamily == "Menlo" }
+        set("lineHeight", 1.4) { abs($0.lineHeight - 1.4) < 0.001 }
+        set("theme", "rune-dark") { $0.theme == "rune-dark" }
+        set("cursorStyle", "block") { $0.cursorStyle == .block }
+        set("cursorBlink", true) { $0.cursorBlink }
+        set("paddingX", 24) { $0.paddingX == 24 }
+        set("paddingY", 8) { $0.paddingY == 8 }
+        set("shell", "/bin/zsh") { $0.shell == "/bin/zsh" }
+        set("shell", nil) { $0.shell == nil }
+        set("honorPrompt", true) { $0.honorPrompt }
+        set("honorPrompt", false) { !$0.honorPrompt }
+        set("scrollback", 20000) { $0.scrollback == 20000 }
+        set("optionAsMeta", false) { !$0.optionAsMeta }
+        set("showWelcome", false) { !$0.showWelcome }
+        set("inputMode", "shell") { $0.inputMode == .shell }
+        set("inputMode", "editor") { $0.inputMode == .editor }
+        set("aiIncludeBlockContext", false) { !$0.aiIncludeBlockContext }
+        set("ollamaEndpoint", "http://localhost:11434") { $0.ollamaEndpoint == "http://localhost:11434" }
+        set("ollamaEndpoint", nil) { $0.ollamaEndpoint == nil }
+        set("aiModel", "gemma4:e2b") { $0.aiModel == "gemma4:e2b" }
+        set("aiEnabled", false) { !$0.aiEnabled }
+        set("aiEnabled", true) { $0.aiEnabled }
+        // Per-machine override and clearing it.
+        model.thisMachineOnly = true
+        set("fontSize", 17) { $0.fontSize == 17 }
+        check("override badge", model.isOverridden("fontSize"))
+        model.thisMachineOnly = false
+        model.clearOverride("fontSize")
+        check("override cleared", store.snapshot.config.fontSize == 15 && !model.isOverridden("fontSize"))
+        check("no write errors", store.lastWriteError == nil)
+        check("no config warnings", store.snapshot.warnings.isEmpty)
+        // The window applies config on the next run-loop turn; check the live terminal after it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            check("font applied", session.terminalView.font.familyName == "Menlo" && abs(session.terminalView.font.pointSize - 15) < 0.01)
+            check("lineHeight applied", abs(session.terminalView.lineSpacing - 1.4) < 0.001)
+            check("paddingX applied", abs(session.view.terminalContainer.padding.left - 24) < 0.01)
+            check("optionAsMeta applied", session.terminalView.optionAsMetaKey == false)
+            check("cursor applied", store.snapshot.config.cursorStyle == .block)
+            print("SETTINGS DONE failures=\(failures)")
+            fflush(stdout)
+        }
     }
 
     private static func run(_ steps: ArraySlice<String>, session: TerminalSession, delay: TimeInterval) {
@@ -47,6 +105,39 @@ enum DebugDriver {
                     print("KEY \(key) handled in \(String(format: "%.1f", Date().timeIntervalSince(start) * 1000))ms text=<\(editor.string)> suffix=<\(editor.suggestionSuffix ?? "nil")> height=\(editor.frame.height) rows=\(session.terminalView.getTerminal().rows)")
                     fflush(stdout)
                 }
+            case let click where click.hasPrefix("@clickTreeRow:"):
+                // Sends a real mouse click to the file tree row with this index.
+                guard let window = session.view.window, let index = Int(click.dropFirst(14)),
+                      let host = window.contentView?.subviews.first(where: { String(describing: type(of: $0)).contains("FileTreeView") }) else { break }
+                let yInHost = 56 + 34 + CGFloat(index) * 26 + 13 // header + filter + rows
+                let point = host.convert(NSPoint(x: 80, y: host.isFlipped ? yInHost : host.bounds.height - yInHost), to: nil)
+                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                    if let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                      windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) {
+                        window.sendEvent(event)
+                    }
+                }
+            case let snap where snap.hasPrefix("@snapshot:"):
+                // Renders the window's content offscreen (works even when the window is covered).
+                guard let view = session.view.window?.contentView,
+                      let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { break }
+                view.cacheDisplay(in: view.bounds, to: rep)
+                if let png = rep.representation(using: .png, properties: [:]) {
+                    try? png.write(to: URL(fileURLWithPath: String(snap.dropFirst(10))))
+                }
+            case let shot where shot.hasPrefix("@webshot:"):
+                if let controller = session.view.window?.windowController as? MainWindowController {
+                    controller.debugSelectedPreview()?.debugWebSnapshot(to: String(shot.dropFirst(9)))
+                }
+            case let size where size.hasPrefix("@height:"):
+                if let window = session.view.window, let h = Double(size.dropFirst(8)) {
+                    var frame = window.frame
+                    frame.origin.y -= CGFloat(h) - frame.height
+                    frame.size.height = CGFloat(h)
+                    window.setFrame(frame, display: true)
+                }
+            case "@settingsTest":
+                runSettingsSelfTest(session: session)
             case "@tree":
                 NSApp.sendAction(#selector(MainWindowController.toggleFileTree(_:)), to: nil, from: nil)
             case "@dump":

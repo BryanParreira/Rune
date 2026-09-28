@@ -237,6 +237,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     }
 
     #if DEBUG
+    func debugSelectedPreview() -> FilePreviewView? {
+        (selectedTab as? FilePreviewTab)?.contentView as? FilePreviewView
+    }
+
     func debugDumpTabs() {
         for (i, tab) in tabs.enumerated() {
             let kind = tab is FilePreviewTab ? ((tab as? FilePreviewTab)?.isPinned == true ? "file(pinned)" : "file(preview)") : String(describing: type(of: tab))
