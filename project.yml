@@ -107,7 +107,9 @@ targets:
     type: bundle.unit-test
     platform: macOS
     sources:
+      # Tests live only in local checkouts (not published); the target builds empty without them.
       - path: Tests/RuneKitTests
+        optional: true
     dependencies:
       - target: RuneKit
     settings:
