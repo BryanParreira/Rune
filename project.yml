@@ -1,0 +1,113 @@
+name: Rune
+
+options:
+  bundleIdPrefix: dev.rune
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: NO
+    DEAD_CODE_STRIPPING: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
+    GCC_TREAT_WARNINGS_AS_ERRORS: NO
+  configs:
+    Release:
+      ARCHS: "arm64 x86_64"
+      ONLY_ACTIVE_ARCH: NO
+
+packages:
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    exactVersion: 1.20.0
+
+targets:
+  RuneKit:
+    type: framework
+    platform: macOS
+    sources:
+      - path: RuneKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.rune.RuneKit
+        GENERATE_INFOPLIST_FILE: YES
+        SKIP_INSTALL: YES
+        DEFINES_MODULE: YES
+
+  Rune:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+      - path: Resources
+        excludes:
+          - Info.plist
+    dependencies:
+      - target: RuneKit
+        embed: true
+      - package: SwiftTerm
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleName: Rune
+        CFBundleDisplayName: Rune
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleIconName: AppIcon
+        LSApplicationCategoryType: public.app-category.developer-tools
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        NSPrincipalClass: NSApplication
+        NSHighResolutionCapable: true
+        NSSupportsAutomaticTermination: false
+        NSSupportsSuddenTermination: false
+        NSHumanReadableCopyright: "Rune — local-first terminal"
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Folder
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - public.folder
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.rune.Rune
+        PRODUCT_NAME: Rune
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+        COMBINE_HIDPI_IMAGES: YES
+
+  RuneKitTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/RuneKitTests
+    dependencies:
+      - target: RuneKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.rune.RuneKitTests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  Rune:
+    build:
+      targets:
+        Rune: all
+        RuneKitTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - RuneKitTests
+    archive:
+      config: Release
