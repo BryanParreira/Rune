@@ -161,20 +161,82 @@ final class AIPromptTests: XCTestCase {
     func testMessagesIncludeContextAndTruncate() {
         let long = String(repeating: "x", count: AIPrompt.maxOutputCharacters + 500) + "END"
         let ctx = AIContext(request: "why?", cwd: "/tmp", osVersion: "macOS 15", shell: "zsh",
+                            gitBranch: "main", directoryListing: ["src/", "Package.swift"],
                             blockCommand: "make", blockOutput: long, blockExitCode: 2)
         let messages = AIPrompt.messages(for: ctx)
         XCTAssertEqual(messages.map(\.role), ["system", "user"])
         let user = messages[1].content
-        XCTAssertTrue(user.contains("Working directory: /tmp"))
-        XCTAssertTrue(user.contains("Previous command: make (exit code 2)"))
+        XCTAssertTrue(user.contains("Working directory: /tmp (git branch main)"))
+        XCTAssertTrue(user.contains("Files here: src/, Package.swift"))
+        XCTAssertTrue(user.contains("Related command: make (exit code 2)"))
         XCTAssertTrue(user.contains("…(truncated)…"))
         XCTAssertTrue(user.contains("END"))
-        XCTAssertTrue(user.hasSuffix("Request: why?"))
+        XCTAssertTrue(user.hasSuffix("\nwhy?"))
     }
 
-    func testMessagesWithoutBlock() {
+    func testMessagesWithoutBlockOrListing() {
         let user = AIPrompt.messages(for: AIContext(request: "list files", cwd: "~", osVersion: "macOS", shell: "zsh"))[1].content
-        XCTAssertFalse(user.contains("Previous command"))
+        XCTAssertFalse(user.contains("Related command"))
+        XCTAssertFalse(user.contains("Files here"))
+    }
+
+    func testListingIsCapped() {
+        let names = (1...100).map { "f\($0)" }
+        let user = AIPrompt.userMessage(for: AIContext(request: "q", cwd: "/", osVersion: "m", shell: "zsh", directoryListing: names))
+        XCTAssertTrue(user.contains("f60"))
+        XCTAssertFalse(user.contains("f61,"))
+        XCTAssertTrue(user.contains("(40 more)"))
+    }
+
+    func testHistoryIsKeptBetweenSystemAndNewRequest() {
+        let history = [OllamaClient.ChatMessage(role: "user", content: "first"), OllamaClient.ChatMessage(role: "assistant", content: "answer")]
+        let messages = AIPrompt.messages(for: AIContext(request: "and then?", cwd: "/", osVersion: "m", shell: "zsh"), history: history)
+        XCTAssertEqual(messages.map(\.role), ["system", "user", "assistant", "user"])
+        XCTAssertTrue(messages[3].content.hasSuffix("and then?"))
+    }
+
+    func testSystemPromptIsGeneralNotCommandOnly() {
+        let prompt = AIPrompt.systemPrompt
+        XCTAssertTrue(prompt.contains("programming questions"))
+        XCTAssertTrue(prompt.contains("its own ```sh block"))
+        XCTAssertFalse(prompt.contains("exactly one command"))
+    }
+
+    func testSegmentsMixProseCommandsAndCode() {
+        let reply = """
+        First install it:
+        ```sh
+        brew install jq
+        ```
+        Then query:
+        ```bash
+        $ jq '.name' package.json
+        ```
+        A script version:
+        ```python
+        import json
+        ```
+        Done.
+        """
+        XCTAssertEqual(AIPrompt.segments(from: reply), [
+            .text("First install it:"),
+            .command("brew install jq", complete: true),
+            .text("Then query:"),
+            .command("jq '.name' package.json", complete: true),
+            .text("A script version:"),
+            .code(language: "python", "import json", complete: true),
+            .text("Done."),
+        ])
+        XCTAssertEqual(AIPrompt.commands(in: reply), ["brew install jq", "jq '.name' package.json"])
+    }
+
+    func testStreamingBlockIsIncomplete() {
+        XCTAssertEqual(AIPrompt.segments(from: "Try:\n```sh\ngit sta"), [.text("Try:"), .command("git sta", complete: false)])
+        XCTAssertTrue(AIPrompt.commands(in: "```sh\ngit sta").isEmpty)
+    }
+
+    func testProseOnlyReply() {
+        XCTAssertEqual(AIPrompt.segments(from: "A symlink is a pointer to another path."), [.text("A symlink is a pointer to another path.")])
     }
 
     func testAIConfigKeys() {

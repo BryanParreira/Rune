@@ -132,6 +132,7 @@ final class SessionView: NSView {
         inputArea.setRunning(mode == .runningCommand, command: session.tracker.blocks.last?.command)
         let aiVisible = conversation.isVisible && mode.editorVisible
         aiHost.isHidden = !aiVisible
+        inputArea.aiConversationOpen = aiVisible
         welcomeHost.isHidden = aiVisible || !(mode == .editor && session.config.showWelcome && !welcomeDismissed)
         overlay.isHidden = mode == .fullscreenApp
         contextDidChange()

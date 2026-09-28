@@ -37,8 +37,15 @@ enum DebugDriver {
                 print("DUMP screen cursorY=\(t.getCursorLocation().y) rows=\(t.rows) lines=\(g.lineCount) top=\(g.topVisibleRow) mode=\(session.mode)")
                 for b in session.tracker.blocks { print("DUMP block \(b.command) header=\(b.headerRow) out=\(b.outputStartRow) end=\(b.endRow ?? -1) screenTop=\(g.linesTrimmed + g.screenTop)") }
                 print("DUMP state=\(c.state) model=\(c.model) context=\(c.contextLabel ?? "-")")
+                print("DUMP earlier=\(c.earlier.map(\.prompt)) prompt=\(c.prompt)")
                 print("DUMP reply<<\(c.reply)>>")
-                print("DUMP command<<\(c.command ?? "nil")>>")
+                for seg in c.segments {
+                    switch seg {
+                    case .text(let t): print("DUMP seg text(\(t.count) chars)")
+                    case .command(let cmd, let done): print("DUMP seg COMMAND[\(done)] \(cmd)")
+                    case .code(let lang, let code, _): print("DUMP seg code[\(lang)] \(code.count) chars")
+                    }
+                }
                 print("DUMP service ready=\(AIService.shared.isReady) active=\(AIService.shared.activeModel ?? "nil") status=\(AIService.shared.status)")
                 fflush(stdout)
             case let question where question.hasPrefix("@ai:"):

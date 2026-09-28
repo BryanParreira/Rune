@@ -1,8 +1,8 @@
 import Foundation
 import RuneKit
 
-/// One AI exchange shown above a tab's input: the question, the streamed answer, and the
-/// suggested command. Nothing here ever runs a command; the UI asks the user first.
+/// The AI conversation shown above a tab's input. ⌘↵ while it's open asks a follow-up;
+/// closing it starts fresh. Nothing here ever runs a command; the UI asks the user first.
 final class AIConversation: ObservableObject {
     enum State: Equatable {
         case hidden
@@ -14,38 +14,70 @@ final class AIConversation: ObservableObject {
         case failed(String)
     }
 
+    struct Exchange: Identifiable, Equatable {
+        let id = UUID()
+        var prompt: String
+        var reply: String
+    }
+
     @Published private(set) var state: State = .hidden
     @Published private(set) var prompt = ""
     @Published private(set) var reply = ""
     @Published private(set) var isThinking = false
     @Published private(set) var model = ""
-    @Published private(set) var command: String?
     /// Label for the attached block, e.g. "make (exit 2)".
     @Published private(set) var contextLabel: String?
+    /// Earlier exchanges in this conversation (oldest first).
+    @Published private(set) var earlier: [Exchange] = []
 
+    /// Messages sent so far (user turns include the environment summary).
+    private var history: [OllamaClient.ChatMessage] = []
+    private var pendingUserMessage: OllamaClient.ChatMessage?
     private var task: Task<Void, Never>?
+
+    /// Keep the prompt small enough for local models: the last few exchanges only.
+    static let maxRememberedExchanges = 6
 
     var isActive: Bool { state == .waiting || state == .streaming }
     var isVisible: Bool { state != .hidden }
+    /// True when ⌘↵ should continue this conversation rather than start a new one.
+    var canFollowUp: Bool {
+        switch state {
+        case .done, .failed: return !history.isEmpty || !reply.isEmpty
+        default: return false
+        }
+    }
+
+    /// The segments of the current reply, for rendering.
+    var segments: [AIPrompt.Segment] { AIPrompt.segments(from: reply) }
+    /// First complete command in the current reply (⌘↵ on an empty input runs it).
+    var command: String? { AIPrompt.extractCommand(from: reply) }
 
     func showSetup(prompt: String) {
         cancel()
         self.prompt = prompt
         reply = ""
-        command = nil
         state = .setup
     }
 
-    func ask(_ context: AIContext, model: String, client: OllamaClient, disableThinking: Bool, contextLabel: String?) {
+    func ask(_ context: AIContext, model: String, client: OllamaClient, disableThinking: Bool,
+             contextLabel: String?, followUp: Bool) {
         cancel()
+        if followUp {
+            if !reply.isEmpty { earlier.append(Exchange(prompt: prompt, reply: reply)) }
+        } else {
+            history.removeAll()
+            earlier.removeAll()
+        }
         prompt = context.request
         reply = ""
-        command = nil
         isThinking = false
         self.model = model
-        self.contextLabel = contextLabel
+        self.contextLabel = contextLabel ?? (followUp ? self.contextLabel : nil)
         state = .waiting
-        let messages = AIPrompt.messages(for: context)
+
+        let messages = AIPrompt.messages(for: context, history: history)
+        pendingUserMessage = messages.last
 
         task = Task { @MainActor [weak self] in
             do {
@@ -58,14 +90,13 @@ final class AIConversation: ObservableObject {
                         self.isThinking = false
                         self.state = .streaming
                         self.reply += text
-                        self.command = AIPrompt.extractCommand(from: self.reply)
                     case .done:
                         break
                     }
                 }
                 guard let self, self.isActive else { return }
+                self.finishTurn()
                 self.state = .done
-                self.command = AIPrompt.extractCommand(from: self.reply)
             } catch is CancellationError {
                 // Stopped by the user.
             } catch {
@@ -80,32 +111,34 @@ final class AIConversation: ObservableObject {
         guard isActive else { return }
         task?.cancel()
         task = nil
-        state = reply.isEmpty ? .hidden : .done
-        command = AIPrompt.extractCommand(from: reply)
+        if reply.isEmpty {
+            state = earlier.isEmpty ? .hidden : .done
+        } else {
+            finishTurn()
+            state = .done
+        }
     }
 
     func dismiss() {
         cancel()
+        history.removeAll()
+        earlier.removeAll()
+        reply = ""
         state = .hidden
+    }
+
+    private func finishTurn() {
+        guard let user = pendingUserMessage else { return }
+        history.append(user)
+        history.append(OllamaClient.ChatMessage(role: "assistant", content: reply))
+        let maxMessages = Self.maxRememberedExchanges * 2
+        if history.count > maxMessages { history.removeFirst(history.count - maxMessages) }
+        pendingUserMessage = nil
     }
 
     private func cancel() {
         task?.cancel()
         task = nil
-    }
-
-    /// Reply text without the fenced command (shown separately as a card).
-    var explanation: String {
-        var lines: [String] = []
-        var inFence = false
-        for line in reply.components(separatedBy: "\n") {
-            if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
-                inFence.toggle()
-                continue
-            }
-            if !inFence { lines.append(line) }
-        }
-        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func describe(_ error: Error) -> String {

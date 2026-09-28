@@ -343,15 +343,23 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             return
         }
 
+        // Follow-ups continue the open conversation; its context was already sent, so only
+        // attach a block the user explicitly picked.
+        let followUp = conversation.canFollowUp && explicitBlock == nil
         var block = explicitBlock
         if block == nil, let id = selectedBlockID { block = tracker.block(id: id) }
-        if block == nil, config.aiIncludeBlockContext { block = tracker.blocks.last { $0.state == .finished } }
+        if block == nil, !followUp, config.aiIncludeBlockContext { block = tracker.blocks.last { $0.state == .finished } }
 
+        let listing = FileListing.entries(at: currentDirectory, showHidden: false)
+            .prefix(AIPrompt.maxListing + 40)
+            .map { $0.isDirectory ? $0.name + "/" : $0.name }
         let context = AIContext(
             request: trimmed,
             cwd: currentDirectory,
             osVersion: "macOS " + ProcessInfo.processInfo.operatingSystemVersionString,
             shell: (ProcessInfo.processInfo.environment["SHELL"] as NSString?)?.lastPathComponent ?? "zsh",
+            gitBranch: gitBranch,
+            directoryListing: Array(listing),
             blockCommand: block.map { commandText(of: $0) },
             blockOutput: block.map { outputText(of: $0) },
             blockExitCode: block?.exitCode
@@ -363,7 +371,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         }
         conversation.ask(context, model: model, client: service.client,
                          disableThinking: service.activeModelInfo?.supportsThinking ?? false,
-                         contextLabel: label)
+                         contextLabel: label, followUp: followUp)
     }
 
     /// "Explain this error" for a failed block.

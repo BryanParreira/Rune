@@ -77,35 +77,117 @@ struct AIPanel: View {
 
     @ViewBuilder
     private var answer: some View {
-        if conversation.state == .waiting {
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text(conversation.isThinking ? "Thinking…" : "Asking \(conversation.model)…")
-                    .font(.system(size: fontSize - 1))
-                    .foregroundColor(Color(nsColor: palette.secondary))
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    if !conversation.earlier.isEmpty {
+                        EarlierTurns(turns: conversation.earlier, palette: palette, fontSize: fontSize)
+                    }
+                    if conversation.state == .waiting {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text(conversation.isThinking ? "Thinking…" : "Asking \(conversation.model)…")
+                                .font(.system(size: fontSize - 1))
+                                .foregroundColor(Color(nsColor: palette.secondary))
+                        }
+                    }
+                    ForEach(Array(conversation.segments.enumerated()), id: \.offset) { _, segment in
+                        segmentView(segment)
+                    }
+                    if conversation.state == .streaming {
+                        ProgressView().controlSize(.mini)
+                    }
+                    Color.clear.frame(height: 1).id("end")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-        } else {
-            let text = conversation.explanation
-            if !text.isEmpty {
-                Text(markdown(text))
-                    .font(.system(size: fontSize - 0.5))
-                    .foregroundColor(Color(nsColor: palette.text))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let command = conversation.command {
-                CommandCard(command: command, palette: palette, fontSize: fontSize,
-                            enabled: conversation.state == .done,
-                            onRun: { onRun(command) }, onEdit: { onEdit(command) },
-                            onCancel: { conversation.dismiss() })
-            } else if conversation.state == .streaming {
-                ProgressView().controlSize(.mini)
-            }
+            .frame(maxHeight: 360)
+            .fixedSize(horizontal: false, vertical: true)
+            .onChange(of: conversation.reply) { proxy.scrollTo("end", anchor: .bottom) }
+        }
+    }
+
+    @ViewBuilder
+    private func segmentView(_ segment: AIPrompt.Segment) -> some View {
+        switch segment {
+        case .text(let text):
+            Text(markdown(text))
+                .font(.system(size: fontSize - 0.5))
+                .foregroundColor(Color(nsColor: palette.text))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        case .command(let command, let complete):
+            CommandCard(command: command, palette: palette, fontSize: fontSize,
+                        enabled: complete && conversation.state != .waiting,
+                        onRun: { onRun(command) }, onEdit: { onEdit(command) })
+        case .code(let language, let code, _):
+            CodeBox(language: language, code: code, palette: palette, fontSize: fontSize)
         }
     }
 
     private func markdown(_ text: String) -> AttributedString {
         (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+    }
+}
+
+/// Earlier questions in this conversation, collapsed to one line each.
+private struct EarlierTurns: View {
+    let turns: [AIConversation.Exchange]
+    let palette: ChromePalette
+    let fontSize: CGFloat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(turns) { turn in
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.turn.down.right").font(.system(size: 9))
+                    Text(turn.prompt).lineLimit(1).truncationMode(.tail)
+                }
+                .font(.system(size: fontSize - 2))
+                .foregroundColor(Color(nsColor: palette.hint))
+                .help(turn.reply)
+            }
+        }
+        .padding(.bottom, 2)
+    }
+}
+
+/// Non-shell code: shown and copyable, never runnable.
+private struct CodeBox: View {
+    let language: String
+    let code: String
+    let palette: ChromePalette
+    let fontSize: CGFloat
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(language).font(.system(size: fontSize - 3, design: .monospaced)).foregroundColor(Color(nsColor: palette.hint))
+                Spacer()
+                Button(copied ? "Copied" : "Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(code, forType: .string)
+                    copied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: fontSize - 3))
+                .foregroundColor(Color(nsColor: palette.accent))
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            Text(code)
+                .font(.system(size: fontSize - 1, design: .monospaced))
+                .foregroundColor(Color(nsColor: palette.text))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(nsColor: palette.background)))
+        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color(nsColor: palette.outline), lineWidth: 1))
     }
 }
 
@@ -117,7 +199,6 @@ private struct CommandCard: View {
     let enabled: Bool
     let onRun: () -> Void
     let onEdit: () -> Void
-    let onCancel: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -136,7 +217,6 @@ private struct CommandCard: View {
                     .disabled(!enabled)
                 PanelButton(title: "Edit", systemImage: "pencil", prominent: false, palette: palette, action: onEdit)
                     .disabled(!enabled)
-                PanelButton(title: "Cancel", systemImage: nil, prominent: false, palette: palette, action: onCancel)
                 Spacer()
                 Text("Review before running")
                     .font(.system(size: fontSize - 3))

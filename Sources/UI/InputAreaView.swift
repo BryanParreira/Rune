@@ -119,8 +119,9 @@ final class InputAreaView: NSView, NSTextViewDelegate {
         self.running = running
         editor.isEditable = !running
         editor.alphaValue = running ? 0.45 : 1
-        editor.placeholder = running ? "Running \(command.map { "“\($0)”" } ?? "command")…" : CommandTextView.defaultPlaceholder
-        chipsModel.hint = running ? .running : (editor.string.isEmpty ? .idle : .typing)
+        editor.placeholder = running ? "Running \(command.map { "“\($0)”" } ?? "command")…"
+            : (aiConversationOpen ? "Ask a follow-up (⌘↵) or type a command…" : CommandTextView.defaultPlaceholder)
+        chipsModel.hint = currentHint
         editor.needsDisplay = true
     }
 
@@ -149,9 +150,26 @@ final class InputAreaView: NSView, NSTextViewDelegate {
 
     // MARK: - Editor sizing
 
+    /// Shows follow-up hints while an AI answer is open.
+    var aiConversationOpen = false {
+        didSet {
+            guard oldValue != aiConversationOpen else { return }
+            chipsModel.hint = currentHint
+            if !running {
+                editor.placeholder = aiConversationOpen ? "Ask a follow-up (⌘↵) or type a command…" : CommandTextView.defaultPlaceholder
+            }
+        }
+    }
+
+    private var currentHint: InputChromeModel.Hint {
+        if running { return .running }
+        if aiConversationOpen { return .aiOpen }
+        return editor.string.isEmpty ? .idle : .typing
+    }
+
     func textDidChange(_ notification: Notification) {
         chipsModel.completions = []
-        chipsModel.hint = editor.string.isEmpty ? .idle : .typing
+        chipsModel.hint = currentHint
         sessionView?.session?.resetHistoryNavigation()
         refreshHighlighting()
         updateSuggestion()
@@ -323,7 +341,7 @@ extension InputAreaView: CommandTextViewDelegate {
 // MARK: - SwiftUI chrome
 
 final class InputChromeModel: ObservableObject {
-    enum Hint { case idle, typing, running }
+    enum Hint { case idle, typing, running, aiOpen }
 
     @Published var directory = "~"
     @Published var branch: String?
@@ -421,6 +439,8 @@ struct InputHintLine: View {
                                       : "↵ run   → accept suggestion   ⇧↵ new line   ⇥ complete")
                 case .running:
                     hint("⌃C interrupt   keystrokes go to the running program")
+                case .aiOpen:
+                    hint("⌘↵ follow up   ↵ run as command   esc close")
                 }
             }
         }
