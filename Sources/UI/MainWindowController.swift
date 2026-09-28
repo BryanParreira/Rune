@@ -101,6 +101,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         let tabBar = NSHostingView(rootView: TabBarView(model: tabsModel, leadingInset: TrafficLights.reservedWidth(in: window)))
         let banner = NSHostingView(rootView: WarningBanner(model: warningModel))
         banner.sizingOptions = [.intrinsicContentSize]
+        // The banner is exactly as tall as its content (0 when there are no warnings).
+        banner.setContentHuggingPriority(.required, for: .vertical)
+        banner.setContentCompressionResistancePriority(.required, for: .vertical)
+        contentArea.setContentHuggingPriority(.defaultLow, for: .vertical)
         // The tab bar deliberately lives under the transparent titlebar.
         tabBar.safeAreaRegions = []
         banner.safeAreaRegions = []

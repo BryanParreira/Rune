@@ -15,7 +15,7 @@ final class TerminalContainerView: NSView {
     }
 
     var padding = NSEdgeInsets(top: 12, left: 16, bottom: 10, right: 16) {
-        didSet { needsLayout = true }
+        didSet { layoutTerminal() }
     }
 
     var background: NSColor = .black {
@@ -39,6 +39,22 @@ final class TerminalContainerView: NSView {
 
     override func layout() {
         super.layout()
+        layoutTerminal()
+    }
+
+    /// Auto Layout doesn't always call layout() when only this view's frame changes, so the
+    /// terminal (frame-based) is also resized directly whenever our size changes.
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        layoutTerminal()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        layoutTerminal()
+    }
+
+    private func layoutTerminal() {
         let rect = NSRect(
             x: padding.left,
             y: padding.top,

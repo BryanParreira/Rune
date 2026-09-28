@@ -64,6 +64,10 @@ struct WarningBanner: View {
             .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(amber.opacity(0.10))
+        } else {
+            // A definite zero height: an empty body has no intrinsic size, which left the
+            // window layout ambiguous (the banner could take arbitrary space).
+            Color.clear.frame(height: 0)
         }
     }
 
