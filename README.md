@@ -14,7 +14,7 @@ No account. No telemetry. No cloud. Just a fast terminal that's yours.
 ![Apple Silicon and Intel](https://img.shields.io/badge/Apple%20Silicon%20%2B%20Intel-universal-111)
 ![Swift](https://img.shields.io/badge/Swift-native-F05138?logo=swift&logoColor=white)
 ![No telemetry](https://img.shields.io/badge/telemetry-none-2ea44f)
-![License: MIT](https://img.shields.io/badge/license-MIT-111)
+![Free to use](https://img.shields.io/badge/price-free-111)
 
 </div>
 
@@ -134,8 +134,9 @@ Sources/        AppKit + SwiftUI app: sessions, block overlay, input editor, AI 
                 file tree, settings, updates
 ```
 
-Built with [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) for terminal emulation and [Sparkle](https://sparkle-project.org) for updates, both MIT-licensed. The interface draws inspiration from Warp's layout; every line of Rune's code is its own.
+Built with [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) for terminal emulation and [Sparkle](https://sparkle-project.org) for updates (both MIT-licensed; see Acknowledgements). The interface draws inspiration from Warp's layout; every line of Rune's code is its own.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Proprietary. © 2026 Bryan Bernardo Parreira. All rights reserved. Free to use; see [LICENSE](LICENSE).
+Third-party notices are in [Resources/Acknowledgements.txt](Resources/Acknowledgements.txt).

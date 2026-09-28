@@ -962,8 +962,11 @@ struct AboutPage: View {
                         .padding(.bottom, 6)
                 }
             }
-            SettingRow(model: model, title: "License", detail: "MIT. Terminal emulation by SwiftTerm (MIT).") {
-                EmptyView()
+            SettingRow(model: model, title: "License", detail: "© 2026 Bryan Bernardo Parreira. All rights reserved. Rune is free to use; see the license for terms. Built with open-source SwiftTerm and Sparkle.") {
+                LinkButton(title: "Acknowledgements", palette: p) {
+                    guard let path = Bundle.main.path(forResource: "Acknowledgements", ofType: "txt") else { return }
+                    (NSApp.keyWindow?.windowController as? MainWindowController)?.openFile(path: path, pinned: true)
+                }
             }
         }
     }

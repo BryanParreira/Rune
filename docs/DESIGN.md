@@ -3,7 +3,7 @@
 Rune's layout follows the "input at the bottom, output as blocks" model popularized by Warp.
 The values below are design measurements and behaviors (layout facts), re-implemented from
 scratch in Rune's own Swift code. No source code, strings, icons, or assets were copied from
-Warp; its app code is AGPL-3.0 and Rune stays MIT.
+Warp; its app code is AGPL-3.0, and Rune (proprietary) contains none of it.
 
 ## Layout (top → bottom)
 
