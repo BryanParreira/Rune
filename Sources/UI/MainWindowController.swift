@@ -7,6 +7,8 @@ import SwiftUI
 protocol TabContent: AnyObject {
     var id: UUID { get }
     var title: String { get }
+    /// A program that would be killed by closing this tab, if any.
+    var runningProgram: String? { get }
     var contentView: NSView { get }
     func focus()
     func apply(_ snapshot: ConfigSnapshot)
@@ -142,7 +144,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     private func wireModels() {
         tabsModel.onSelect = { [weak self] id in self?.selectTab(id: id) }
-        tabsModel.onClose = { [weak self] id in self?.closeTab(id: id) }
+        tabsModel.onClose = { [weak self] id in self?.requestCloseTab(id: id) }
         tabsModel.onNew = { [weak self] in self?.newTab(nil) }
         tabsModel.onToggleSidebar = { [weak self] in self?.toggleFileTree(nil) }
         tabsModel.onOpenSettings = { [weak self] in self?.openSettingsTab() }
@@ -295,8 +297,57 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     @objc func closeTab(_ sender: Any?) {
         if let tab = selectedTab {
-            closeTab(id: tab.id)
+            requestCloseTab(id: tab.id)
         }
+    }
+
+    /// Programs that would be killed by closing this window.
+    var runningPrograms: [String] {
+        tabs.compactMap(\.runningProgram)
+    }
+
+    /// Closes a tab, asking first if a program is still running in it.
+    private func requestCloseTab(id: UUID) {
+        guard let tab = tabs.first(where: { $0.id == id }) else { return }
+        guard let program = tab.runningProgram, let window else {
+            closeTab(id: id)
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Close this tab?"
+        alert.informativeText = "“\(program)” is still running in this tab. Closing it will stop it."
+        alert.addButton(withTitle: "Close Tab")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+        alert.beginSheetModal(for: window) { [weak self] response in
+            if response == .alertFirstButtonReturn { self?.closeTab(id: id) }
+        }
+    }
+
+    private var confirmedWindowClose = false
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        let programs = runningPrograms
+        guard !programs.isEmpty, !confirmedWindowClose else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Close this window?"
+        alert.informativeText = Self.describe(programs) + " Closing the window will stop \(programs.count == 1 ? "it" : "them")."
+        alert.addButton(withTitle: "Close Window")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+        alert.beginSheetModal(for: sender) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.confirmedWindowClose = true
+            sender.close()
+        }
+        return false
+    }
+
+    static func describe(_ programs: [String]) -> String {
+        let unique = Array(NSOrderedSet(array: programs)) as? [String] ?? programs
+        let list = unique.prefix(3).map { "“\($0)”" }.joined(separator: ", ")
+        let more = unique.count > 3 ? " and \(unique.count - 3) more" : ""
+        return programs.count == 1 ? "\(list) is still running." : "\(list)\(more) are still running."
     }
 
     @objc func openSettings(_ sender: Any?) {

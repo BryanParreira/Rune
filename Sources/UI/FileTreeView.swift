@@ -26,6 +26,9 @@ final class FileTreeModel: ObservableObject {
     private var expanded: Set<String> = []
     private var watcher: DirectoryWatcher?
     private var filterWork: DispatchWorkItem?
+    private var gitRunning = false
+    private var gitRequestedAgain = false
+    private var lastGitRun = Date.distantPast
 
     /// Actions provided by the window (they need the active session).
     var onInsertPath: (String) -> Void = { _ in }
@@ -122,11 +125,24 @@ final class FileTreeModel: ObservableObject {
 
     // MARK: Git
 
+    /// Runs `git status` at most every 2 s, never concurrently (busy repos change constantly).
     private func refreshGitStatus() {
         guard let root, let repo = GitInfo.repositoryRoot(for: root) else {
             git = GitStatusSnapshot()
             return
         }
+        if gitRunning { gitRequestedAgain = true; return }
+        let wait = 2 - Date().timeIntervalSince(lastGitRun)
+        if wait > 0 {
+            gitRunning = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
+                self?.gitRunning = false
+                self?.refreshGitStatus()
+            }
+            return
+        }
+        gitRunning = true
+        lastGitRun = Date()
         let path = [ProcessInfo.processInfo.environment["PATH"] ?? "", CommandCatalog.shared.shellPath ?? ""].joined(separator: ":")
         DispatchQueue.global(qos: .utility).async {
             let fm = FileManager.default
@@ -137,13 +153,19 @@ final class FileTreeModel: ObservableObject {
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = FileHandle.nullDevice
-            guard (try? process.run()) != nil else { return }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return }
-            let snapshot = GitStatusSnapshot.parse(porcelain: data, repoRoot: repo)
+            var snapshot: GitStatusSnapshot?
+            if (try? process.run()) != nil {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                if process.terminationStatus == 0 { snapshot = GitStatusSnapshot.parse(porcelain: data, repoRoot: repo) }
+            }
             DispatchQueue.main.async {
-                if self.root.flatMap({ GitInfo.repositoryRoot(for: $0) }) == repo { self.git = snapshot }
+                self.gitRunning = false
+                if let snapshot, self.root.flatMap({ GitInfo.repositoryRoot(for: $0) }) == repo { self.git = snapshot }
+                if self.gitRequestedAgain {
+                    self.gitRequestedAgain = false
+                    self.refreshGitStatus()
+                }
             }
         }
     }
@@ -178,9 +200,11 @@ final class FileTreeModel: ObservableObject {
     static func search(root: String, query: String, showHidden: Bool, limit: Int = 300) -> [Row] {
         var results: [Row] = []
         var queue: [(String, Int)] = [(root, 0)]
+        var head = 0
         var visited = 0
-        while !queue.isEmpty, results.count < limit, visited < 20_000 {
-            let (folder, depth) = queue.removeFirst()
+        while head < queue.count, results.count < limit, visited < 20_000 {
+            let (folder, depth) = queue[head]
+            head += 1
             for entry in FileListing.entries(at: folder, showHidden: showHidden) {
                 visited += 1
                 if entry.name.localizedCaseInsensitiveContains(query) {
@@ -365,7 +389,8 @@ private struct ResizeHandle: View {
         .contentShape(Rectangle())
         .onHover { inside in
             hovering = inside
-            if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            // set() rather than push/pop: an unbalanced pop can leave the wrong cursor behind.
+            (inside ? NSCursor.resizeLeftRight : NSCursor.arrow).set()
         }
         .gesture(
             DragGesture(minimumDistance: 1, coordinateSpace: .global)

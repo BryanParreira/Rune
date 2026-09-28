@@ -9,6 +9,7 @@ import SwiftUI
 final class SettingsTab: TabContent {
     let id = UUID()
     let title = "Settings"
+    let runningProgram: String? = nil
     let contentView: NSView
     private let model: SettingsModel
 
@@ -659,6 +660,10 @@ struct TerminalPage: View {
                 .frame(width: 220, height: 28)
                 .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(nsColor: p.foreground.withAlphaComponent(0.16)), lineWidth: 1))
                 .onAppear { shellDraft = model.config.shell ?? "" }
+                .onDisappear {
+                    let value = shellDraft.trimmingCharacters(in: .whitespaces)
+                    if value != (model.config.shell ?? "") { model.set("shell", value.isEmpty ? nil : value) }
+                }
             }
             SettingRow(model: model, title: "Show shell prompt in blocks", key: "honorPrompt",
                        detail: "Off: Rune shows the folder and git branch itself. On: your PS1 (Starship, oh-my-zsh…) appears in each block. Applies to new tabs.") {
@@ -770,6 +775,10 @@ struct AIPage: View {
                 .frame(width: 240, height: 28)
                 .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(nsColor: p.foreground.withAlphaComponent(0.16)), lineWidth: 1))
                 .onAppear { endpointDraft = model.config.ollamaEndpoint ?? "" }
+                .onDisappear {
+                    let value = endpointDraft.trimmingCharacters(in: .whitespaces)
+                    if value != (model.config.ollamaEndpoint ?? "") { model.set("ollamaEndpoint", value.isEmpty ? nil : value) }
+                }
             }
             }
         }

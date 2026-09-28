@@ -29,6 +29,15 @@ final class CommandHistoryTests: XCTestCase {
         XCTAssertEqual(h.entries, ["a", "c", "d"])
     }
 
+    func testLargeHistoryLoadsQuickly() {
+        let entries = (0..<200_000).map { "command \($0 % 50_000)" }
+        let start = Date()
+        let history = CommandHistory(entries: entries)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 2.0)
+        XCTAssertEqual(history.entries.count, 10_000)
+        XCTAssertEqual(history.entries.last, "command 49999")
+    }
+
     func testHistoryFileLocation() {
         let home = URL(fileURLWithPath: "/Users/x")
         XCTAssertEqual(CommandHistory.zshHistoryURL(environment: [:], home: home).path, "/Users/x/.zsh_history")

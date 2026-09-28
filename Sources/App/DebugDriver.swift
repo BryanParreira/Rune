@@ -37,6 +37,7 @@ enum DebugDriver {
                 print("DUMP layout terminalHeight=\(session.terminalView.frame.height) sessionHeight=\(session.view.frame.height) aiVisible=\(c.isVisible) collapsed=\(c.isCollapsed)")
                 print("DUMP screen cursorY=\(t.getCursorLocation().y) rows=\(t.rows) lines=\(g.lineCount) top=\(g.topVisibleRow) mode=\(session.mode)")
                 for b in session.tracker.blocks { print("DUMP block \(b.command) header=\(b.headerRow) out=\(b.outputStartRow) end=\(b.endRow ?? -1) screenTop=\(g.linesTrimmed + g.screenTop)") }
+                print("DUMP running=\(session.runningProgram ?? "nil")")
                 print("DUMP state=\(c.state) model=\(c.model) context=\(c.contextLabel ?? "-")")
                 print("DUMP earlier=\(c.earlier.map(\.prompt)) prompt=\(c.prompt)")
                 print("DUMP reply<<\(c.reply)>>")

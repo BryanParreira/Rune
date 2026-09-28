@@ -50,6 +50,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
+    /// Asks before quitting while programs are running in any tab.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let programs = windowControllers.flatMap(\.runningPrograms)
+        guard !programs.isEmpty else { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = "Quit Rune?"
+        alert.informativeText = MainWindowController.describe(programs) + " Quitting will stop \(programs.count == 1 ? "it" : "them")."
+        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+        return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+    }
+
     // MARK: - Windows
 
     /// Opens `directory` as a new tab in the frontmost window, or a new window if there is none.

@@ -19,6 +19,22 @@ public enum ProcessInfoReader {
     }
 }
 
+extension ProcessInfoReader {
+    /// Names of the direct child processes of `pid` (e.g. programs a shell is running).
+    public static func childProcessNames(of pid: pid_t) -> [String] {
+        guard pid > 0 else { return [] }
+        var pids = [pid_t](repeating: 0, count: 64)
+        let bytes = proc_listchildpids(pid, &pids, Int32(pids.count * MemoryLayout<pid_t>.size))
+        guard bytes > 0 else { return [] }
+        let count = min(Int(bytes), pids.count)
+        return pids.prefix(count).filter { $0 > 0 }.compactMap { child in
+            var name = [CChar](repeating: 0, count: 256)
+            guard proc_name(child, &name, UInt32(name.count)) > 0 else { return nil }
+            return String(cString: name)
+        }
+    }
+}
+
 /// Formats "user@host:~/path" tab titles.
 public enum TabTitle {
     public static func abbreviate(path: String, home: String) -> String {

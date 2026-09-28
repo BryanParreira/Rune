@@ -141,9 +141,21 @@ final class InputAreaView: NSView, NSTextViewDelegate {
         case [127], [8]:
             editor.deleteBackward(nil)
         default:
-            // Printable text only; escape sequences (arrows etc.) are dropped.
-            guard !data.contains(where: { $0 < 0x20 || $0 == 0x7F }),
-                  let text = String(bytes: data, encoding: .utf8) else { return }
+            var bytes = Array(data)
+            // A paste arrives wrapped in bracketed-paste markers; keep its text, newlines included.
+            let pasteStart: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E]
+            let pasteEnd: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E]
+            let isPaste = bytes.starts(with: pasteStart)
+            if isPaste {
+                bytes.removeFirst(pasteStart.count)
+                if bytes.count >= pasteEnd.count, Array(bytes.suffix(pasteEnd.count)) == pasteEnd {
+                    bytes.removeLast(pasteEnd.count)
+                }
+            }
+            // Otherwise printable text only; escape sequences (arrows etc.) are dropped.
+            let allowed: (UInt8) -> Bool = { isPaste ? ($0 >= 0x20 || $0 == 0x0A || $0 == 0x0D || $0 == 0x09) && $0 != 0x7F : $0 >= 0x20 && $0 != 0x7F }
+            guard bytes.allSatisfy(allowed), var text = String(bytes: bytes, encoding: .utf8) else { return }
+            text = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
             editor.insertText(text, replacementRange: editor.selectedRange())
         }
     }
@@ -183,6 +195,8 @@ final class InputAreaView: NSView, NSTextViewDelegate {
     /// Colors the command line like zsh-syntax-highlighting.
     func refreshHighlighting() {
         guard let palette, let storage = editor.textStorage, let font = editor.font else { return }
+        // Rewriting attributes mid-composition would disturb input methods (Japanese, Chinese…).
+        guard !editor.hasMarkedText() else { return }
         let text = editor.string
         let full = NSRange(location: 0, length: (text as NSString).length)
         let tokens = CommandHighlighter.tokenize(text) { CommandCatalog.shared.contains($0) }

@@ -250,8 +250,24 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         return dir.path
     }
 
+    /// Name of a program running in this tab (vim, npm, ssh…), or nil when the shell is idle.
+    var runningProgram: String? {
+        guard state == .running, let pid = terminalView.process?.shellPid else { return nil }
+        let commandRunning = tracker.isCommandRunning
+        let children = ProcessInfoReader.childProcessNames(of: pid).filter { name in
+            // Background helpers some prompt themes keep alive while the shell is idle.
+            if name.hasPrefix("gitstatusd") { return false }
+            if !commandRunning, name == "zsh" || name == "-zsh" || name == "sh" { return false }
+            return true
+        }
+        if let first = children.first { return first }
+        if tracker.isCommandRunning { return tracker.blocks.last?.command.components(separatedBy: " ").first }
+        return nil
+    }
+
     func terminate() {
         integrationTimeout?.cancel()
+        view.conversation.dismiss()
         liveTimer?.invalidate()
         guard state == .running else { return }
         state = .exited(nil)

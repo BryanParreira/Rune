@@ -8,7 +8,17 @@ public struct CommandHistory: Sendable {
 
     public init(entries: [String] = [], limit: Int = 10_000) {
         self.limit = limit
-        for entry in entries { append(entry) }
+        // Linear-time de-duplication: walk newest→oldest, keep the first (most recent) copy.
+        var seen = Set<String>()
+        var newestFirst: [String] = []
+        newestFirst.reserveCapacity(min(entries.count, limit))
+        for entry in entries.reversed() {
+            let trimmed = entry.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, seen.insert(trimmed).inserted else { continue }
+            newestFirst.append(trimmed)
+            if newestFirst.count == limit { break }
+        }
+        self.entries = newestFirst.reversed()
     }
 
     public mutating func append(_ command: String) {
