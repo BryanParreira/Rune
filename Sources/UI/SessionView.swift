@@ -111,9 +111,19 @@ final class SessionView: NSView {
         blocksDidChange()
     }
 
+    private var blockRefreshPending = false
+
+    /// Coalesces overlay updates: heavy output calls this for every chunk, but the overlay
+    /// only needs to be recomputed once per frame (~30 fps is plenty for chrome).
     func blocksDidChange() {
-        overlay.needsDisplay = true
-        overlay.refreshHover()
+        guard !blockRefreshPending else { return }
+        blockRefreshPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 30) { [weak self] in
+            guard let self else { return }
+            self.blockRefreshPending = false
+            self.overlay.needsDisplay = true
+            self.overlay.refreshHover()
+        }
     }
 
     func contextDidChange() {

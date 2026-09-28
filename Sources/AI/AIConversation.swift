@@ -34,6 +34,10 @@ final class AIConversation: ObservableObject {
 
     /// Messages sent so far (user turns include the environment summary).
     private var history: [OllamaClient.ChatMessage] = []
+    /// Tokens received but not yet shown; flushed to `reply` ~20 times a second so long
+    /// answers don't re-render (and re-parse Markdown) on every token.
+    private var pendingText = ""
+    private var flushScheduled = false
     private var pendingUserMessage: OllamaClient.ChatMessage?
     private var task: Task<Void, Never>?
 
@@ -91,13 +95,15 @@ final class AIConversation: ObservableObject {
                         self.isThinking = true
                     case .content(let text):
                         self.isThinking = false
-                        self.state = .streaming
-                        self.reply += text
+                        if self.state != .streaming { self.state = .streaming }
+                        self.pendingText += text
+                        self.scheduleFlush()
                     case .done:
                         break
                     }
                 }
                 guard let self, self.isActive else { return }
+                self.flushPending()
                 self.finishTurn()
                 self.state = .done
             } catch is CancellationError {
@@ -109,11 +115,27 @@ final class AIConversation: ObservableObject {
         }
     }
 
+    private func scheduleFlush() {
+        guard !flushScheduled else { return }
+        flushScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.flushPending()
+        }
+    }
+
+    private func flushPending() {
+        flushScheduled = false
+        guard !pendingText.isEmpty else { return }
+        reply += pendingText
+        pendingText = ""
+    }
+
     /// Stops generation (Esc) but keeps what arrived so far.
     func stop() {
         guard isActive else { return }
         task?.cancel()
         task = nil
+        flushPending()
         if reply.isEmpty {
             state = earlier.isEmpty ? .hidden : .done
         } else {
@@ -156,6 +178,8 @@ final class AIConversation: ObservableObject {
     private func cancel() {
         task?.cancel()
         task = nil
+        pendingText = ""
+        flushScheduled = false
     }
 
     private static func describe(_ error: Error) -> String {

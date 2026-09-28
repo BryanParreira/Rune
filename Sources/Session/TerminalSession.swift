@@ -88,6 +88,9 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     private var anchorLines: [Int: BufferLine] = [:]
     private var lastColumns = 0
     private var liveTimer: Timer?
+    /// Held while a command runs so App Nap doesn't throttle output processing when Rune
+    /// is in the background (e.g. a long build while you work elsewhere).
+    private var commandActivity: NSObjectProtocol?
     /// Fixed per shell launch: the integration sets up the prompt for one style or the other.
     private(set) var typeInShell = false
 
@@ -266,6 +269,10 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     }
 
     func terminate() {
+        if let activity = commandActivity {
+            ProcessInfo.processInfo.endActivity(activity)
+            commandActivity = nil
+        }
         integrationTimeout?.cancel()
         view.conversation.dismiss()
         liveTimer?.invalidate()
@@ -615,6 +622,13 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
 
     private func updateMode() {
         let running = tracker.isCommandRunning
+        if running, commandActivity == nil {
+            commandActivity = ProcessInfo.processInfo.beginActivity(
+                options: [.userInitiatedAllowingIdleSystemSleep], reason: "Running a command in Rune")
+        } else if !running, let activity = commandActivity {
+            ProcessInfo.processInfo.endActivity(activity)
+            commandActivity = nil
+        }
         if running, liveTimer == nil {
             // Live duration counter for the running block.
             liveTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in

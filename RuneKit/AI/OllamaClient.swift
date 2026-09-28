@@ -112,6 +112,8 @@ public struct OllamaClient: Sendable {
             "stream": true,
             "messages": messages.map { ["role": $0.role, "content": $0.content] },
             "options": ["temperature": 0.2],
+            // Keep the model in memory between questions so follow-ups start immediately.
+            "keep_alive": "30m",
         ]
         if disableThinking { object["think"] = false }
         return (try? JSONSerialization.data(withJSONObject: object)) ?? Data()
