@@ -115,13 +115,18 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         terminalView.processDelegate = self
         terminalView.getTerminal().semanticPromptClickBehavior = .disabled
         terminalView.onDataReceived = { [weak self] in self?.handleDataReceived() }
-        terminalView.onScrolled = { [weak self] in self?.view.blocksDidChange() }
+        terminalView.onScrolled = { [weak self] in
+            self?.view.blocksDidChange()
+            self?.view.overlay.flashScrollIndicator()
+        }
         terminalView.onBufferSwitched = { [weak self] in self?.updateMode() }
         terminalView.inputInterceptor = { [weak self] data in self?.intercept(data) ?? false }
         terminalView.contextMenuProvider = { [weak self] point in self?.contextMenu(atTerminalPoint: point) }
         installOSCHandlers()
         apply(snapshot)
         HistoryStore.shared.loadIfNeeded()
+        // Rune draws its own overlay scroll indicator (BlockOverlayView).
+        terminalView.subviews.compactMap { $0 as? NSScroller }.forEach { $0.isHidden = true }
     }
 
     var title: String {
@@ -195,6 +200,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         startedAt = Date()
         state = .running
         lastColumns = terminalView.getTerminal().cols
+        // Start at the bottom: output grows upward from the input, like a chat.
+        padToBottom()
         terminalView.startProcess(
             executable: shell,
             args: [],
@@ -204,6 +211,36 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         )
         updateMode()
         onChange?()
+    }
+
+    /// Moves the cursor to the last row by adding blank lines above it.
+    private func padToBottom() {
+        let terminal = terminalView.getTerminal()
+        let missing = terminal.rows - 1 - terminal.getCursorLocation().y
+        if missing > 0 {
+            terminalView.feed(text: String(repeating: "\r\n", count: missing))
+        }
+    }
+
+    /// Rune's own prompt is invisible, so after `clear` / ⌘K the empty prompt can be moved to
+    /// the bottom row without the shell noticing. Tells the tracker where the prompt now is.
+    private var promptIsInvisible: Bool {
+        mode == .editor && !typeInShell && !config.honorPrompt
+    }
+
+    private func reanchorPromptAtBottom() {
+        guard promptIsInvisible else { return }
+        let before = terminalView.getTerminal().getCursorLocation().y
+        guard before < terminalView.getTerminal().rows - 1 else { return }
+        padToBottom()
+        let cursor = geometry.cursorPosition
+        tracker.handle(.promptStart, at: MarkPosition(row: cursor.row - 1, column: 0))
+        tracker.handle(.commandStart, at: MarkPosition(row: cursor.row, column: 0))
+        let terminal = terminalView.getTerminal()
+        for row in [cursor.row - 1, cursor.row] {
+            if let line = terminal.getScrollInvariantLine(row: row) { anchorLines[row] = line }
+        }
+        view.blocksDidChange()
     }
 
     private static func zshIntegrationDirectory() -> String? {
@@ -271,8 +308,10 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         anchorLines.removeAll()
         selectedBlockID = nil
         terminalView.feed(text: "\u{1b}[H\u{1b}[2J\u{1b}[3J")
-        if mode == .editor, integration == .active {
-            terminalView.sendToShell([12]) // Ctrl-L: the shell redraws its (empty) prompt
+        if promptIsInvisible, integration == .active {
+            reanchorPromptAtBottom()
+        } else if mode == .editor || mode == .shellPrompt {
+            terminalView.sendToShell([12]) // Ctrl-L: the shell redraws its prompt
         }
         view.blocksDidChange()
     }
@@ -485,6 +524,10 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             break
         }
 
+        if case .commandStart = mark, promptIsInvisible, terminal.getCursorLocation().y < terminal.rows - 1 {
+            // e.g. after `clear`: re-anchor once the shell has finished drawing the prompt.
+            DispatchQueue.main.async { [weak self] in self?.reanchorPromptAtBottom() }
+        }
         if case .commandFinished = mark { refreshGitBranch() }
         if changed { view.blocksDidChange() }
         updateMode()

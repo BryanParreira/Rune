@@ -30,6 +30,10 @@ enum DebugDriver {
             case "@settings": NSApp.sendAction(#selector(AppDelegate.openSettings(_:)), to: nil, from: nil)
             case "@dump":
                 let c = session.view.conversation
+                let t = session.terminalView.getTerminal()
+                let g = session.geometry
+                print("DUMP screen cursorY=\(t.getCursorLocation().y) rows=\(t.rows) lines=\(g.lineCount) top=\(g.topVisibleRow) mode=\(session.mode)")
+                for b in session.tracker.blocks { print("DUMP block \(b.command) header=\(b.headerRow) out=\(b.outputStartRow) end=\(b.endRow ?? -1) screenTop=\(g.linesTrimmed + g.screenTop)") }
                 print("DUMP state=\(c.state) model=\(c.model) context=\(c.contextLabel ?? "-")")
                 print("DUMP reply<<\(c.reply)>>")
                 print("DUMP command<<\(c.command ?? "nil")>>")

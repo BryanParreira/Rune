@@ -13,6 +13,13 @@ final class BlockOverlayView: NSView {
     private var lastMouseLocation: NSPoint?
     private let actionBar = BlockActionBar()
 
+    // Scroll indicator: thin thumb on the right that appears while scrolling and fades out.
+    private var indicatorAlpha: CGFloat = 0
+    private var indicatorFade: Timer?
+    private var draggingThumb = false
+    private var dragOffset: CGFloat = 0
+    private var hoveringIndicator = false
+
     static let flagPoleWidth: CGFloat = 3
 
     override init(frame frameRect: NSRect) {
@@ -29,11 +36,106 @@ final class BlockOverlayView: NSView {
 
     override var isFlipped: Bool { true }
 
-    /// Only the action bar takes clicks; everything else falls through to the terminal.
+    /// Only the action bar and the scroll indicator take clicks; everything else falls
+    /// through to the terminal.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard !actionBar.isHidden else { return nil }
         let local = convert(point, from: superview)
-        return actionBar.frame.contains(local) ? super.hitTest(point) : nil
+        if !actionBar.isHidden, actionBar.frame.contains(local) { return super.hitTest(point) }
+        if let track = indicatorTrack(), NSRect(x: track.maxX - 14, y: track.minY, width: 16, height: track.height).contains(local) {
+            return self
+        }
+        return nil
+    }
+
+    // MARK: - Scroll indicator
+
+    /// Track rect (flipped overlay coordinates) and scroll metrics, or nil if nothing to scroll.
+    private func indicatorTrack() -> NSRect? {
+        guard let session = sessionView?.session, session.mode != .fullscreenApp else { return nil }
+        let terminal = session.terminalView.getTerminal()
+        guard session.geometry.lineCount > terminal.rows else { return nil }
+        let frame = session.terminalView.frame
+        return NSRect(x: bounds.maxX - 10, y: frame.minY + 2, width: 6, height: frame.height - 4)
+    }
+
+    private func thumbRect(in track: NSRect) -> NSRect? {
+        guard let session = sessionView?.session else { return nil }
+        let terminal = session.terminalView.getTerminal()
+        let total = CGFloat(session.geometry.lineCount)
+        let rows = CGFloat(terminal.rows)
+        let maxTop = max(1, total - rows)
+        let height = max(28, track.height * rows / total)
+        let progress = min(1, max(0, CGFloat(terminal.getTopVisibleRow()) / maxTop))
+        return NSRect(x: track.minX, y: track.minY + (track.height - height) * progress, width: track.width, height: height)
+    }
+
+    func flashScrollIndicator() {
+        guard indicatorTrack() != nil else { return }
+        indicatorAlpha = 1
+        needsDisplay = true
+        scheduleIndicatorFade()
+    }
+
+    private func scheduleIndicatorFade() {
+        indicatorFade?.invalidate()
+        guard !draggingThumb, !hoveringIndicator else { return }
+        indicatorFade = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
+            self?.indicatorFade = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] timer in
+                guard let self else { timer.invalidate(); return }
+                self.indicatorAlpha -= 0.1
+                if self.indicatorAlpha <= 0 { self.indicatorAlpha = 0; timer.invalidate() }
+                self.needsDisplay = true
+            }
+        }
+    }
+
+    private func drawScrollIndicator(palette: ChromePalette) {
+        guard indicatorAlpha > 0, let track = indicatorTrack(), let thumb = thumbRect(in: track) else { return }
+        let wide = draggingThumb || hoveringIndicator
+        let rect = wide ? thumb.insetBy(dx: -1.5, dy: 0) : thumb.insetBy(dx: 0.5, dy: 0)
+        palette.foreground.withAlphaComponent((wide ? 0.45 : 0.28) * indicatorAlpha).setFill()
+        NSBezierPath(roundedRect: rect, xRadius: rect.width / 2, yRadius: rect.width / 2).fill()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let track = indicatorTrack(), let thumb = thumbRect(in: track), let session = sessionView?.session else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        draggingThumb = true
+        indicatorAlpha = 1
+        if thumb.insetBy(dx: -6, dy: 0).contains(point) {
+            dragOffset = point.y - thumb.minY
+        } else {
+            // Click in the track: jump so the thumb centers on the click.
+            dragOffset = thumb.height / 2
+            scroll(session: session, thumbTop: point.y - dragOffset, track: track, thumbHeight: thumb.height)
+        }
+        needsDisplay = true
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard draggingThumb, let track = indicatorTrack(), let thumb = thumbRect(in: track), let session = sessionView?.session else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        scroll(session: session, thumbTop: point.y - dragOffset, track: track, thumbHeight: thumb.height)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        draggingThumb = false
+        scheduleIndicatorFade()
+        needsDisplay = true
+    }
+
+    private func scroll(session: TerminalSession, thumbTop: CGFloat, track: NSRect, thumbHeight: CGFloat) {
+        let terminal = session.terminalView.getTerminal()
+        let maxTop = max(0, session.geometry.lineCount - terminal.rows)
+        let usable = max(1, track.height - thumbHeight)
+        let progress = min(1, max(0, (thumbTop - track.minY) / usable))
+        session.terminalView.scrollTo(row: Int((progress * CGFloat(maxTop)).rounded()))
+        needsDisplay = true
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        // Wheel over the indicator strip scrolls the terminal as usual.
+        sessionView?.session?.terminalView.scrollWheel(with: event)
     }
 
     override func updateTrackingAreas() {
@@ -48,12 +150,32 @@ final class BlockOverlayView: NSView {
 
     override func mouseMoved(with event: NSEvent) {
         lastMouseLocation = convert(event.locationInWindow, from: nil)
+        updateIndicatorHover()
         refreshHover()
     }
 
     override func mouseExited(with event: NSEvent) {
         lastMouseLocation = nil
+        updateIndicatorHover()
         refreshHover()
+    }
+
+    private func updateIndicatorHover() {
+        let over: Bool
+        if let point = lastMouseLocation, let track = indicatorTrack() {
+            over = NSRect(x: track.maxX - 14, y: track.minY, width: 16, height: track.height).contains(point)
+        } else {
+            over = false
+        }
+        guard over != hoveringIndicator else { return }
+        hoveringIndicator = over
+        if over {
+            indicatorFade?.invalidate()
+            indicatorAlpha = 1
+        } else {
+            scheduleIndicatorFade()
+        }
+        needsDisplay = true
     }
 
     // MARK: - Geometry
@@ -135,6 +257,7 @@ final class BlockOverlayView: NSView {
                        reserveForActions: block.id == hoveredBlockID)
         }
         NSGraphicsContext.restoreGraphicsState()
+        drawScrollIndicator(palette: palette)
     }
 
     private func drawHeader(_ block: Block, in rect: NSRect, palette: ChromePalette, font: NSFont,
