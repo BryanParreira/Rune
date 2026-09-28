@@ -40,3 +40,45 @@ final class FileListingTests: XCTestCase {
         XCTAssertEqual(FileListing.shellQuoted("/tmp/it's"), "'/tmp/it'\\''s'")
     }
 }
+
+final class GitStatusTests: XCTestCase {
+    private func data(_ entries: [String]) -> Data {
+        Data(entries.joined(separator: "\0").utf8) + Data([0])
+    }
+
+    func testParsesStatesAndAggregatesFolders() {
+        let porcelain = data([
+            " M Sources/App/main.swift",
+            "?? docs/new.md",
+            "A  RuneKit/New.swift",
+            " D old.txt",
+            "R  Sources/B.swift", "Sources/A.swift",
+            "UU conflict.txt",
+            "!! build/",
+        ])
+        let s = GitStatusSnapshot.parse(porcelain: porcelain, repoRoot: "/repo")
+        XCTAssertEqual(s.state(for: "/repo/Sources/App/main.swift"), .modified)
+        XCTAssertEqual(s.state(for: "/repo/docs/new.md"), .untracked)
+        XCTAssertEqual(s.state(for: "/repo/RuneKit/New.swift"), .added)
+        XCTAssertEqual(s.state(for: "/repo/old.txt"), .deleted)
+        XCTAssertEqual(s.state(for: "/repo/Sources/B.swift"), .renamed)
+        XCTAssertNil(s.state(for: "/repo/Sources/A.swift"), "rename source is not a separate entry")
+        XCTAssertEqual(s.state(for: "/repo/conflict.txt"), .conflicted)
+        XCTAssertNil(s.state(for: "/repo/build"), "ignored files are skipped")
+        // Folders inherit the most important state inside them.
+        XCTAssertEqual(s.state(for: "/repo/Sources/App"), .modified)
+        XCTAssertEqual(s.state(for: "/repo/Sources"), .modified)
+        XCTAssertEqual(s.state(for: "/repo/docs"), .untracked)
+        XCTAssertEqual(s.state(for: "/repo"), .conflicted)
+    }
+
+    func testUntrackedFolderEntry() {
+        let s = GitStatusSnapshot.parse(porcelain: data(["?? newdir/"]), repoRoot: "/r")
+        XCTAssertEqual(s.state(for: "/r/newdir"), .untracked)
+    }
+
+    func testBadges() {
+        XCTAssertEqual(GitFileState.modified.badge, "M")
+        XCTAssertEqual(GitFileState.untracked.badge, "U")
+    }
+}

@@ -21,6 +21,19 @@ public enum GitInfo {
         return String(head.prefix(7))
     }
 
+    /// Top-level folder of the repository containing `path` (the folder that holds `.git`).
+    public static func repositoryRoot(for path: String) -> String? {
+        let fm = FileManager.default
+        var dir = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+        for _ in 0..<64 {
+            if fm.fileExists(atPath: dir.appendingPathComponent(".git").path) { return dir.path }
+            let parent = dir.deletingLastPathComponent()
+            if parent.path == dir.path { return nil }
+            dir = parent
+        }
+        return nil
+    }
+
     /// Walks up from `path` looking for `.git` (a directory, or a file pointing elsewhere for worktrees).
     static func findGitDirectory(from path: String) -> URL? {
         let fm = FileManager.default

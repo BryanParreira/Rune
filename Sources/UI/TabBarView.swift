@@ -14,6 +14,7 @@ final class TabsModel: ObservableObject {
 
     @Published var sidebarVisible = false
     var onToggleSidebar: () -> Void = {}
+    var onOpenSettings: () -> Void = {}
     var onSelect: (UUID) -> Void = { _ in }
     var onClose: (UUID) -> Void = { _ in }
     var onNew: () -> Void = {}
@@ -60,6 +61,8 @@ struct TabBarView: View {
             }
             .padding(.leading, 8)
             Spacer(minLength: 0)
+            IconButton(systemName: "gearshape", size: 13, palette: model.palette, help: "Settings (⌘,)", action: model.onOpenSettings)
+                .padding(.trailing, 10)
         }
         .padding(.leading, leadingInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

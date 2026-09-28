@@ -38,7 +38,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private let fileTree = FileTreeModel()
     private var fileTreeHost: NSHostingView<FileTreeView>?
     private var fileTreeWidth: NSLayoutConstraint?
-    static let fileTreeDefaultWidth: CGFloat = 250
+    static let fileTreeWidthRange: ClosedRange<CGFloat> = 180...520
+    private static let fileTreeWidthKey = "RuneFileTreeWidth"
+    /// Last width the user dragged the file tree to (a per-Mac UI preference, not config).
+    private var fileTreePreferredWidth: CGFloat = {
+        let saved = CGFloat(UserDefaults.standard.double(forKey: "RuneFileTreeWidth"))
+        return saved > 0 ? min(max(saved, 180), 520) : 260
+    }()
 
     /// Called after the window closes so the app can drop its reference.
     var onClose: ((MainWindowController) -> Void)?
@@ -97,7 +103,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         tabBar.safeAreaRegions = []
         banner.safeAreaRegions = []
 
-        let treeHost = NSHostingView(rootView: FileTreeView(model: fileTree, palette: ChromePalette(theme: configStore.snapshot.theme)))
+        let treeHost = NSHostingView(rootView: makeFileTreeView(palette: ChromePalette(theme: configStore.snapshot.theme)))
         treeHost.safeAreaRegions = []
         treeHost.isHidden = true
         fileTreeHost = treeHost
@@ -139,6 +145,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         tabsModel.onClose = { [weak self] id in self?.closeTab(id: id) }
         tabsModel.onNew = { [weak self] in self?.newTab(nil) }
         tabsModel.onToggleSidebar = { [weak self] in self?.toggleFileTree(nil) }
+        tabsModel.onOpenSettings = { [weak self] in self?.openSettingsTab() }
         fileTree.onInsertPath = { [weak self] path in
             guard let session = self?.fileTreeSession else { return }
             let quoted = FileListing.shellQuoted(path)
@@ -168,7 +175,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             warningModel.warnings = snapshot.warnings
             warningModel.dismissed = false
         }
-        fileTreeHost?.rootView = FileTreeView(model: fileTree, palette: palette)
+        fileTreeHost?.rootView = makeFileTreeView(palette: palette)
         window?.backgroundColor = palette.background
         window?.contentView?.layer?.backgroundColor = palette.background.cgColor
         for tab in tabs {
@@ -308,6 +315,23 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         select(index: index)
     }
 
+    private func makeFileTreeView(palette: ChromePalette) -> FileTreeView {
+        FileTreeView(
+            model: fileTree,
+            palette: palette,
+            onResize: { [weak self] x in
+                guard let self, let width = self.fileTreeWidth, let host = self.fileTreeHost, !host.isHidden else { return }
+                let clamped = min(max(x, Self.fileTreeWidthRange.lowerBound), Self.fileTreeWidthRange.upperBound)
+                width.constant = clamped
+                self.fileTreePreferredWidth = clamped
+            },
+            onResizeEnded: { [weak self] in
+                guard let self else { return }
+                UserDefaults.standard.set(Double(self.fileTreePreferredWidth), forKey: Self.fileTreeWidthKey)
+            }
+        )
+    }
+
     @objc func toggleFileTree(_ sender: Any?) {
         guard let host = fileTreeHost, let width = fileTreeWidth else { return }
         let show = host.isHidden
@@ -317,7 +341,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.18
             context.allowsImplicitAnimation = true
-            width.animator().constant = show ? Self.fileTreeDefaultWidth : 0
+            width.animator().constant = show ? fileTreePreferredWidth : 0
             window?.contentView?.layoutSubtreeIfNeeded()
         }, completionHandler: { [weak self] in
             if !show { host.isHidden = true }
@@ -327,7 +351,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         if ProcessInfo.processInfo.environment["RUNE_DEBUG_SCRIPT"] != nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
                 guard let self else { return }
-                print("TREE visible=\(!host.isHidden) width=\(host.frame.width) root=\(self.fileTree.root ?? "-") rows=\(self.fileTree.rows.count) first=\(self.fileTree.rows.prefix(6).map(\.entry.name))")
+                print("TREE visible=\(!host.isHidden) width=\(host.frame.width) root=\(self.fileTree.root ?? "-") rows=\(self.fileTree.rows.count) first=\(self.fileTree.rows.prefix(6).map(\.entry.name)) git=\(self.fileTree.git.states.count)")
                 fflush(stdout)
             }
         }
