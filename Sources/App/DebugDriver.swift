@@ -26,6 +26,8 @@ enum DebugDriver {
             case "@clear": session.clearScreen()
             case "@wait": break
             case "@settings": NSApp.sendAction(#selector(AppDelegate.openSettings(_:)), to: nil, from: nil)
+            case let question where question.hasPrefix("@ai:"):
+                session.askAI(String(question.dropFirst(4)))
             case let typed where typed.hasPrefix("@type:"):
                 let editor = session.view.inputArea.editor
                 editor.insertText(String(typed.dropFirst(6)), replacementRange: editor.selectedRange())

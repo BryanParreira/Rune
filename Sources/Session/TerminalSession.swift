@@ -74,6 +74,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     var onChange: (() -> Void)?
     /// The shell exited and the tab should close.
     var onRequestClose: (() -> Void)?
+    /// Open a new tab with this text pre-filled in the input editor (not run).
+    var onRequestNewTab: ((String?) -> Void)?
 
     private var snapshot: ConfigSnapshot
     private var startedAt = Date()
@@ -279,6 +281,56 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         terminalView.sendToShell([3])
     }
 
+    // MARK: - AI
+
+    /// Sends `request` to the selected local model. The selected block (⌘↑) or, if allowed in
+    /// settings, the most recent block goes along as context.
+    func askAI(_ request: String, about explicitBlock: Block? = nil) {
+        let trimmed = request.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let service = AIService.shared
+        let conversation = view.conversation
+        view.dismissWelcomeForSession()
+
+        guard service.isReady, let model = service.activeModel else {
+            conversation.showSetup(prompt: trimmed)
+            service.refresh { [weak self] in
+                // If Ollama turned out to be ready, send right away.
+                if AIService.shared.isReady, self?.view.conversation.state == .setup {
+                    self?.askAI(trimmed, about: explicitBlock)
+                }
+            }
+            return
+        }
+
+        var block = explicitBlock
+        if block == nil, let id = selectedBlockID { block = tracker.block(id: id) }
+        if block == nil, config.aiIncludeBlockContext { block = tracker.blocks.last { $0.state == .finished } }
+
+        let context = AIContext(
+            request: trimmed,
+            cwd: currentDirectory,
+            osVersion: "macOS " + ProcessInfo.processInfo.operatingSystemVersionString,
+            shell: (ProcessInfo.processInfo.environment["SHELL"] as NSString?)?.lastPathComponent ?? "zsh",
+            blockCommand: block.map { commandText(of: $0) },
+            blockOutput: block.map { outputText(of: $0) },
+            blockExitCode: block?.exitCode
+        )
+        let label = block.map { b -> String in
+            let name = commandText(of: b).components(separatedBy: "\n").first ?? ""
+            let short = name.count > 28 ? String(name.prefix(27)) + "…" : name
+            return b.isFailed ? "\(short) (exit \(b.exitCode ?? 1))" : short
+        }
+        conversation.ask(context, model: model, client: service.client,
+                         disableThinking: service.activeModelInfo?.supportsThinking ?? false,
+                         contextLabel: label)
+    }
+
+    /// "Explain this error" for a failed block.
+    func explain(_ block: Block) {
+        askAI(AIPrompt.explainErrorRequest(command: commandText(of: block)), about: block)
+    }
+
     // MARK: - Blocks
 
     func selectAdjacentBlock(previous: Bool) {
@@ -351,6 +403,15 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         let rerunItem = BlockMenuItem(title: "Re-run Command", block: block) { [weak self] in self?.rerun($0) }
         rerunItem.isEnabled = mode == .editor
         menu.addItem(rerunItem)
+        if block.isFailed {
+            menu.addItem(BlockMenuItem(title: "Explain This Error", block: block) { [weak self] in self?.explain($0) })
+        }
+        menu.addItem(BlockMenuItem(title: "Ask AI About This Block…", block: block) { [weak self] b in
+            guard let self else { return }
+            self.selectedBlockID = b.id
+            self.view.blocksDidChange()
+            self.view.inputArea.focusEditor()
+        })
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: ""))
         return menu

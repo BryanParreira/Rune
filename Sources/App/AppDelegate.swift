@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let store = ConfigStore()
         configStore = store
         ConfigStore.current = store
+        AIService.shared.start(store: store)
         didFinishLaunching = true
 
         let initial = pendingDirectories.isEmpty ? [Self.launchDirectory()] : pendingDirectories

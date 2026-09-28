@@ -188,6 +188,7 @@ final class BlockOverlayView: NSView {
         }
         actionBar.palette = palette
         actionBar.canRerun = session.mode == .editor
+        actionBar.showsExplain = hovered.block.isFailed
         let size = actionBar.fittingSize
         let right = bounds.width - session.terminalView.frame.minX + 6
         let y = max(hovered.headerRect.minY, session.terminalView.frame.minY)
@@ -202,22 +203,25 @@ final class BlockOverlayView: NSView {
         case .copyCommand: session.copyCommand(block)
         case .copyOutput: session.copyOutput(block)
         case .rerun: session.rerun(block)
+        case .explain: session.explain(block)
         }
     }
 }
 
 /// Small floating bar with block actions.
 final class BlockActionBar: NSView {
-    enum Action { case copyCommand, copyOutput, rerun }
+    enum Action { case copyCommand, copyOutput, rerun, explain }
 
     var onAction: ((Action) -> Void)?
     var palette: ChromePalette? { didSet { restyle() } }
     var canRerun = true { didSet { rerunButton.isEnabled = canRerun } }
+    var showsExplain = false { didSet { explainButton.isHidden = !showsExplain } }
 
     private let stack = NSStackView()
     private lazy var copyCommandButton = makeButton("text.cursor", "Copy command", .copyCommand)
     private lazy var copyOutputButton = makeButton("doc.on.doc", "Copy output", .copyOutput)
     private lazy var rerunButton = makeButton("arrow.clockwise", "Re-run", .rerun)
+    private lazy var explainButton = makeButton("sparkle", "Explain this error with AI", .explain)
 
     static let height: CGFloat = 24
 
@@ -230,7 +234,8 @@ final class BlockActionBar: NSView {
         stack.spacing = 0
         stack.edgeInsets = NSEdgeInsets(top: 0, left: 2, bottom: 0, right: 2)
         stack.translatesAutoresizingMaskIntoConstraints = false
-        [copyCommandButton, copyOutputButton, rerunButton].forEach(stack.addArrangedSubview)
+        [explainButton, copyCommandButton, copyOutputButton, rerunButton].forEach(stack.addArrangedSubview)
+        explainButton.isHidden = true
         addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),

@@ -264,7 +264,34 @@ extension InputAreaView: CommandTextViewDelegate {
         chipsModel.completions = result.isUnique ? [] : result.candidates
     }
 
+    func commandTextViewAskAI(_ view: CommandTextView) {
+        guard let sessionView, let session = sessionView.session else { return }
+        let text = editor.string
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // ⌘↵ on an empty line runs a finished suggestion, like pressing its Run button.
+            if sessionView.conversation.state == .done, let command = sessionView.conversation.command {
+                sessionView.conversation.dismiss()
+                session.submit(command)
+            }
+            return
+        }
+        session.askAI(text)
+        editor.string = ""
+        textDidChange(Notification(name: NSText.didChangeNotification))
+    }
+
+    func setText(_ text: String) {
+        editor.string = text
+        editor.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+        textDidChange(Notification(name: NSText.didChangeNotification))
+        focusEditor()
+    }
+
     func commandTextViewCancel(_ view: CommandTextView) {
+        if let conversation = sessionView?.conversation, conversation.isVisible {
+            conversation.isActive ? conversation.stop() : conversation.dismiss()
+            return
+        }
         if !chipsModel.completions.isEmpty {
             chipsModel.completions = []
         } else {
@@ -302,6 +329,7 @@ final class InputChromeModel: ObservableObject {
 
 struct ContextChipsRow: View {
     @ObservedObject var model: InputChromeModel
+    @ObservedObject var ai = AIService.shared
 
     var body: some View {
         HStack(spacing: 8) {
@@ -309,8 +337,36 @@ struct ContextChipsRow: View {
             if let branch = model.branch {
                 ContextChip(symbol: "arrow.triangle.branch", text: branch, palette: model.palette, size: model.monoFontSize - 1)
             }
+            if let active = ai.activeModel {
+                Button(action: showModelMenu) {
+                    ContextChip(symbol: "sparkle", text: active, palette: model.palette, size: model.monoFontSize - 1)
+                }
+                .buttonStyle(.plain)
+                .help("AI model (⌘↵ to ask). Click to switch.")
+                if !ai.endpoint.isLocal {
+                    ContextChip(symbol: "exclamationmark.triangle", text: "remote AI: \(ai.endpoint.url.host ?? "")", palette: model.palette, size: model.monoFontSize - 1)
+                        .help("AI requests go to \(ai.endpoint.url.absoluteString), not this Mac.")
+                }
+            }
         }
         .fixedSize()
+    }
+
+    private func showModelMenu() {
+        let menu = NSMenu()
+        for installed in ai.status.models {
+            let title = [installed.name, installed.displaySize.map { "  \($0)" }].compactMap { $0 }.joined()
+            let item = ClosureMenuItem(title: title) { AIService.shared.select(model: installed.name) }
+            item.state = installed.name == ai.activeModel ? .on : .off
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        menu.addItem(ClosureMenuItem(title: "Refresh Models") { AIService.shared.refresh() })
+        menu.addItem(ClosureMenuItem(title: "AI Settings…") {
+            NSApp.sendAction(#selector(AppDelegate.openSettings(_:)), to: nil, from: nil)
+        })
+        let location = NSEvent.mouseLocation
+        menu.popUp(positioning: nil, at: NSPoint(x: location.x - 10, y: location.y + 10), in: nil)
     }
 }
 
@@ -351,9 +407,9 @@ struct InputHintLine: View {
             } else {
                 switch model.hint {
                 case .idle:
-                    hint("↑ history   ⇧↵ new line   ⇥ complete   ⌘↑ blocks")
+                    hint("↑ history   ⌘↵ ask AI   ⇧↵ new line   ⇥ complete   ⌘↑ blocks")
                 case .typing:
-                    hint("↵ run   → accept suggestion   ⇧↵ new line   ⇥ complete")
+                    hint("↵ run   ⌘↵ ask AI   → accept suggestion   ⇧↵ new line")
                 case .running:
                     hint("⌃C interrupt   keystrokes go to the running program")
                 }

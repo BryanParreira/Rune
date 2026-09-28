@@ -154,6 +154,14 @@ public final class CommandCatalog: @unchecked Sendable {
 
     private let lock = NSLock()
     private var executables: Set<String> = []
+    private var _shellPath: String?
+
+    /// The PATH the user's shell reported (nil until the integration has run).
+    public var shellPath: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _shellPath
+    }
     private var shellNames: Set<String> = []
 
     public init() {}
@@ -172,6 +180,7 @@ public final class CommandCatalog: @unchecked Sendable {
         lock.lock()
         if !(onlyIfEmpty && !executables.isEmpty) {
             executables = names
+            if !onlyIfEmpty { _shellPath = path }
         }
         lock.unlock()
     }

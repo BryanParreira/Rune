@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import RuneKit
 import SwiftUI
 
@@ -15,6 +16,10 @@ final class SessionView: NSView {
     private let welcomeHost: NSHostingView<WelcomePanel>
     private let stack = NSStackView()
     private var welcomeDismissed = false
+    let conversation = AIConversation()
+    private let aiHost = NSHostingView(rootView: AnyView(EmptyView()))
+    private var cancellables: Set<AnyCancellable> = []
+    private var snapshot: ConfigSnapshot?
 
     init(terminalView: RuneTerminalView) {
         self.terminalView = terminalView
@@ -41,7 +46,15 @@ final class SessionView: NSView {
         stack.distribution = .fill
         stack.detachesHiddenViews = true
         stack.translatesAutoresizingMaskIntoConstraints = false
-        for view in [terminalContainer, welcomeHost, inputArea] as [NSView] {
+        aiHost.sizingOptions = [.intrinsicContentSize]
+        aiHost.safeAreaRegions = []
+        aiHost.isHidden = true
+        conversation.$state
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.updateVisibility() } }
+            .store(in: &cancellables)
+
+        for view in [terminalContainer, welcomeHost, aiHost, inputArea] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             stack.addArrangedSubview(view)
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
@@ -49,6 +62,7 @@ final class SessionView: NSView {
         terminalContainer.setContentHuggingPriority(.defaultLow, for: .vertical)
         terminalContainer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         welcomeHost.setContentHuggingPriority(.required, for: .vertical)
+        aiHost.setContentHuggingPriority(.required, for: .vertical)
         inputArea.setContentHuggingPriority(.required, for: .vertical)
         inputArea.setContentCompressionResistancePriority(.required, for: .vertical)
 
@@ -71,6 +85,7 @@ final class SessionView: NSView {
     // MARK: - Updates from the session
 
     func apply(_ snapshot: ConfigSnapshot) {
+        self.snapshot = snapshot
         let palette = ChromePalette(theme: snapshot.theme)
         let config = snapshot.config
         wantsLayer = true
@@ -83,6 +98,7 @@ final class SessionView: NSView {
         inputArea.apply(snapshot: snapshot, palette: palette)
         overlay.palette = palette
         overlay.font = snapshot.font
+        rebuildAIPanel()
         updateVisibility()
         blocksDidChange()
     }
@@ -114,7 +130,9 @@ final class SessionView: NSView {
         let mode = session.mode
         inputArea.isHidden = !mode.editorVisible
         inputArea.setRunning(mode == .runningCommand, command: session.tracker.blocks.last?.command)
-        welcomeHost.isHidden = !(mode == .editor && session.config.showWelcome && !welcomeDismissed)
+        let aiVisible = conversation.isVisible && mode.editorVisible
+        aiHost.isHidden = !aiVisible
+        welcomeHost.isHidden = aiVisible || !(mode == .editor && session.config.showWelcome && !welcomeDismissed)
         overlay.isHidden = mode == .fullscreenApp
         contextDidChange()
     }
@@ -127,6 +145,32 @@ final class SessionView: NSView {
         } else if window.firstResponder !== terminalView {
             window.makeFirstResponder(terminalView)
         }
+    }
+
+    private func rebuildAIPanel() {
+        guard let snapshot else { return }
+        let palette = ChromePalette(theme: snapshot.theme)
+        aiHost.rootView = AnyView(AIPanel(
+            conversation: conversation,
+            palette: palette,
+            fontSize: CGFloat(snapshot.config.fontSize),
+            horizontalPadding: CGFloat(snapshot.config.paddingX),
+            onRun: { [weak self] command in
+                self?.conversation.dismiss()
+                self?.session?.submit(command)
+            },
+            onEdit: { [weak self] command in
+                self?.conversation.dismiss()
+                self?.inputArea.setText(command)
+            },
+            onPullModel: { [weak self] model in
+                self?.conversation.dismiss()
+                self?.session?.onRequestNewTab?("ollama pull \(model)")
+            },
+            onOpenSettings: {
+                NSApp.sendAction(#selector(AppDelegate.openSettings(_:)), to: nil, from: nil)
+            }
+        ))
     }
 
     /// Bytes typed into the terminal view while the editor owns input.

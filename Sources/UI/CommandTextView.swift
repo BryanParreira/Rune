@@ -10,6 +10,7 @@ protocol CommandTextViewDelegate: AnyObject {
     func commandTextViewInterrupt(_ view: CommandTextView)
     func commandTextViewEndOfInput(_ view: CommandTextView)
     func commandTextViewClearScreen(_ view: CommandTextView)
+    func commandTextViewAskAI(_ view: CommandTextView)
 }
 
 /// Native multi-line command editor: Enter runs, Shift-Enter inserts a newline,
@@ -106,7 +107,9 @@ final class CommandTextView: NSTextView {
 
         switch event.keyCode {
         case 36, 76: // Return, keypad Enter
-            if mods.contains(.shift) || mods.contains(.option) {
+            if mods == .command {
+                commandDelegate?.commandTextViewAskAI(self)
+            } else if mods.contains(.shift) || mods.contains(.option) {
                 insertNewlineIgnoringFieldEditor(nil)
             } else if plain {
                 commandDelegate?.commandTextViewSubmit(self)

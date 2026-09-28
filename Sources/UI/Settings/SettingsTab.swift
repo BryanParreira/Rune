@@ -33,6 +33,7 @@ final class SettingsModel: ObservableObject {
         case appearance = "Appearance"
         case terminal = "Terminal"
         case input = "Input"
+        case ai = "AI"
         case keyboard = "Keyboard shortcuts"
         case sync = "Sync & machines"
         case about = "About"
@@ -147,6 +148,8 @@ enum SettingsIndex {
             return ["Shell", "Show shell prompt", "PS1", "Starship", "Scrollback", "Option key", "Meta"]
         case .input:
             return ["New session panel", "welcome", "editor", "history", "completion", "Type commands in", "zsh prompt", "autosuggestions", "syntax highlighting", "plugins"]
+        case .ai:
+            return ["AI", "Ollama", "Model", "local", "LLM", "Endpoint", "context", "Explain"]
         case .keyboard:
             return KeyboardShortcut.all.map(\.action) + ["shortcuts", "keybindings"]
         case .sync:
@@ -167,6 +170,8 @@ struct KeyboardShortcut: Identifiable {
         .init(action: "Insert new line", keys: ["⇧", "↵"]),
         .init(action: "Previous / next command in history", keys: ["↑", "↓"]),
         .init(action: "Complete file or folder", keys: ["⇥"]),
+        .init(action: "Ask AI (local model)", keys: ["⌘", "↵"]),
+        .init(action: "Stop / close AI answer", keys: ["esc"]),
         .init(action: "Clear input / interrupt running command", keys: ["⌃", "C"]),
         .init(action: "Select previous block", keys: ["⌘", "↑"]),
         .init(action: "Select next block", keys: ["⌘", "↓"]),
@@ -243,6 +248,7 @@ struct SettingsView: View {
         case .appearance: AppearancePage(model: model)
         case .terminal: TerminalPage(model: model)
         case .input: InputPage(model: model)
+        case .ai: AIPage(model: model)
         case .keyboard: KeyboardPage(model: model)
         case .sync: SyncPage(model: model)
         case .about: AboutPage(model: model)
@@ -690,6 +696,97 @@ struct InputPage: View {
             SettingRow(model: model, title: "Tab completion", detail: "Completes files and folders relative to the current directory.") {
                 EmptyView()
             }
+        }
+    }
+}
+
+struct AIPage: View {
+    @ObservedObject var model: SettingsModel
+    @ObservedObject private var ai = AIService.shared
+    @State private var endpointDraft = ""
+
+    var body: some View {
+        let p = model.palette
+        VStack(alignment: .leading, spacing: 0) {
+            PageTitle(text: "AI", palette: p)
+            Text("Rune talks to Ollama on your own Mac. Press ⌘↵ in the input to ask; suggested commands always wait for you to press Run. AI is optional: without Ollama, Rune is a complete terminal.")
+                .font(.system(size: 12))
+                .foregroundColor(Color(nsColor: p.secondary))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 18)
+
+            SettingRow(model: model, title: "Status", detail: statusDetail) {
+                HStack(spacing: 14) {
+                    if ai.isChecking { ProgressView().controlSize(.small) }
+                    statusAction(p)
+                    LinkButton(title: "Refresh", palette: p) { ai.refresh(); model.refreshLists() }
+                }
+            }
+
+            if let notice = ai.fallbackNotice {
+                SettingsNotice(text: notice, palette: p)
+            }
+
+            SettingRow(model: model, title: "Model", key: "aiModel",
+                       detail: ai.status.models.isEmpty ? "Models installed on this Mac appear here." : "Installed on this Mac. Your choice is saved in config.json.") {
+                if ai.status.models.isEmpty {
+                    Text("None").font(.system(size: 13)).foregroundColor(Color(nsColor: p.hint))
+                } else {
+                    DropdownField(
+                        selection: Binding(get: { ai.activeModel ?? "" }, set: { ai.select(model: $0) }),
+                        options: ai.status.models.map(\.name),
+                        label: { name in
+                            let info = ai.status.models.first { $0.name == name }?.displaySize
+                            return info.map { "\(name)   \($0)" } ?? name
+                        },
+                        palette: p, width: 280)
+                }
+            }
+
+            SettingRow(model: model, title: "Send last command as context", key: "aiIncludeBlockContext",
+                       detail: "Includes the most recent block's command and the end of its output (at most 4,000 characters). A block you select with ⌘↑ is always included.") {
+                SwitchControl(isOn: model.binding("aiIncludeBlockContext", { $0.aiIncludeBlockContext }))
+            }
+
+            SettingsDivider(palette: p)
+
+            SettingRow(model: model, title: "Ollama server", key: "ollamaEndpoint",
+                       detail: "Leave empty to use $OLLAMA_HOST or http://localhost:11434. Currently: \(ai.endpoint.url.absoluteString)\(ai.endpoint.isLocal ? " (this Mac)" : " — requests leave this Mac").") {
+                TextField("http://localhost:11434", text: $endpointDraft, onCommit: {
+                    let value = endpointDraft.trimmingCharacters(in: .whitespaces)
+                    model.set("ollamaEndpoint", value.isEmpty ? nil : value)
+                })
+                .textFieldStyle(.plain)
+                .font(.system(size: 13, design: .monospaced))
+                .padding(.horizontal, 8)
+                .frame(width: 240, height: 28)
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(nsColor: p.foreground.withAlphaComponent(0.16)), lineWidth: 1))
+                .onAppear { endpointDraft = model.config.ollamaEndpoint ?? "" }
+            }
+        }
+        .onAppear { ai.refresh() }
+    }
+
+    private var statusDetail: String {
+        switch ai.status {
+        case .ready(let models): return "Running · \(models.count) model\(models.count == 1 ? "" : "s") installed"
+        case .noModels: return "Running, but no models are installed yet."
+        case .installedNotRunning(let models): return "Installed but not running" + (models.isEmpty ? "." : " · on disk: \(models.joined(separator: ", "))")
+        case .notInstalled: return "Ollama isn't installed on this Mac."
+        case .unreachable(let url): return "Can't reach \(url)."
+        }
+    }
+
+    @ViewBuilder
+    private func statusAction(_ p: ChromePalette) -> some View {
+        switch ai.status {
+        case .notInstalled: LinkButton(title: "Download Ollama", palette: p) { ai.openDownloadPage() }
+        case .installedNotRunning: LinkButton(title: "Start Ollama", palette: p) { ai.startOllama() }
+        case .noModels:
+            LinkButton(title: "Pull \(ModelSelection.suggestedModel)", palette: p) {
+                NSApp.sendAction(#selector(MainWindowController.pullSuggestedModel(_:)), to: nil, from: nil)
+            }
+        default: EmptyView()
         }
     }
 }

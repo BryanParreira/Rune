@@ -155,9 +155,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         selectedSession ?? tabs.compactMap { $0 as? TerminalSession }.last
     }
 
-    func addTab(directory: String) {
+    func addTab(directory: String, prefill: String? = nil) {
         let session = TerminalSession(snapshot: configStore.snapshot, directory: directory)
         session.onChange = { [weak self] in self?.refreshTabs() }
+        session.onRequestNewTab = { [weak self, weak session] text in
+            self?.addTab(directory: session?.currentDirectory ?? NSHomeDirectory(), prefill: text)
+        }
         session.onRequestClose = { [weak self, weak session] in
             guard let self, let session else { return }
             self.closeTab(id: session.id)
@@ -168,6 +171,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         contentArea.layoutSubtreeIfNeeded()
         session.start()
         session.focus()
+        if let prefill { session.view.inputArea.setText(prefill) }
         #if DEBUG
         if tabs.count == 1 { DebugDriver.runIfRequested(session: session) }
         #endif
@@ -248,6 +252,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     @objc func openSettings(_ sender: Any?) {
         openSettingsTab()
+    }
+
+    /// Opens a terminal tab with `ollama pull <suggested>` typed in (the user presses Enter).
+    @objc func pullSuggestedModel(_ sender: Any?) {
+        addTab(directory: directorySource?.currentDirectory ?? NSHomeDirectory(),
+               prefill: "ollama pull \(ModelSelection.suggestedModel)")
     }
 
     @objc func selectTabByNumber(_ sender: NSMenuItem) {
