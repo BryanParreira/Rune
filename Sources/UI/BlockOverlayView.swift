@@ -144,7 +144,7 @@ final class BlockOverlayView: NSView {
 
         // Context: cwd (and host if remote later).
         let context = TabTitle.abbreviate(path: block.cwd, home: NSHomeDirectory())
-        if !context.isEmpty, !session.config.honorPrompt {
+        if !context.isEmpty, !session.config.honorPrompt, !session.typeInShell {
             let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: palette.hint]
             let size = (context as NSString).size(withAttributes: attrs)
             let origin = NSPoint(x: left, y: rect.midY - size.height / 2)

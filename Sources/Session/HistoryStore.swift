@@ -1,6 +1,19 @@
 import Foundation
 import RuneKit
 
+extension CommandCatalog {
+    /// Command names known to the app, shared by every tab. Seeded from the app's own PATH;
+    /// replaced with the shell's real PATH once the integration reports it.
+    static let shared: CommandCatalog = {
+        let catalog = CommandCatalog()
+        let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        DispatchQueue.global(qos: .utility).async {
+            catalog.loadExecutables(path: path, onlyIfEmpty: true)
+        }
+        return catalog
+    }()
+}
+
 /// Command history shared by every tab: the user's zsh history plus commands run in Rune.
 final class HistoryStore {
     static let shared = HistoryStore()

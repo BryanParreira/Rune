@@ -104,6 +104,7 @@ final class InputAreaView: NSView, NSTextViewDelegate {
         chipsModel.palette = palette
         chipsModel.monoFontSize = CGFloat(config.fontSize)
         editor.configure(font: snapshot.font, palette: palette)
+        refreshHighlighting()
         updateEditorHeight()
         needsDisplay = true
     }
@@ -152,7 +153,51 @@ final class InputAreaView: NSView, NSTextViewDelegate {
         chipsModel.completions = []
         chipsModel.hint = editor.string.isEmpty ? .idle : .typing
         sessionView?.session?.resetHistoryNavigation()
+        refreshHighlighting()
+        updateSuggestion()
         updateEditorHeight()
+    }
+
+    func textViewDidChangeSelection(_ notification: Notification) {
+        updateSuggestion()
+    }
+
+    /// Colors the command line like zsh-syntax-highlighting.
+    func refreshHighlighting() {
+        guard let palette, let storage = editor.textStorage, let font = editor.font else { return }
+        let text = editor.string
+        let full = NSRange(location: 0, length: (text as NSString).length)
+        let tokens = CommandHighlighter.tokenize(text) { CommandCatalog.shared.contains($0) }
+        storage.beginEditing()
+        storage.setAttributes([.font: font, .foregroundColor: palette.text], range: full)
+        for token in tokens where NSMaxRange(token.range) <= full.length {
+            let color: NSColor
+            switch token.kind {
+            case .command: color = palette.success
+            case .unknownCommand: color = palette.error
+            case .argument: continue
+            case .option: color = palette.ansiCyan
+            case .string: color = palette.ansiYellow
+            case .variable: color = palette.ansiMagenta
+            case .operatorToken: color = palette.secondary
+            case .comment: color = palette.hint
+            }
+            storage.addAttribute(.foregroundColor, value: color, range: token.range)
+        }
+        storage.endEditing()
+    }
+
+    /// History-based suggestion shown in grey after the caret (like zsh-autosuggestions).
+    private func updateSuggestion() {
+        let text = editor.string
+        let atEnd = editor.selectedRange().length == 0 && editor.selectedRange().location == (text as NSString).length
+        guard atEnd, !running, !text.contains("\n"),
+              let match = HistoryStore.shared.history.suggestion(for: text)
+        else {
+            editor.suggestionSuffix = nil
+            return
+        }
+        editor.suggestionSuffix = String(match.dropFirst(text.count))
     }
 
     private func updateEditorHeight() {
@@ -198,6 +243,8 @@ extension InputAreaView: CommandTextViewDelegate {
 
     private func setEditorText(_ text: String) {
         editor.string = text
+        refreshHighlighting()
+        editor.suggestionSuffix = nil
         editor.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
         chipsModel.hint = text.isEmpty ? .idle : .typing
         updateEditorHeight()
@@ -306,7 +353,7 @@ struct InputHintLine: View {
                 case .idle:
                     hint("↑ history   ⇧↵ new line   ⇥ complete   ⌘↑ blocks")
                 case .typing:
-                    hint("↵ run   ⇧↵ new line   ⇥ complete")
+                    hint("↵ run   → accept suggestion   ⇧↵ new line   ⇥ complete")
                 case .running:
                     hint("⌃C interrupt   keystrokes go to the running program")
                 }

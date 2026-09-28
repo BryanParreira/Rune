@@ -98,6 +98,9 @@ public final class BlockTracker {
             pendingCommandText = text
             return false
 
+        case .shellNames, .shellPath:
+            return false
+
         case .promptStart:
             // A prompt above the previous block means the screen was cleared or reset.
             if let last = blocks.last, position.row < last.headerRow {

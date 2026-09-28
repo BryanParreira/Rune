@@ -86,6 +86,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     private var anchorLines: [Int: BufferLine] = [:]
     private var lastColumns = 0
     private var liveTimer: Timer?
+    /// Fixed per shell launch: the integration sets up the prompt for one style or the other.
+    private(set) var typeInShell = false
 
     private static let displayHost = HostIdentity.displayHostname()
     private static let userName = HostIdentity.userName()
@@ -167,8 +169,10 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
         var env = ShellEnvironment.build(inherited: ProcessInfo.processInfo.environment, currentDirectory: directory, appVersion: version)
 
+        typeInShell = config.inputMode == .shell
         if ShellResolver.isZsh(shell), let integrationDir = Self.zshIntegrationDirectory() {
-            ShellEnvironment.addZshIntegration(to: &env, integrationDirectory: integrationDir, honorPrompt: config.honorPrompt)
+            ShellEnvironment.addZshIntegration(to: &env, integrationDirectory: integrationDir,
+                                               honorPrompt: config.honorPrompt, typeInShell: typeInShell)
             integration = .pending
             let timeout = DispatchWorkItem { [weak self] in
                 guard let self, self.integration == .pending else { return }
@@ -400,6 +404,14 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
                 view.contextDidChange()
                 onChange?()
             }
+        case .shellNames(let names):
+            CommandCatalog.shared.setShellNames(Set(names))
+            view.inputArea.refreshHighlighting()
+        case .shellPath(let path):
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                CommandCatalog.shared.loadExecutables(path: path)
+                DispatchQueue.main.async { self?.view.inputArea.refreshHighlighting() }
+            }
         case .commandText, .integrationReady:
             break
         }
@@ -478,7 +490,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         let newMode = InputRouter.mode(
             integration: integration,
             alternateScreen: terminalView.getTerminal().isCurrentBufferAlternate,
-            commandRunning: running
+            commandRunning: running,
+            typeInShell: typeInShell
         )
         guard newMode != mode else { return }
         mode = newMode

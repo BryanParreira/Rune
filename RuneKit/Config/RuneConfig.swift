@@ -7,6 +7,14 @@ public enum CursorShape: String, CaseIterable, Sendable {
     case underline
 }
 
+/// Where commands are typed.
+public enum InputStyle: String, CaseIterable, Sendable {
+    /// Rune's own editor pinned to the bottom (history suggestions, highlighting, completion).
+    case editor
+    /// Directly at the shell prompt, so every zsh line-editor plugin works as usual.
+    case shell
+}
+
 /// Fully resolved Rune settings. Every field has a default, so a missing or
 /// partially invalid config file still produces a usable value.
 public struct RuneConfig: Equatable, Sendable {
@@ -24,6 +32,8 @@ public struct RuneConfig: Equatable, Sendable {
     public var showWelcome: Bool = true
     /// Show the shell's own prompt (PS1) in each block instead of Rune's context chips.
     public var honorPrompt: Bool = false
+    /// Rune editor, or type straight into zsh.
+    public var inputMode: InputStyle = .editor
     /// Explicit shell path. `nil` means use $SHELL / the account's login shell.
     public var shell: String?
     /// Folder (iCloud Drive, dotfiles repo, …) to read config/themes/workflows from.
@@ -37,7 +47,7 @@ public struct RuneConfig: Equatable, Sendable {
     /// (keys starting with `_` or `$` are allowed for comments / schema hints).
     public static let knownKeys: Set<String> = [
         "fontFamily", "fontSize", "lineHeight", "theme", "paddingX", "paddingY", "cursorStyle",
-        "cursorBlink", "scrollback", "optionAsMeta", "showWelcome", "honorPrompt", "shell",
+        "cursorBlink", "scrollback", "optionAsMeta", "showWelcome", "honorPrompt", "inputMode", "shell",
         "syncPath", "hosts",
     ]
 
@@ -56,6 +66,7 @@ public struct RuneConfig: Equatable, Sendable {
       "optionAsMeta": true,
       "showWelcome": true,
       "honorPrompt": false,
+      "inputMode": "editor",
       "shell": null,
       "syncPath": null,
       "hosts": {}
@@ -89,6 +100,13 @@ extension RuneConfig {
         if let v = reader.bool("optionAsMeta") { optionAsMeta = v }
         if let v = reader.bool("showWelcome") { showWelcome = v }
         if let v = reader.bool("honorPrompt") { honorPrompt = v }
+        if let v = reader.string("inputMode") {
+            if let style = InputStyle(rawValue: v.lowercased()) {
+                inputMode = style
+            } else {
+                reader.warnings.append("inputMode \"\(v)\" is not one of editor, shell; using editor")
+            }
+        }
         shell = reader.optionalString("shell")
         syncPath = reader.optionalString("syncPath")
 

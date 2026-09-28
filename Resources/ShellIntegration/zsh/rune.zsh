@@ -8,6 +8,7 @@
 (( ${+__rune_loaded} )) && return 0
 typeset -g __rune_loaded=1
 typeset -gi __rune_running=0
+typeset -gi __rune_reported_names=0
 
 autoload -Uz add-zsh-hook
 
@@ -41,6 +42,16 @@ __rune_precmd_first() {
 __rune_precmd_last() {
   __rune_encode "$PWD"
   builtin printf '\e]6973;cwd=%s\a' "$REPLY"
+
+  # Once the user's config has loaded, tell Rune which aliases and functions exist so its
+  # editor can highlight them as valid commands.
+  if (( ! __rune_reported_names )); then
+    __rune_reported_names=1
+    __rune_encode "${(kj: :)aliases} ${(kj: :)functions[(I)[^_]*]}"
+    builtin printf '\e]6973;names=%s\a' "$REPLY"
+    __rune_encode "$PATH"
+    builtin printf '\e]6973;path=%s\a' "$REPLY"
+  fi
 
   if [[ "$RUNE_HONOR_PROMPT" == 1 ]]; then
     if [[ "$PS1" != *'133;B'* ]]; then

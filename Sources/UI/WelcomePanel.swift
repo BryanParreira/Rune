@@ -31,12 +31,13 @@ struct WelcomePanel: View {
     var body: some View {
         let palette = model.palette
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "rectangle.and.pencil.and.ellipsis")
-                    .font(.system(size: model.fontSize + 2, weight: .semibold))
-                    .foregroundColor(Color(nsColor: palette.accent))
+            HStack(spacing: 9) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: model.fontSize + 11, height: model.fontSize + 11)
                 Text("New session")
-                    .font(.system(size: model.fontSize + 6, weight: .semibold))
+                    .font(.system(size: model.fontSize + 5, weight: .semibold))
                     .foregroundColor(Color(nsColor: palette.text))
                 Spacer()
                 Button(action: model.onDismiss) {
@@ -49,20 +50,20 @@ struct WelcomePanel: View {
                 .buttonStyle(.plain)
                 .help("Hide for this tab")
             }
-            .padding(.bottom, 10)
+            .padding(.bottom, 12)
 
             ForEach(shortcuts) { shortcut in
-                HStack(spacing: 8) {
+                HStack(spacing: 7) {
                     HStack(spacing: 3) {
                         ForEach(shortcut.keys, id: \.self) { key in
-                            Keycap(key: key, size: model.fontSize, palette: palette)
+                            Keycap(key: key, size: model.fontSize - 2, palette: palette)
                         }
                     }
                     Text(shortcut.text)
-                        .font(.system(size: model.fontSize))
+                        .font(.system(size: model.fontSize - 1))
                         .foregroundColor(Color(nsColor: palette.secondary))
                 }
-                .padding(.bottom, 8)
+                .padding(.bottom, 7)
             }
 
             HStack {
@@ -95,7 +96,7 @@ struct Keycap: View {
             .font(.system(size: size - 1, weight: .medium))
             .foregroundColor(Color(nsColor: palette.text))
             .frame(minWidth: size + 5, minHeight: size + 5)
-            .padding(.horizontal, key.count > 1 ? 4 : 0)
+            .padding(.horizontal, key.count > 1 ? 3 : 0)
             .background(
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
                     .fill(Color(nsColor: palette.surface3))

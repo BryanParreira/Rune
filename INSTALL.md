@@ -53,6 +53,12 @@ make dmg       # build/Rune.dmg to copy to other Macs
 
 Rune → Settings… (⌘,) edits the same file through a UI.
 
+Your zsh setup (oh-my-zsh, Starship, plugins) loads exactly as usual; Rune never edits your
+dotfiles. In the default Rune editor you get history suggestions (→ accepts) and syntax
+highlighting built in. To type straight at your own prompt with every zle plugin
+(zsh-autosuggestions, zsh-syntax-highlighting, vi-mode, fzf ⌃R…), set
+Settings → Input → "Type commands in" to "zsh prompt" (or `"inputMode": "shell"`).
+
 If you use icon-heavy tools (eza, Starship, lsd), install any Nerd Font; Rune borrows its icon
 glyphs automatically even when your main font is something else.
 

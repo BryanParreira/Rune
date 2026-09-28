@@ -20,6 +20,8 @@ final class CommandTextView: NSTextView {
     weak var commandDelegate: CommandTextViewDelegate?
     var placeholder = CommandTextView.defaultPlaceholder { didSet { needsDisplay = true } }
     private var placeholderColor: NSColor = .tertiaryLabelColor
+    /// Grey completion shown after the caret (from history), accepted with → / End / ⌃E / ⌃F.
+    var suggestionSuffix: String? { didSet { if oldValue != suggestionSuffix { needsDisplay = true } } }
 
     convenience init() {
         self.init(frame: .zero)
@@ -59,9 +61,41 @@ final class CommandTextView: NSTextView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        guard string.isEmpty, let font else { return }
+        guard let font else { return }
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: placeholderColor]
-        (placeholder as NSString).draw(at: NSPoint(x: textContainerOrigin.x, y: textContainerOrigin.y), withAttributes: attrs)
+        if string.isEmpty {
+            (placeholder as NSString).draw(at: NSPoint(x: textContainerOrigin.x, y: textContainerOrigin.y), withAttributes: attrs)
+        } else if let suffix = suggestionSuffix, let point = endOfTextPoint() {
+            (suffix as NSString).draw(at: point, withAttributes: attrs)
+        }
+    }
+
+    /// Where the next character after the text would be drawn.
+    private func endOfTextPoint() -> NSPoint? {
+        guard let layoutManager, let textContainer else { return nil }
+        let length = (string as NSString).length
+        guard length > 0 else { return nil }
+        let glyphs = layoutManager.glyphRange(forCharacterRange: NSRange(location: length - 1, length: 1), actualCharacterRange: nil)
+        let rect = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
+        return NSPoint(x: rect.maxX + textContainerOrigin.x, y: rect.minY + textContainerOrigin.y)
+    }
+
+    private var caretAtEnd: Bool {
+        selectedRange().length == 0 && selectedRange().location == (string as NSString).length
+    }
+
+    /// Accepts the whole suggestion, or just its next word.
+    private func acceptSuggestion(wordOnly: Bool) -> Bool {
+        guard caretAtEnd, let suffix = suggestionSuffix, !suffix.isEmpty else { return false }
+        var chunk = suffix
+        if wordOnly {
+            let trimmed = suffix.drop(while: { $0 == " " })
+            let leading = suffix.count - trimmed.count
+            let word = trimmed.prefix(while: { $0 != " " })
+            chunk = String(suffix.prefix(leading + word.count))
+        }
+        insertText(chunk, replacementRange: selectedRange())
+        return true
     }
 
     override var acceptsFirstResponder: Bool { true }
@@ -84,6 +118,12 @@ final class CommandTextView: NSTextView {
             if isCaretOnFirstLine, commandDelegate?.commandTextView(self, historyOlder: string) == true { return }
         case 125 where plain: // Down
             if isCaretOnLastLine, commandDelegate?.commandTextViewHistoryNewer(self) == true { return }
+        case 124 where plain || mods == .function || mods == [.function, .numericPad]: // Right
+            if acceptSuggestion(wordOnly: false) { return }
+        case 124 where mods.contains(.option):
+            if acceptSuggestion(wordOnly: true) { return }
+        case 119: // End
+            if acceptSuggestion(wordOnly: false) { return }
         case 48 where plain: // Tab
             commandDelegate?.commandTextViewComplete(self)
             return
@@ -105,6 +145,8 @@ final class CommandTextView: NSTextView {
             case "l":
                 commandDelegate?.commandTextViewClearScreen(self)
                 return
+            case "e", "f":
+                if acceptSuggestion(wordOnly: false) { return }
             default:
                 break
             }

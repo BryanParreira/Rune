@@ -20,18 +20,23 @@ public enum InputMode: Equatable, Sendable {
     case fullscreenApp
     /// No integration: behave like a classic terminal, editor hidden.
     case plainTerminal
+    /// The user types at the real shell prompt (inputMode = shell); blocks still work.
+    case shellPrompt
 
     public var editorVisible: Bool { self == .editor || self == .runningCommand }
     public var keystrokesToTerminal: Bool { self != .editor }
 }
 
 public enum InputRouter {
-    public static func mode(integration: IntegrationState, alternateScreen: Bool, commandRunning: Bool) -> InputMode {
+    public static func mode(integration: IntegrationState, alternateScreen: Bool, commandRunning: Bool,
+                            typeInShell: Bool = false) -> InputMode {
         if alternateScreen { return .fullscreenApp }
         switch integration {
         case .unavailable: return .plainTerminal
-        case .pending: return .editor
-        case .active: return commandRunning ? .runningCommand : .editor
+        case .pending: return typeInShell ? .shellPrompt : .editor
+        case .active:
+            if typeInShell { return .shellPrompt }
+            return commandRunning ? .runningCommand : .editor
         }
     }
 }

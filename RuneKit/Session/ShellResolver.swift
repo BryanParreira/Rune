@@ -72,7 +72,8 @@ public enum ShellEnvironment {
     public static func addZshIntegration(
         to env: inout [String: String],
         integrationDirectory: String,
-        honorPrompt: Bool
+        honorPrompt: Bool,
+        typeInShell: Bool = false
     ) {
         if let userZdotdir = env["ZDOTDIR"], !userZdotdir.isEmpty {
             env["RUNE_USER_ZDOTDIR"] = userZdotdir
@@ -81,7 +82,9 @@ public enum ShellEnvironment {
         }
         env["ZDOTDIR"] = integrationDirectory
         env["RUNE_INTEGRATION_DIR"] = integrationDirectory
-        env["RUNE_HONOR_PROMPT"] = honorPrompt ? "1" : "0"
+        // Typing at the shell prompt needs the real prompt and a visible cursor.
+        env["RUNE_HONOR_PROMPT"] = (honorPrompt || typeInShell) ? "1" : "0"
+        env["RUNE_INPUT_MODE"] = typeInShell ? "shell" : "editor"
     }
 
     /// `KEY=value` array form expected by forkpty/execve, sorted for determinism.

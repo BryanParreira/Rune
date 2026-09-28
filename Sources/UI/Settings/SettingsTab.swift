@@ -146,7 +146,7 @@ enum SettingsIndex {
         case .terminal:
             return ["Shell", "Show shell prompt", "PS1", "Starship", "Scrollback", "Option key", "Meta"]
         case .input:
-            return ["New session panel", "welcome", "editor", "history", "completion"]
+            return ["New session panel", "welcome", "editor", "history", "completion", "Type commands in", "zsh prompt", "autosuggestions", "syntax highlighting", "plugins"]
         case .keyboard:
             return KeyboardShortcut.all.map(\.action) + ["shortcuts", "keybindings"]
         case .sync:
@@ -675,10 +675,16 @@ struct InputPage: View {
         let p = model.palette
         VStack(alignment: .leading, spacing: 0) {
             PageTitle(text: "Input", palette: p)
+            SettingRow(model: model, title: "Type commands in", key: "inputMode",
+                       detail: "Rune editor: the input box at the bottom, with history suggestions (→ to accept), syntax highlighting and Tab completion. zsh prompt: type directly at your shell prompt so every zsh plugin (autosuggestions, syntax highlighting, vi-mode, fzf ⌃R…) works exactly as in any terminal; blocks still work. Applies to new tabs.") {
+                DropdownField(selection: model.binding("inputMode", { $0.inputMode }, encode: { $0.rawValue }),
+                              options: InputStyle.allCases,
+                              label: { $0 == .editor ? "Rune editor" : "zsh prompt" }, palette: p, width: 180)
+            }
             SettingRow(model: model, title: "Show “New session” panel", key: "showWelcome", detail: "Shortcut tips above the input editor in new tabs.") {
                 SwitchControl(isOn: model.binding("showWelcome", { $0.showWelcome }))
             }
-            SettingRow(model: model, title: "Command history", detail: "Up/Down cycles through ~/.zsh_history plus commands run in Rune.") {
+            SettingRow(model: model, title: "Command history", detail: "Up/Down cycles through ~/.zsh_history plus commands run in Rune. Suggestions from history appear in grey as you type.") {
                 EmptyView()
             }
             SettingRow(model: model, title: "Tab completion", detail: "Completes files and folders relative to the current directory.") {

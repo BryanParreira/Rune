@@ -49,6 +49,11 @@ struct ChromePalette: Equatable {
     let accent: NSColor
     let error: NSColor
     let success: NSColor
+    /// ANSI colors used for input syntax highlighting.
+    let ansiYellow: NSColor
+    let ansiBlue: NSColor
+    let ansiMagenta: NSColor
+    let ansiCyan: NSColor
 
     init(theme: Theme) {
         let fg = theme.foreground.nsColor
@@ -68,6 +73,11 @@ struct ChromePalette: Equatable {
         accent = theme.accent.nsColor
         error = theme.ansi.count > 1 ? theme.ansi[1].nsColor : NSColor(srgbRed: 188 / 255, green: 54 / 255, blue: 42 / 255, alpha: 1)
         success = theme.ansi.count > 2 ? theme.ansi[2].nsColor : NSColor(srgbRed: 28 / 255, green: 160 / 255, blue: 90 / 255, alpha: 1)
+        func ansi(_ i: Int) -> NSColor { theme.ansi.count > i ? theme.ansi[i].nsColor : fg }
+        ansiYellow = ansi(3)
+        ansiBlue = ansi(4)
+        ansiMagenta = ansi(5)
+        ansiCyan = ansi(6)
     }
 
     /// Kept for the tab bar, which predates the token names.

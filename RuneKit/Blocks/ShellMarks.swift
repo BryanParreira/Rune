@@ -15,6 +15,10 @@ public enum ShellMark: Equatable, Sendable {
     case integrationReady(version: String)
     case currentDirectory(String)
     case commandText(String)
+    /// Aliases and functions defined in the user's shell (space separated).
+    case shellNames([String])
+    /// The shell's PATH after the user's config ran (GUI apps start with a minimal PATH).
+    case shellPath(String)
 }
 
 public enum ShellMarkParser {
@@ -46,6 +50,8 @@ public enum ShellMarkParser {
         case "hello": return .integrationReady(version: value)
         case "cwd": return value.isEmpty ? nil : .currentDirectory(value)
         case "cmd": return .commandText(value)
+        case "names": return .shellNames(value.split(separator: " ").map(String.init))
+        case "path": return value.isEmpty ? nil : .shellPath(value)
         default: return nil
         }
     }

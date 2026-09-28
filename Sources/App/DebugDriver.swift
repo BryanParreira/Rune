@@ -8,6 +8,7 @@ import AppKit
 ///   @clear          → Cmd-K
 ///   @wait           → extra pause
 ///   @settings       → open the Settings window
+///   @type:text      → type into the editor without submitting
 enum DebugDriver {
     static func runIfRequested(session: TerminalSession) {
         guard let script = ProcessInfo.processInfo.environment["RUNE_DEBUG_SCRIPT"], !script.isEmpty else { return }
@@ -25,6 +26,9 @@ enum DebugDriver {
             case "@clear": session.clearScreen()
             case "@wait": break
             case "@settings": NSApp.sendAction(#selector(AppDelegate.openSettings(_:)), to: nil, from: nil)
+            case let typed where typed.hasPrefix("@type:"):
+                let editor = session.view.inputArea.editor
+                editor.insertText(String(typed.dropFirst(6)), replacementRange: editor.selectedRange())
             default:
                 if session.mode == .editor {
                     session.submit(step)
