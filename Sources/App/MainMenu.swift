@@ -34,6 +34,7 @@ enum MainMenu {
             menu.addItem(update)
         }
         menu.addItem(.separator())
+        menu.addItem(item("Welcome Guide…", #selector(AppDelegate.showOnboarding(_:))))
         menu.addItem(item("Settings…", #selector(AppDelegate.openSettings(_:)), ","))
         menu.addItem(item("Open config.json", #selector(AppDelegate.openConfig(_:))))
         menu.addItem(item("Reveal Config Folder", #selector(AppDelegate.revealConfigFolder(_:))))

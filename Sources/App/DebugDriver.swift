@@ -1,5 +1,6 @@
 #if DEBUG
 import AppKit
+import SwiftUI
 import RuneKit
 
 /// Debug builds only: runs a scripted sequence against the first session so the UI can be
@@ -135,6 +136,16 @@ enum DebugDriver {
                     frame.origin.y -= CGFloat(h) - frame.height
                     frame.size.height = CGFloat(h)
                     window.setFrame(frame, display: true)
+                }
+            case "@onboarding":
+                NSApp.sendAction(#selector(AppDelegate.showOnboarding(_:)), to: nil, from: nil)
+            case let shot where shot.hasPrefix("@onboardingShot:"):
+                // Renders the onboarding window offscreen, then advances to the next step.
+                if let window = NSApp.windows.first(where: { $0.windowController is OnboardingWindowController }),
+                   let view = window.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                    view.cacheDisplay(in: view.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: String(shot.dropFirst(16))))
+                    (window.contentView as? NSHostingView<OnboardingView>)?.rootView.model.next()
                 }
             case "@settingsTest":
                 runSettingsSelfTest(session: session)

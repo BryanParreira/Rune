@@ -23,6 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             open(directory: directory)
         }
         NSApp.activate()
+        if OnboardingWindowController.needsOnboarding, !Self.isAutomatedRun {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.showOnboarding(nil) }
+        }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -104,6 +107,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func newTab(_ sender: Any?) {
         makeWindow(directory: NSHomeDirectory())
+    }
+
+    private var onboardingController: OnboardingWindowController?
+
+    /// Debug test runs share this Mac's preferences; they must not show or complete onboarding.
+    static var isAutomatedRun: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.environment["RUNE_DEBUG_SCRIPT"] != nil
+        #else
+        return false
+        #endif
+    }
+
+    @objc func showOnboarding(_ sender: Any?) {
+        guard let configStore else { return }
+        if onboardingController == nil {
+            onboardingController = OnboardingWindowController(store: configStore)
+        }
+        onboardingController?.showWindow(nil)
+        onboardingController?.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate()
     }
 
     /// Reached only when no Rune window is key (the window controller handles it otherwise).
