@@ -54,7 +54,9 @@ final class BlockOverlayView: NSView {
         guard let session = sessionView?.session, session.mode != .fullscreenApp else { return nil }
         let terminal = session.terminalView.getTerminal()
         guard session.geometry.lineCount > terminal.rows else { return nil }
-        let frame = session.terminalView.frame
+        // The terminal can extend below the visible area (hidden blank rows); use what shows.
+        let frame = session.terminalView.frame.intersection(bounds)
+        guard frame.height > 8 else { return nil }
         return NSRect(x: bounds.maxX - 10, y: frame.minY + 2, width: 6, height: frame.height - 4)
     }
 

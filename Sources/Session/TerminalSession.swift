@@ -557,10 +557,6 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             break
         }
 
-        if case .commandStart = mark, promptIsInvisible, terminal.getCursorLocation().y < terminal.rows - 1 {
-            // e.g. after `clear`: re-anchor once the shell has finished drawing the prompt.
-            DispatchQueue.main.async { [weak self] in self?.reanchorPromptAtBottom() }
-        }
         if case .commandFinished = mark { refreshGitBranch() }
         if changed { view.blocksDidChange() }
         updateMode()
@@ -652,16 +648,19 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         onChange?()
     }
 
-    /// While the editor owns input, the bottom of the screen is Rune's invisible prompt: a blank
-    /// spacer row and the empty cursor row. Hides those (up to two blank rows) so output ends
-    /// flush above the input editor. Running commands keep every row visible.
+    /// Keeps output anchored right above the input editor: blank rows at the bottom of the
+    /// screen are pushed out of view instead of being filled with padding. Blank rows appear
+    /// below the cursor after `clear` or when the terminal grows (the window, or the welcome
+    /// panel closing). At Rune's invisible prompt the spacer and cursor rows are hidden too;
+    /// otherwise the cursor row always stays visible. Full-screen apps are left alone.
     func updateBottomTrim() {
         let terminal = terminalView.getTerminal()
         var hidden = 0
-        if promptIsInvisible, integration == .active, !terminal.isCurrentBufferAlternate {
+        if integration == .active, !terminal.isCurrentBufferAlternate, case .running = state {
+            let lowestHideable = promptIsInvisible ? 1 : terminal.getCursorLocation().y + 1
             let screenTop = geometry.linesTrimmed + geometry.screenTop
             var row = terminal.rows - 1
-            while hidden < 2, row > 0,
+            while row >= max(1, lowestHideable),
                   let line = terminal.getScrollInvariantLine(row: screenTop + row),
                   line.translateToString(trimRight: true).isEmpty {
                 hidden += 1
@@ -721,6 +720,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             lastColumns = newCols
             remapAfterReflow()
         }
+        // Right away, so a taller terminal never shows its new blank rows for a frame.
+        updateBottomTrim()
         view.blocksDidChange()
     }
 
