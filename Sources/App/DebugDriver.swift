@@ -181,6 +181,13 @@ enum DebugDriver {
                 }
                 GlobalHotKey.shared.unregister()
                 fflush(stdout)
+            case "@quick":
+                if let store = ConfigStore.current { QuickTerminalController.shared.toggle(store: store) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    let panel = NSApp.windows.first { $0 is QuickTerminalPanel }
+                    print("QUICK visible=\(QuickTerminalController.shared.isVisible) frame=\(panel.map { NSStringFromRect($0.frame) } ?? "-") key=\(panel?.isKeyWindow == true) screen=\(NSStringFromRect(NSScreen.main?.visibleFrame ?? .zero))")
+                    fflush(stdout)
+                }
             case "@gap":
                 // Distance between the last non-blank row on screen and the terminal area's bottom.
                 let terminal = session.terminalView.getTerminal()

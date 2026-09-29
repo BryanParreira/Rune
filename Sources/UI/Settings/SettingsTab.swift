@@ -896,6 +896,11 @@ struct KeyboardPage: View {
                               options: Self.hotkeyChoices(current: model.config.globalHotkey),
                               label: { $0 == "off" ? "Off" : GlobalHotKey.display($0) }, palette: p, width: 140)
             }
+            SettingRow(model: model, title: "The shortcut opens", key: "hotkeyOpens",
+                       detail: "Quick Terminal slides a terminal down from the top of the screen, over any app, and tucks it away when you're done.") {
+                DropdownField(selection: model.binding("hotkeyOpens", { $0.hotkeyOpens }), options: ["window", "quick"],
+                              label: { $0 == "quick" ? "Quick Terminal" : "Rune's windows" }, palette: p, width: 180)
+            }
             SettingRow(model: model, title: "Open Rune at login",
                        detail: "Starts quietly in the background, so the shortcut above works right after you log in.") {
                 LoginItemToggle()

@@ -87,6 +87,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The hotkey: bring Rune forward (opening a window if needed), or hide it when it's
     /// already in front.
     private func toggleFromHotKey() {
+        if let store = configStore, store.snapshot.config.hotkeyOpens == "quick" {
+            QuickTerminalController.shared.toggle(store: store)
+            return
+        }
         if NSApp.isActive, NSApp.keyWindow?.windowController is MainWindowController {
             NSApp.hide(nil)
             return
