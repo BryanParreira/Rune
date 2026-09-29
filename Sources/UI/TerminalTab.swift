@@ -30,6 +30,42 @@ final class TerminalTab: TabContent {
         root.setChild(session.view)
     }
 
+    /// Rebuilds a saved split layout, creating one session per pane (not started yet).
+    init(layout: PaneLayout, palette: ChromePalette, makeSession: (String) -> TerminalSession) {
+        dividerColor = palette.outline
+        var created: [TerminalSession] = []
+        func build(_ node: PaneLayout) -> NSView {
+            switch node {
+            case .pane(let directory):
+                let session = makeSession(directory)
+                created.append(session)
+                return session.view
+            case .split(let vertical, let children):
+                let split = PaneSplitView(vertical: vertical, color: palette.outline)
+                children.map(build).forEach(split.addArrangedSubview)
+                return split
+            }
+        }
+        root.setChild(build(layout))
+        sessions = created
+        focused = created.first
+        updateDimming()
+        for split in allSplits(in: root.child) { split.distributeEvenly() }
+    }
+
+    /// The current panes and their folders, for restoring after a relaunch.
+    var layout: PaneLayout {
+        func walk(_ view: NSView) -> PaneLayout? {
+            if let session = sessions.first(where: { $0.view === view }) {
+                return .pane(directory: session.currentDirectory)
+            }
+            guard let split = view as? PaneSplitView else { return nil }
+            let children = split.arrangedSubviews.compactMap(walk)
+            return children.count == 1 ? children[0] : .split(vertical: split.isVertical, children: children)
+        }
+        return root.child.flatMap(walk) ?? .pane(directory: focusedSession?.currentDirectory ?? NSHomeDirectory())
+    }
+
     func contains(_ session: TerminalSession) -> Bool {
         sessions.contains { $0 === session }
     }
@@ -233,20 +269,24 @@ final class PaneSplitView: NSSplitView {
 
     override var dividerColor: NSColor { color }
 
-    /// Gives every pane the same share of the space.
+    /// Set until the split has had a size to divide evenly.
+    private var wantsEvenDistribution = false
+
+    override func layout() {
+        super.layout()
+        if wantsEvenDistribution { distributeEvenly() }
+    }
+
+    /// Gives every pane the same share of the space (as soon as the split has a size).
     func distributeEvenly() {
-        layoutSubtreeIfNeeded()
         let count = arrangedSubviews.count
         guard count > 1 else { return }
         let total = (isVertical ? bounds.width : bounds.height) - dividerThickness * CGFloat(count - 1)
         guard total > 0 else {
-            // Not laid out yet: try again once it has a size.
-            DispatchQueue.main.async { [weak self] in
-                guard let self, (self.isVertical ? self.bounds.width : self.bounds.height) > 0 else { return }
-                self.distributeEvenly()
-            }
+            wantsEvenDistribution = true
             return
         }
+        wantsEvenDistribution = false
         let share = total / CGFloat(count)
         for index in 0..<(count - 1) {
             setPosition(share * CGFloat(index + 1) + dividerThickness * CGFloat(index), ofDividerAt: index)

@@ -64,7 +64,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     /// Called after the window closes so the app can drop its reference.
     var onClose: ((MainWindowController) -> Void)?
 
-    init(configStore: ConfigStore, directory: String) {
+    /// Called whenever tabs, panes or folders change, so the session can be saved.
+    var onStateChange: (() -> Void)?
+
+    init(configStore: ConfigStore, directory: String, restoring saved: SavedSession.Window? = nil) {
         self.configStore = configStore
         let palette = ChromePalette(theme: configStore.snapshot.theme)
         tabsModel = TabsModel(palette: palette)
@@ -87,8 +90,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         super.init(window: window)
         window.delegate = self
         window.onFirstResponderChange = { [weak self] responder in
-            guard let self, let tab = self.selectedTab as? TerminalTab, tab.noteFocus(responder) else { return }
-            self.refreshTabs()
+            guard let self, let tab = self.selectedTab as? TerminalTab else { return }
+            // The find bar opening or closing moves focus; re-anchor the output for it.
+            tab.focusedSession?.updateBottomTrim()
+            if tab.noteFocus(responder) { self.refreshTabs() }
         }
 
         buildLayout(in: window)
@@ -101,7 +106,56 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             .sink { [weak self] in self?.applySnapshot($0) }
             .store(in: &cancellables)
 
-        addTab(directory: directory)
+        if let saved {
+            restore(saved)
+        } else {
+            addTab(directory: directory)
+        }
+    }
+
+    // MARK: - Session restore
+
+    /// This window's tabs as they should reopen after a relaunch (Settings isn't restored).
+    var savedState: SavedSession.Window {
+        var saved: [SavedSession.Tab] = []
+        var selected = 0
+        for (index, tab) in tabs.enumerated() {
+            if index == selectedIndex { selected = saved.count }
+            if let terminal = tab as? TerminalTab {
+                saved.append(.terminal(terminal.layout))
+            } else if let file = tab as? FilePreviewTab, file.isPinned {
+                saved.append(.file(path: file.path))
+            }
+        }
+        return SavedSession.Window(frame: window.map { NSStringFromRect($0.frame) }, selectedTab: min(selected, max(0, saved.count - 1)), tabs: saved)
+    }
+
+    private func restore(_ saved: SavedSession.Window) {
+        if let frame = saved.frame.map(NSRectFromString), frame.width >= 420, frame.height >= 240 {
+            window?.setFrame(frame, display: false)
+        }
+        let palette = ChromePalette(theme: configStore.snapshot.theme)
+        for tab in saved.tabs {
+            switch tab {
+            case .terminal(let layout):
+                let terminal = TerminalTab(layout: layout, palette: palette) { directory in
+                    self.makeSession(directory: directory)
+                }
+                insert(terminal)
+                terminal.sessions.forEach {
+                    $0.view.dismissWelcomeForSession()
+                    start($0, prefill: nil)
+                }
+                if let first = terminal.sessions.first { terminal.focus(first) }
+            case .file(let path):
+                insert(FilePreviewTab(path: path, pinned: true, snapshot: configStore.snapshot))
+            }
+        }
+        if tabs.isEmpty { addTab(directory: NSHomeDirectory()) }
+        select(index: min(saved.selectedTab, tabs.count - 1))
+        #if DEBUG
+        if let first = terminalTabs.first?.sessions.first { DebugDriver.runIfRequested(session: first) }
+        #endif
     }
 
     @available(*, unavailable)
@@ -264,6 +318,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         guard let tab = selectedTab as? TerminalTab else { return }
         let session = makeSession(directory: tab.focusedSession?.currentDirectory ?? NSHomeDirectory())
         tab.split(adding: session, vertical: vertical)
+        // The shortcut tips are for a fresh tab; in a split they'd crowd out the output.
+        session.view.dismissWelcomeForSession()
         start(session, prefill: nil)
         refreshTabs()
     }
@@ -397,6 +453,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             fileTree.setRoot(directory)
         }
         window?.title = selectedTab?.title ?? "Rune"
+        onStateChange?()
     }
 
     // MARK: - Menu actions (responder chain)
@@ -428,6 +485,18 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         alert.beginSheetModal(for: window) { [weak self, weak session] response in
             guard response == .alertFirstButtonReturn, let session else { return }
             self?.closePane(session)
+        }
+    }
+
+    /// ⌘F / ⌘G / ⇧⌘G: search the focused pane's output, or the open file.
+    @objc func findInTab(_ sender: NSMenuItem) {
+        let request = NSMenuItem()
+        request.tag = sender.tag
+        if let session = selectedSession {
+            session.terminalView.performTextFinderAction(request)
+            session.updateBottomTrim()
+        } else if let preview = selectedTab as? FilePreviewTab {
+            preview.find(request)
         }
     }
 

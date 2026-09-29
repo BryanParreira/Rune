@@ -21,6 +21,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         didFinishLaunching = true
 
+        // Opened on a specific folder (Finder, `rune`, --cwd): open just that.
+        let openedOnFolder = !pendingDirectories.isEmpty || CommandLine.arguments.contains("--cwd")
         if pendingDirectories.isEmpty { pendingDirectories = [Self.launchDirectory()] }
         if OnboardingWindowController.needsOnboarding, !Self.isAutomatedRun {
             // First launch: the guide comes first; the terminal opens when it closes.
@@ -31,10 +33,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.isFirstRunOnboarding = false
                 self.openPendingDirectories()
             }
+        } else if !openedOnFolder, store.snapshot.config.restoreSession, !Self.isAutomatedRun || Self.usesTestSessionFile,
+                  let saved = SessionFile.load() {
+            pendingDirectories.removeAll()
+            for window in saved.windows { makeWindow(directory: NSHomeDirectory(), restoring: window) }
+            if windowControllers.isEmpty { openPendingDirectories() }
         } else {
             openPendingDirectories()
         }
         NSApp.activate()
+    }
+
+    // MARK: - Session saving
+
+    private var saveWork: DispatchWorkItem?
+
+    /// Saves the open windows shortly after the latest change.
+    private func scheduleSessionSave() {
+        saveWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.saveSession() }
+        saveWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
+    }
+
+    private func saveSession() {
+        saveWork?.cancel()
+        // Test runs share this Mac's files; they must never replace the user's session.
+        guard !Self.isAutomatedRun || Self.usesTestSessionFile, !isFirstRunOnboarding else { return }
+        SessionFile.save(SavedSession(windows: windowControllers.map(\.savedState).filter { !$0.tabs.isEmpty }))
     }
 
     private func openPendingDirectories() {
@@ -75,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Asks before quitting while programs are running in any tab.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        saveSession()
         let programs = windowControllers.flatMap(\.runningPrograms)
         guard !programs.isEmpty else { return .terminateNow }
         let alert = NSAlert()
@@ -103,14 +130,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return windowControllers.last
     }
 
-    private func makeWindow(directory: String) {
+    private func makeWindow(directory: String, restoring saved: SavedSession.Window? = nil) {
         guard let configStore else { return }
-        let controller = MainWindowController(configStore: configStore, directory: directory)
+        let controller = MainWindowController(configStore: configStore, directory: directory, restoring: saved)
         controller.onClose = { [weak self] closed in
             self?.windowControllers.removeAll { $0 === closed }
+            // Unless the app is quitting (already saved), closing a window updates the session.
+            if NSApp.isRunning, self?.isTerminating == false { self?.scheduleSessionSave() }
         }
+        controller.onStateChange = { [weak self] in self?.scheduleSessionSave() }
         windowControllers.append(controller)
-        if windowControllers.count > 1, let previous = windowControllers.dropLast().last?.window {
+        if saved == nil, windowControllers.count > 1, let previous = windowControllers.dropLast().last?.window {
             controller.window?.setFrameTopLeftPoint(
                 previous.cascadeTopLeft(from: NSPoint(x: previous.frame.minX, y: previous.frame.maxY))
             )
@@ -129,6 +159,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         makeWindow(directory: NSHomeDirectory())
     }
 
+    private var isTerminating = false
+
+    func applicationWillTerminate(_ notification: Notification) {
+        isTerminating = true
+    }
+
     private var onboardingController: OnboardingWindowController?
     /// True while the first-launch guide is open and no terminal window exists yet.
     private var isFirstRunOnboarding = false
@@ -137,6 +173,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static var isAutomatedRun: Bool {
         #if DEBUG
         return ProcessInfo.processInfo.environment["RUNE_DEBUG_SCRIPT"] != nil
+        #else
+        return false
+        #endif
+    }
+
+    private static var usesTestSessionFile: Bool {
+        #if DEBUG
+        return SessionFile.testOverride != nil
         #else
         return false
         #endif

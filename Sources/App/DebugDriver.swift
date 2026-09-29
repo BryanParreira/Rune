@@ -146,6 +146,12 @@ enum DebugDriver {
                    controller.tabSummaries.indices.contains(index) {
                     controller.selectTab(withID: controller.tabSummaries[index].id)
                 }
+            case "@find":
+                if let controller = session.view.window?.windowController as? MainWindowController {
+                    let item = NSMenuItem()
+                    item.tag = NSTextFinder.Action.showFindInterface.rawValue
+                    controller.findInTab(item)
+                }
             case "@gap":
                 // Distance between the last non-blank row on screen and the terminal area's bottom.
                 let terminal = session.terminalView.getTerminal()

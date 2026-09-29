@@ -73,9 +73,17 @@ enum MainMenu {
         menu.addItem(item("Paste", #selector(NSText.paste(_:)), "v"))
         menu.addItem(item("Select All", #selector(NSText.selectAll(_:)), "a"))
         menu.addItem(.separator())
-        let find = item("Find…", #selector(NSResponder.performTextFinderAction(_:)), "f")
-        find.tag = NSTextFinder.Action.showFindInterface.rawValue
-        menu.addItem(find)
+        // Routed by the window to the terminal output (or the file viewer), whichever the
+        // selected tab shows: the input editor would otherwise swallow them.
+        for (title, key, modifiers, action) in [
+            ("Find…", "f", NSEvent.ModifierFlags.command, NSTextFinder.Action.showFindInterface),
+            ("Find Next", "g", .command, .nextMatch),
+            ("Find Previous", "g", [.command, .shift], .previousMatch),
+        ] {
+            let entry = item(title, #selector(MainWindowController.findInTab(_:)), key, modifiers)
+            entry.tag = action.rawValue
+            menu.addItem(entry)
+        }
         return menu
     }
 

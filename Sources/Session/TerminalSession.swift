@@ -721,7 +721,14 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
                 row -= 1
             }
         }
+        // SwiftTerm's find bar hangs from the terminal's top edge: keep that edge near the top
+        // of the pane while it's open.
+        if isFindBarVisible { hidden = min(hidden, 2) }
         view.terminalContainer.hiddenBottomRows = hidden
+    }
+
+    private var isFindBarVisible: Bool {
+        terminalView.subviews.contains { !$0.isHidden && String(describing: type(of: $0)) == "TerminalFindBarView" }
     }
 
     /// Keystrokes that reach the terminal view while the editor owns input are redirected

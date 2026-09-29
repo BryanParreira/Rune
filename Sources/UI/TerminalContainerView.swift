@@ -82,6 +82,8 @@ final class TerminalContainerView: NSView {
         }
         if terminalView.frame.origin != origin {
             terminalView.setFrameOrigin(origin)
+            // Block backgrounds and headers are drawn relative to the terminal's position.
+            overlay?.needsDisplay = true
         }
         overlay?.frame = bounds
     }

@@ -162,7 +162,7 @@ enum SettingsIndex {
         case .appearance:
             return ["Theme", "Font", "Font size", "Line height", "Cursor", "Blinking cursor", "Padding", "Nerd Font", "icons", "colors"]
         case .terminal:
-            return ["Shell", "Show shell prompt", "PS1", "Starship", "Scrollback", "Option key", "Meta", "Notifications", "Notify when done", "long commands"]
+            return ["Shell", "Show shell prompt", "PS1", "Starship", "Scrollback", "Option key", "Meta", "Notifications", "Notify when done", "long commands", "Restore", "Reopen", "session", "tabs at launch"]
         case .workflows:
             return ["Workflows", "saved commands", "snippets", "command palette", "placeholders"]
         case .input:
@@ -207,8 +207,9 @@ struct KeyboardShortcut: Identifiable {
         .init(action: "Next / previous pane", keys: ["⌘", "] ["]),
         .init(action: "Move to the pane in a direction", keys: ["⌥", "⌘", "←→↑↓"]),
         .init(action: "Next workflow placeholder", keys: ["⇥"]),
+        .init(action: "Find in output / file", keys: ["⌘", "F"]),
+        .init(action: "Find next / previous", keys: ["⌘", "G / ⇧⌘G"]),
         .init(action: "Settings", keys: ["⌘", ","]),
-        .init(action: "Find", keys: ["⌘", "F"]),
     ]
 }
 
@@ -705,6 +706,10 @@ struct TerminalPage: View {
             }
             SettingRow(model: model, title: "Option key acts as Meta", key: "optionAsMeta", detail: "Turn off to type special characters with Option.") {
                 SwitchControl(isOn: model.binding("optionAsMeta", { $0.optionAsMeta }))
+            }
+            SettingRow(model: model, title: "Reopen windows and tabs at launch", key: "restoreSession",
+                       detail: "Brings back your windows, tabs, split panes and their folders after quitting or updating. Only folder and file paths are saved, on this Mac.") {
+                SwitchControl(isOn: model.binding("restoreSession", { $0.restoreSession }))
             }
             SettingRow(model: model, title: "Notify when long commands finish", key: "notifyWhenDone",
                        detail: "A macOS notification when a command finishes while Rune is in the background or its tab isn't visible. Click it to jump back.") {

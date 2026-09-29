@@ -30,6 +30,7 @@ final class FilePreviewTab: TabContent {
     }
 
     func focus() { view.focus() }
+    func find(_ request: NSMenuItem) { view.find(request) }
     func apply(_ snapshot: ConfigSnapshot) { view.apply(snapshot) }
     func closeContent() { view.stopWatching() }
 }
@@ -204,6 +205,13 @@ final class FilePreviewView: NSView {
 
     func focus() {
         if !scrollView.isHidden { window?.makeFirstResponder(textView) }
+    }
+
+    /// Find bar actions for the code view (the rendered Markdown view has none).
+    func find(_ request: NSMenuItem) {
+        guard !scrollView.isHidden else { NSSound.beep(); return }
+        window?.makeFirstResponder(textView)
+        textView.performTextFinderAction(request)
     }
 
     func apply(_ snapshot: ConfigSnapshot) {

@@ -49,6 +49,8 @@ public struct RuneConfig: Equatable, Sendable {
     public var shell: String?
     /// Folder (iCloud Drive, dotfiles repo, …) to read config/themes/workflows from.
     public var syncPath: String?
+    /// Reopen the previous windows, tabs, splits and folders at launch.
+    public var restoreSession: Bool = true
     /// Saved commands shown in the command palette.
     public var workflows: [Workflow] = []
     /// Post a macOS notification when a long command finishes while Rune isn't in front
@@ -67,7 +69,7 @@ public struct RuneConfig: Equatable, Sendable {
         "fontFamily", "fontSize", "lineHeight", "theme", "paddingX", "paddingY", "cursorStyle",
         "cursorBlink", "scrollback", "optionAsMeta", "showWelcome", "honorPrompt", "inputMode", "shell",
         "aiEnabled", "ollamaEndpoint", "aiModel", "aiIncludeBlockContext",
-        "syncPath", "hosts", "workflows", "notifyWhenDone", "notifyAfterSeconds", "gpuRendering",
+        "syncPath", "hosts", "workflows", "notifyWhenDone", "notifyAfterSeconds", "gpuRendering", "restoreSession",
     ]
 
     /// Written to ~/.config/rune/config.json on first launch.
@@ -141,6 +143,7 @@ extension RuneConfig {
             workflows = Workflow.parse(raw, warnings: &reader.warnings)
         }
         if let v = reader.bool("notifyWhenDone") { notifyWhenDone = v }
+        if let v = reader.bool("restoreSession") { restoreSession = v }
         if let v = reader.number("notifyAfterSeconds", range: 1...3600) { notifyAfterSeconds = v }
 
         for key in dictionary.keys.sorted() where !Self.knownKeys.contains(key) {
