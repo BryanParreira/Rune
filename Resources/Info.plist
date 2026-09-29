@@ -79,6 +79,43 @@
 	<string>A command you run in Rune wants to access your reminders.</string>
 	<key>NSRemovableVolumesUsageDescription</key>
 	<string>Commands you run in Rune may read and write files on external drives.</string>
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>New Rune Tab Here</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>newTabHere</string>
+			<key>NSPortName</key>
+			<string>Rune</string>
+			<key>NSRequiredContext</key>
+			<dict/>
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>public.folder</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>New Rune Window Here</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>newWindowHere</string>
+			<key>NSPortName</key>
+			<string>Rune</string>
+			<key>NSRequiredContext</key>
+			<dict/>
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>public.folder</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
 	<key>NSSupportsSuddenTermination</key>
