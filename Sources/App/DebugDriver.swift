@@ -174,6 +174,13 @@ enum DebugDriver {
                 }
                 print("FONT terminal uses \(session.terminalView.font.familyName ?? "?")")
                 fflush(stdout)
+            case "@hotkey":
+                for spec in ["ctrl+`", "option+space", "cmd+shift+t", "t", "ctrl+nope", "off"] {
+                    let ok = GlobalHotKey.shared.register(spec)
+                    print("HOTKEY \(spec) → registered=\(ok) current=\(GlobalHotKey.shared.current ?? "none") display=\(GlobalHotKey.display(spec))")
+                }
+                GlobalHotKey.shared.unregister()
+                fflush(stdout)
             case "@gap":
                 // Distance between the last non-blank row on screen and the terminal area's bottom.
                 let terminal = session.terminalView.getTerminal()

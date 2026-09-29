@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import RuneKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -22,10 +23,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = self?.windowControllers.first { $0.reveal(sessionID: sessionID) }
         }
         didFinishLaunching = true
+        setUpGlobalHotKey(store)
 
         // Opened on a specific folder (Finder, `rune`, --cwd): open just that.
         let openedOnFolder = !pendingDirectories.isEmpty || CommandLine.arguments.contains("--cwd")
         if pendingDirectories.isEmpty { pendingDirectories = [Self.launchDirectory()] }
+        if Self.launchedAsLoginItem, !openedOnFolder, !OnboardingWindowController.needsOnboarding {
+            // Started at login: stay in the background until the hotkey (or the Dock) asks.
+            startupWindowsPending = true
+            return
+        }
+        openStartupWindows(openedOnFolder: openedOnFolder)
+    }
+
+    /// Set when launched at login: the first window opens on demand.
+    private var startupWindowsPending = false
+
+    private func openStartupWindows(openedOnFolder: Bool) {
+        startupWindowsPending = false
+        guard let store = configStore else { return }
         if OnboardingWindowController.needsOnboarding, !Self.isAutomatedRun {
             // First launch: the guide comes first; the terminal opens when it closes.
             isFirstRunOnboarding = true
@@ -42,6 +58,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if windowControllers.isEmpty { openPendingDirectories() }
         } else {
             openPendingDirectories()
+        }
+        NSApp.activate()
+    }
+
+    /// macOS started Rune as a login item.
+    private static var launchedAsLoginItem: Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent, event.eventID == kAEOpenApplication else { return false }
+        return event.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
+    }
+
+    // MARK: - Global hotkey
+
+    private var hotKeyObserver: AnyCancellable?
+
+    private func setUpGlobalHotKey(_ store: ConfigStore) {
+        guard !Self.isAutomatedRun else { return }
+        GlobalHotKey.shared.onPress = { [weak self] in self?.toggleFromHotKey() }
+        GlobalHotKey.shared.register(store.snapshot.config.globalHotkey)
+        hotKeyObserver = store.$snapshot
+            .map(\.config.globalHotkey)
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { GlobalHotKey.shared.register($0) }
+    }
+
+    /// The hotkey: bring Rune forward (opening a window if needed), or hide it when it's
+    /// already in front.
+    private func toggleFromHotKey() {
+        if NSApp.isActive, NSApp.keyWindow?.windowController is MainWindowController {
+            NSApp.hide(nil)
+            return
+        }
+        NSApp.unhide(nil)
+        if startupWindowsPending {
+            openStartupWindows(openedOnFolder: false)
+        } else if let window = frontController()?.window {
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            newWindow(nil)
         }
         NSApp.activate()
     }
@@ -83,6 +139,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if startupWindowsPending {
+            openStartupWindows(openedOnFolder: false)
+            return true
+        }
         if isFirstRunOnboarding {
             onboardingController?.window?.makeKeyAndOrderFront(nil)
             return true

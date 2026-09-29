@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import RuneKit
+import ServiceManagement
 import SwiftUI
 
 /// Settings, shown as a tab in the main window. Every control writes straight to config.json
@@ -170,7 +171,7 @@ enum SettingsIndex {
         case .ai:
             return ["AI", "Ollama", "Model", "local", "LLM", "Endpoint", "context", "Explain"]
         case .keyboard:
-            return KeyboardShortcut.all.map(\.action) + ["shortcuts", "keybindings"]
+            return KeyboardShortcut.all.map(\.action) + ["shortcuts", "keybindings", "hotkey", "global", "login", "launch"]
         case .sync:
             return ["Sync folder", "iCloud", "dotfiles", "This Mac only", "machine", "hosts", "per-machine"]
         case .about:
@@ -200,6 +201,7 @@ struct KeyboardShortcut: Identifiable {
         .init(action: "Switch to tab 1–8 / last tab", keys: ["⌘", "1…9"]),
         .init(action: "Next / previous tab", keys: ["⌘", "⇧", "] ["]),
         .init(action: "New window", keys: ["⌘", "N"]),
+        .init(action: "Show / hide Rune from any app (default)", keys: ["⌃", "`"]),
         .init(action: "Command palette", keys: ["⌘", "P"]),
         .init(action: "Split pane right", keys: ["⌘", "D"]),
         .init(action: "Split pane down", keys: ["⌘", "⇧", "D"]),
@@ -888,6 +890,17 @@ struct KeyboardPage: View {
         let p = model.palette
         VStack(alignment: .leading, spacing: 0) {
             PageTitle(text: "Keyboard shortcuts", palette: p)
+            SettingRow(model: model, title: "Show or hide Rune from anywhere", key: "globalHotkey",
+                       detail: hotkeyDetail) {
+                DropdownField(selection: model.binding("globalHotkey", { $0.globalHotkey }),
+                              options: Self.hotkeyChoices(current: model.config.globalHotkey),
+                              label: { $0 == "off" ? "Off" : GlobalHotKey.display($0) }, palette: p, width: 140)
+            }
+            SettingRow(model: model, title: "Open Rune at login",
+                       detail: "Starts quietly in the background, so the shortcut above works right after you log in.") {
+                LoginItemToggle()
+            }
+            SettingsDivider(palette: p)
             let rows = KeyboardShortcut.all.filter { model.matches($0.action) || model.matches("shortcuts") }
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, shortcut in
                 HStack {
@@ -902,6 +915,37 @@ struct KeyboardPage: View {
                 .background(Color(nsColor: index % 2 == 0 ? p.surface1 : .clear))
             }
         }
+    }
+}
+
+extension KeyboardPage {
+    static func hotkeyChoices(current: String) -> [String] {
+        let presets = ["ctrl+`", "option+`", "option+space", "ctrl+option+t", "off"]
+        return presets.contains(current) ? presets : [current] + presets
+    }
+
+    var hotkeyDetail: String {
+        let spec = model.config.globalHotkey
+        if spec == "off" { return "Off. Choose a shortcut to bring Rune forward from any app." }
+        if GlobalHotKey.parse(spec) == nil { return "“\(spec)” isn't a shortcut Rune understands (try \"ctrl+`\" or \"option+space\")." }
+        if GlobalHotKey.shared.current != spec { return "Another app is already using \(GlobalHotKey.display(spec)). Pick a different one." }
+        return "Press \(GlobalHotKey.display(spec)) in any app to bring Rune forward; press it again to hide it."
+    }
+}
+
+/// Registers Rune as a login item (System Settings → General → Login Items).
+struct LoginItemToggle: View {
+    @State private var isOn = SMAppService.mainApp.status == .enabled
+
+    var body: some View {
+        SwitchControl(isOn: Binding(get: { isOn }, set: { newValue in
+            do {
+                if newValue { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+            } catch {
+                NSSound.beep()
+            }
+            isOn = SMAppService.mainApp.status == .enabled
+        }))
     }
 }
 

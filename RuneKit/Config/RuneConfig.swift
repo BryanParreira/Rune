@@ -49,6 +49,8 @@ public struct RuneConfig: Equatable, Sendable {
     public var shell: String?
     /// Folder (iCloud Drive, dotfiles repo, …) to read config/themes/workflows from.
     public var syncPath: String?
+    /// System-wide shortcut that shows or hides Rune ("ctrl+`", "option+space"…, or "off").
+    public var globalHotkey: String = "ctrl+`"
     /// Rune Recall: keep a searchable history of commands and their output on this Mac.
     public var recallEnabled: Bool = true
     /// Days of Recall history to keep.
@@ -75,7 +77,7 @@ public struct RuneConfig: Equatable, Sendable {
         "fontFamily", "fontSize", "lineHeight", "theme", "paddingX", "paddingY", "cursorStyle",
         "cursorBlink", "scrollback", "optionAsMeta", "showWelcome", "honorPrompt", "inputMode", "shell",
         "aiEnabled", "ollamaEndpoint", "aiModel", "aiIncludeBlockContext",
-        "syncPath", "hosts", "workflows", "notifyWhenDone", "notifyAfterSeconds", "gpuRendering", "restoreSession", "hideSecrets", "recallEnabled", "recallDays",
+        "syncPath", "hosts", "workflows", "notifyWhenDone", "notifyAfterSeconds", "gpuRendering", "restoreSession", "hideSecrets", "recallEnabled", "recallDays", "globalHotkey",
     ]
 
     /// Written to ~/.config/rune/config.json on first launch.
@@ -152,6 +154,7 @@ extension RuneConfig {
         if let v = reader.bool("restoreSession") { restoreSession = v }
         if let v = reader.bool("hideSecrets") { hideSecrets = v }
         if let v = reader.bool("recallEnabled") { recallEnabled = v }
+        if let v = reader.string("globalHotkey") { globalHotkey = v.isEmpty ? "off" : v }
         if let v = reader.number("recallDays", range: 1...3650) { recallDays = v }
         if let v = reader.number("notifyAfterSeconds", range: 1...3600) { notifyAfterSeconds = v }
 
