@@ -487,6 +487,18 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         copyToPasteboard(outputText(of: block))
     }
 
+    /// The command and its output as a Markdown code block, with secrets removed, for
+    /// pasting into chats, issues and docs.
+    func copyAsMarkdown(_ block: Block) {
+        let command = commandText(of: block)
+        let output = outputText(of: block)
+        var markdown = "```console\n$ " + command.replacingOccurrences(of: "\n", with: "\n> ")
+        if !output.isEmpty { markdown += "\n" + output }
+        markdown += "\n```"
+        if block.isFailed, let code = block.exitCode { markdown += "\n_exit \(code)_" }
+        copyToPasteboard(SecretRedactor.redact(markdown))
+    }
+
     func rerun(_ block: Block) {
         guard mode == .editor else { return }
         submit(commandText(of: block))
@@ -505,6 +517,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         let menu = NSMenu()
         menu.addItem(BlockMenuItem(title: "Copy Command", block: block) { [weak self] in self?.copyCommand($0) })
         menu.addItem(BlockMenuItem(title: "Copy Output", block: block) { [weak self] in self?.copyOutput($0) })
+        menu.addItem(BlockMenuItem(title: "Copy as Markdown", block: block) { [weak self] in self?.copyAsMarkdown($0) })
         let rerunItem = BlockMenuItem(title: "Re-run Command", block: block) { [weak self] in self?.rerun($0) }
         rerunItem.isEnabled = mode == .editor
         menu.addItem(rerunItem)

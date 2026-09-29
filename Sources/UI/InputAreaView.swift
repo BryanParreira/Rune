@@ -178,7 +178,15 @@ final class InputAreaView: NSView, NSTextViewDelegate {
     private var currentHint: InputChromeModel.Hint {
         if running { return .running }
         if aiConversationOpen { return .aiOpen }
-        return editor.string.isEmpty ? .idle : .typing
+        return Self.hint(for: editor.string)
+    }
+
+    private static func hint(for text: String) -> InputChromeModel.Hint {
+        if text.isEmpty { return .idle }
+        if AIService.shared.isEnabled, InputClassifier.looksLikeQuestion(text, isCommand: CommandCatalog.shared.contains) {
+            return .question
+        }
+        return .typing
     }
 
     func textDidChange(_ notification: Notification) {
@@ -280,7 +288,7 @@ extension InputAreaView: CommandTextViewDelegate {
         refreshHighlighting()
         editor.suggestionSuffix = nil
         editor.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
-        chipsModel.hint = text.isEmpty ? .idle : .typing
+        chipsModel.hint = Self.hint(for: text)
         updateEditorHeight()
     }
 
@@ -375,7 +383,7 @@ extension InputAreaView: CommandTextViewDelegate {
 // MARK: - SwiftUI chrome
 
 final class InputChromeModel: ObservableObject {
-    enum Hint { case idle, typing, running, aiOpen }
+    enum Hint { case idle, typing, question, running, aiOpen }
 
     @Published var directory = "~"
     @Published var branch: String?
@@ -498,6 +506,9 @@ struct InputHintLine: View {
                 case .typing:
                     hint(ai.isEnabled ? "↵ run   ⌘↵ ask AI   → accept suggestion   ⇧↵ new line"
                                       : "↵ run   → accept suggestion   ⇧↵ new line   ⇥ complete")
+                case .question:
+                    Text("Looks like a question  ·  ⌘↵ ask AI  ·  ↵ runs it as a command")
+                        .foregroundColor(Color(nsColor: model.palette.accent))
                 case .running:
                     hint("⌃C interrupt   keystrokes go to the running program")
                 case .aiOpen:
