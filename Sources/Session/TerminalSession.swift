@@ -103,6 +103,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     private(set) var hasPrompted = false
     /// A folder to move to once the shell is ready.
     private var pendingDirectory: String?
+    /// A command to run once the shell is at its first prompt (a pane from a launch layout).
+    private var pendingStartCommand: String?
 
     // MARK: Remote shells
 
@@ -271,6 +273,28 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
 
     /// Moves a shell that's sitting at its prompt to `directory` without running a visible
     /// command: used when a pre-started shell is handed to a tab for another folder.
+    /// The command running in this pane, for a saved layout to start again (not private
+    /// commands, and not what runs inside a remote shell).
+    var layoutCommand: String? {
+        guard !isRemote, tracker.isCommandRunning, let block = tracker.blocks.last, block.state == .running,
+              !block.command.isEmpty, !privateCommands.contains(block.command) else { return nil }
+        return block.command
+    }
+
+    /// Runs `command` as soon as the shell is ready, as if typed in the editor and entered.
+    func runWhenReady(_ command: String) {
+        guard hasPrompted, pendingDirectory == nil, mode == .editor else {
+            pendingStartCommand = command
+            return
+        }
+        runStartCommand(command)
+    }
+
+    private func runStartCommand(_ command: String) {
+        // After the quiet `cd` a pooled shell may still be doing (moveIdleShell).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.submit(command) }
+    }
+
     func moveIdleShell(to directory: String) {
         guard directory != currentDirectory, FileManager.default.fileExists(atPath: directory) else { return }
         guard hasPrompted, integration == .active, mode == .editor || mode == .shellPrompt,
@@ -665,6 +689,10 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
                 pendingDirectory = nil
                 DispatchQueue.main.async { [weak self] in self?.moveIdleShell(to: directory) }
             }
+        }
+        if case .commandStart = mark, let command = pendingStartCommand {
+            pendingStartCommand = nil
+            runStartCommand(command)
         }
         let wasRunning = tracker.isCommandRunning
         let changed = tracker.handle(mark, at: position)

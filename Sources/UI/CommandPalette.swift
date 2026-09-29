@@ -13,6 +13,7 @@ struct PaletteItem: Identifiable {
         case folder = "Folder"
         case history = "History"
         case theme = "Theme"
+        case layout = "Layout"
     }
 
     let id: String
@@ -76,7 +77,7 @@ final class PaletteModel: ObservableObject {
     /// Actions and workflows rank above the (much longer) history list on equal matches.
     private static func kindBoost(_ kind: PaletteItem.Kind) -> Int {
         switch kind {
-        case .action, .workflow, .projectWorkflow: return 30
+        case .action, .workflow, .projectWorkflow, .layout: return 30
         case .tab, .theme: return 20
         case .folder: return 10
         case .history: return 0

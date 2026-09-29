@@ -218,6 +218,21 @@ enum DebugDriver {
                 if let delegate = NSApp.delegate as? AppDelegate {
                     if parts.first == "window" { delegate.newWindowHere(pasteboard, userData: nil, error: &message) } else { delegate.newTabHere(pasteboard, userData: nil, error: &message) }
                 }
+            case let name where name.hasPrefix("@saveLayout:"):
+                if let controller = session.view.window?.windowController as? MainWindowController,
+                   let store = (NSApp.delegate as? AppDelegate)?.layoutStore {
+                    try? store.save(controller.currentLayout(named: String(name.dropFirst(12))))
+                    print("LAYOUT saved " + store.directory.path)
+                }
+            case let name where name.hasPrefix("@openLayout:"):
+                let wanted = String(name.dropFirst(12))
+                if let delegate = NSApp.delegate as? AppDelegate, let entry = delegate.layoutStore?.loadAll().first(where: { $0.layout.name == wanted }) {
+                    delegate.openLayout(entry.layout)
+                }
+            case "@allTabs":
+                for controller in NSApp.windows.compactMap({ $0.windowController as? MainWindowController }) {
+                    controller.debugDumpTabs()
+                }
             case "@newTab":
                 (session.view.window?.windowController as? MainWindowController)?.newTab(nil)
             case "@closeTab":

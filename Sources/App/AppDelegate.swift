@@ -231,12 +231,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.onStateChange = { [weak self] in self?.scheduleSessionSave() }
         windowControllers.append(controller)
-        if saved == nil, windowControllers.count > 1, let previous = windowControllers.dropLast().last?.window {
+        if saved?.frame == nil, windowControllers.count > 1, let previous = windowControllers.dropLast().last?.window {
             controller.window?.setFrameTopLeftPoint(
                 previous.cascadeTopLeft(from: NSPoint(x: previous.frame.minX, y: previous.frame.maxY))
             )
         }
         controller.showWindow(nil)
+    }
+
+    // MARK: - Launch layouts
+
+    var layoutStore: LaunchLayoutStore? { configStore.map { LaunchLayoutStore(paths: $0.paths) } }
+
+    /// Opens a saved layout in a new window and starts its pane commands.
+    func openLayout(_ layout: LaunchLayout) {
+        let home = NSHomeDirectory()
+        let tabs = layout.tabs.map { tab in
+            SavedSession.Tab.terminal(tab.root.layout(home: home, fileExists: { FileManager.default.fileExists(atPath: $0) }), style: tab.style)
+        }
+        guard !tabs.isEmpty else { return }
+        makeWindow(directory: home, restoring: SavedSession.Window(frame: nil, selectedTab: 0, tabs: tabs))
+        windowControllers.last?.runStartCommands(layout.tabs.map(\.root.commands))
+        NSApp.activate()
+    }
+
+    /// Shell > Open Layout > (a layout).
+    @objc func openLayoutFromMenu(_ sender: NSMenuItem) {
+        guard let file = sender.representedObject as? URL,
+              let entry = layoutStore?.loadAll().first(where: { $0.file == file }) else { return }
+        openLayout(entry.layout)
+    }
+
+    @objc func showLayoutsFolder(_ sender: Any?) {
+        guard let directory = layoutStore?.directory else { return }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(directory)
     }
 
     // MARK: - Menu actions (reached when no window handles them)

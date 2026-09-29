@@ -75,6 +75,9 @@ final class TerminalTab: TabContent {
         .terminal(layout, style: style.isEmpty ? nil : style)
     }
 
+    /// What each pane is running, in the same order as the panes of `layout`.
+    var paneCommands: [String?] { sessionsInLayoutOrder().map(\.layoutCommand) }
+
     func contains(_ session: TerminalSession) -> Bool {
         sessions.contains { $0 === session }
     }

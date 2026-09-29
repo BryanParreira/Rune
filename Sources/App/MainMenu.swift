@@ -61,6 +61,13 @@ enum MainMenu {
         menu.addItem(item("Reopen Closed Tab", #selector(MainWindowController.reopenClosedTab(_:)), "t", [.command, .shift]))
         menu.addItem(item("Rename Tab…", #selector(MainWindowController.renameTab(_:)), ""))
         menu.addItem(.separator())
+        menu.addItem(item("Save Window as Layout…", #selector(MainWindowController.saveLayout(_:)), ""))
+        let layouts = NSMenu(title: "Open Layout")
+        layouts.delegate = LayoutsMenu.shared
+        let open = NSMenuItem(title: "Open Layout", action: nil, keyEquivalent: "")
+        open.submenu = layouts
+        menu.addItem(open)
+        menu.addItem(.separator())
         menu.addItem(item("Split Pane Right", #selector(MainWindowController.splitRight(_:)), "d"))
         menu.addItem(item("Split Pane Down", #selector(MainWindowController.splitDown(_:)), "d", [.command, .shift]))
         menu.addItem(.separator())
@@ -125,5 +132,27 @@ enum MainMenu {
         menu.addItem(.separator())
         menu.addItem(item("Bring All to Front", #selector(NSApplication.arrangeInFront(_:))))
         return menu
+    }
+}
+
+/// Shell > Open Layout: the saved layouts, read when the menu opens.
+final class LayoutsMenu: NSObject, NSMenuDelegate {
+    static let shared = LayoutsMenu()
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let entries = (NSApp.delegate as? AppDelegate)?.layoutStore?.loadAll() ?? []
+        if entries.isEmpty {
+            let empty = NSMenuItem(title: "No Saved Layouts", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            menu.addItem(empty)
+        }
+        for entry in entries {
+            let item = NSMenuItem(title: entry.layout.name, action: #selector(AppDelegate.openLayoutFromMenu(_:)), keyEquivalent: "")
+            item.representedObject = entry.file
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Show Layouts Folder", action: #selector(AppDelegate.showLayoutsFolder(_:)), keyEquivalent: ""))
     }
 }

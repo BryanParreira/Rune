@@ -163,6 +163,75 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         }
     }
 
+    // MARK: - Launch layouts
+
+    /// Starts each pane's command from a layout; `commands` has one list per tab, in pane order.
+    func runStartCommands(_ commands: [[String?]]) {
+        for (tab, paneCommands) in zip(terminalTabs, commands) {
+            for (session, command) in zip(tab.sessions, paneCommands) {
+                if let command { session.runWhenReady(command) }
+            }
+        }
+    }
+
+    /// Shell > Save Window as Layout…: this window's terminal tabs, splits, folders and
+    /// running commands, to open again later from the palette or the Shell menu.
+    @objc func saveLayout(_ sender: Any?) {
+        let terminals = terminalTabs
+        guard !terminals.isEmpty, let window, let store = (NSApp.delegate as? AppDelegate)?.layoutStore else { NSSound.beep(); return }
+        let layout = currentLayout(named: "")
+        let running = terminals.flatMap(\.paneCommands).compactMap { $0 }
+
+        let alert = NSAlert()
+        alert.messageText = "Save Window as Layout"
+        alert.informativeText = "Opens these \(terminals.count == 1 ? "tabs" : "\(terminals.count) tabs"), splits and folders again from the command palette (⌘P) or Shell > Open Layout."
+            + (running.isEmpty ? "" : " Commands running now start again too: " + running.prefix(3).map { "“\($0)”" }.joined(separator: ", ") + (running.count > 3 ? "…" : "."))
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        field.placeholderString = "Layout name"
+        field.stringValue = (terminals.first?.focusedSession?.currentDirectory).map { ($0 as NSString).lastPathComponent } ?? "Layout"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return }
+            var named = layout
+            named.name = name
+            let save = { self?.writeLayout(named, to: store) }
+            guard store.fileExists(named: name), let window = self?.window else { save(); return }
+            let replace = NSAlert()
+            replace.messageText = "Replace the layout “\(name)”?"
+            replace.informativeText = "A layout with this name already exists."
+            replace.addButton(withTitle: "Replace")
+            replace.addButton(withTitle: "Cancel")
+            DispatchQueue.main.async {
+                replace.beginSheetModal(for: window) { if $0 == .alertFirstButtonReturn { save() } }
+            }
+        }
+    }
+
+    /// This window's terminal tabs as a layout.
+    func currentLayout(named name: String) -> LaunchLayout {
+        let home = NSHomeDirectory()
+        return LaunchLayout(name: name, tabs: terminalTabs.map { tab in
+            LaunchLayout.Tab(title: tab.style.title, color: tab.style.color,
+                             root: LaunchLayout.Pane(layout: tab.layout, commands: tab.paneCommands, home: home))
+        })
+    }
+
+    private func writeLayout(_ layout: LaunchLayout, to store: LaunchLayoutStore) {
+        do {
+            try store.save(layout)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Couldn't save the layout"
+            alert.informativeText = error.localizedDescription
+            if let window { alert.beginSheetModal(for: window) } else { alert.runModal() }
+        }
+    }
+
     // MARK: - Tab names and colors
 
     /// Shell > Rename Tab…: edits the selected tab's name in the tab bar.
@@ -439,7 +508,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     func debugDumpTabs() {
         for (i, tab) in tabs.enumerated() {
             let kind = tab is FilePreviewTab ? ((tab as? FilePreviewTab)?.isPinned == true ? "file(pinned)" : "file(preview)") : String(describing: type(of: tab))
-            let style = (tab as? TerminalTab).map { " style=\($0.style.title ?? "-")/\($0.style.color?.rawValue ?? "-")" } ?? ""
+            let style = (tab as? TerminalTab).map {
+                " style=\($0.style.title ?? "-")/\($0.style.color?.rawValue ?? "-") panes=\($0.layout) running=\($0.paneCommands)"
+            } ?? ""
             print("TABS \(i)\(i == selectedIndex ? "*" : " ") \(kind) \(tab.title)\(style)")
         }
         if let preview = selectedTab as? FilePreviewTab, let view = preview.contentView as? FilePreviewView {
@@ -626,6 +697,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         if paneActions.contains(action) { return selectedTab is TerminalTab }
         if action == #selector(reopenClosedTab(_:)) { return !ClosedTabs.shared.isEmpty }
         if action == #selector(renameTab(_:)) { return selectedTab is TerminalTab }
+        if action == #selector(saveLayout(_:)) { return !terminalTabs.isEmpty }
         if navigation.contains(action) { return ((selectedTab as? TerminalTab)?.paneCount ?? 0) > 1 }
         return true
     }
@@ -903,6 +975,21 @@ extension MainWindowController {
             }
         }
         action("Welcome Guide", "hand.wave", keywords: "onboarding permissions setup") { NSApp.sendAction(#selector(AppDelegate.showOnboarding(_:)), to: nil, from: nil) }
+
+        // Launch layouts
+        if !terminalTabs.isEmpty {
+            action("Save Window as Layout…", "square.and.arrow.down.on.square", keywords: "launch configuration workspace tabs splits") { [weak self] in self?.saveLayout(nil) }
+        }
+        if let delegate = NSApp.delegate as? AppDelegate {
+            for entry in delegate.layoutStore?.loadAll() ?? [] {
+                let tabs = entry.layout.tabs.count
+                items.append(PaletteItem(id: "layout:" + entry.file.path, kind: .layout, title: entry.layout.name,
+                                         subtitle: "Open in a new window · \(tabs) tab\(tabs == 1 ? "" : "s")",
+                                         symbol: "rectangle.3.group", keywords: "layout launch configuration workspace") {
+                    delegate.openLayout(entry.layout)
+                })
+            }
+        }
 
         // Workflows
         for workflow in configStore.snapshot.config.workflows {
