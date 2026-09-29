@@ -191,8 +191,12 @@ final class SessionView: NSView {
             fontSize: CGFloat(snapshot.config.fontSize),
             horizontalPadding: CGFloat(snapshot.config.paddingX),
             onRun: { [weak self] command in
-                self?.session?.submit(command)
+                guard let self else { return }
+                if self.conversation.isAgent { self.conversation.agentWillRun(command) }
+                self.session?.submit(command)
             },
+            onSkip: { [weak self] command in self?.conversation.agentSkip(command) },
+            onStopAgent: { [weak self] in self?.conversation.stopAgent() },
             onEdit: { [weak self] command in
                 self?.conversation.dismiss()
                 self?.inputArea.setText(command)

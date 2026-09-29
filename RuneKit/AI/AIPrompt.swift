@@ -88,9 +88,13 @@ public enum AIPrompt {
 
     /// Full message list: system prompt, earlier turns of this conversation, then the new request.
     public static func messages(for context: AIContext, history: [OllamaClient.ChatMessage] = []) -> [OllamaClient.ChatMessage] {
-        [OllamaClient.ChatMessage(role: "system", content: systemPrompt)]
+        messages(system: systemPrompt, history: history, user: userMessage(for: context))
+    }
+
+    public static func messages(system: String, history: [OllamaClient.ChatMessage], user: String) -> [OllamaClient.ChatMessage] {
+        [OllamaClient.ChatMessage(role: "system", content: system)]
             + history
-            + [OllamaClient.ChatMessage(role: "user", content: userMessage(for: context))]
+            + [OllamaClient.ChatMessage(role: "user", content: user)]
     }
 
     public static func explainErrorRequest(command: String) -> String {

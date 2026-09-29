@@ -181,6 +181,22 @@ enum DebugDriver {
                 }
                 GlobalHotKey.shared.unregister()
                 fflush(stdout)
+            case let goal where goal.hasPrefix("@agent:"):
+                session.askAgent(String(goal.dropFirst(7)))
+            case "@agentRun":
+                let conversation = session.view.conversation
+                if case .run(let command) = conversation.agentStep {
+                    print("AGENT approving: \(command)")
+                    conversation.agentWillRun(command)
+                    session.submit(command)
+                } else {
+                    print("AGENT nothing to run (state \(conversation.state))")
+                }
+                fflush(stdout)
+            case "@agentDump":
+                let conversation = session.view.conversation
+                print("AGENT step=\(conversation.agent?.step ?? -1) state=\(conversation.state) parsed=\(String(describing: conversation.agentStep)) reply<<\(conversation.reply.prefix(300))>>")
+                fflush(stdout)
             case "@gap":
                 // Distance between the last non-blank row on screen and the terminal area's bottom.
                 let terminal = session.terminalView.getTerminal()

@@ -389,6 +389,45 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
 
     /// Sends `request` to the selected local model. The selected block (⌘↑) or, if allowed in
     /// settings, the most recent block goes along as context.
+    /// ⌥⌘↵: Rune Agent works toward `goal`, proposing one command at a time. Each command
+    /// runs only when the user presses Run; its result goes back to the agent.
+    func askAgent(_ goal: String) {
+        let trimmed = goal.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let service = AIService.shared
+        guard service.isEnabled else { NSSound.beep(); return }
+        let conversation = view.conversation
+        view.dismissWelcomeForSession()
+        guard service.isReady, let model = service.activeModel else {
+            conversation.showSetup(prompt: trimmed)
+            service.refresh()
+            return
+        }
+        let listing = FileListing.entries(at: currentDirectory, showHidden: false)
+            .prefix(AIPrompt.maxListing + 40)
+            .map { $0.isDirectory ? $0.name + "/" : $0.name }
+        let context = AIContext(
+            request: SecretRedactor.redact(trimmed),
+            cwd: currentDirectory,
+            osVersion: "macOS " + ProcessInfo.processInfo.operatingSystemVersionString,
+            shell: (ProcessInfo.processInfo.environment["SHELL"] as NSString?)?.lastPathComponent ?? "zsh",
+            gitBranch: gitBranch,
+            directoryListing: Array(listing)
+        )
+        conversation.startAgent(context, model: model, client: service.client,
+                                disableThinking: service.activeModelInfo?.supportsThinking ?? false, contextLabel: "Agent")
+    }
+
+    /// An approved agent command finished: its result becomes the agent's next input.
+    private func reportToAgent(_ block: Block) {
+        let conversation = view.conversation
+        guard let running = conversation.agent?.runningCommand,
+              commandText(of: block).trimmingCharacters(in: .whitespacesAndNewlines) == running.trimmingCharacters(in: .whitespacesAndNewlines)
+        else { return }
+        let output = SecretRedactor.redact(outputText(of: block, maxRows: 200))
+        conversation.agentStepFinished(output: output, exitCode: block.exitCode)
+    }
+
     func askAI(_ request: String, about explicitBlock: Block? = nil) {
         let trimmed = request.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -594,6 +633,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         if case .commandFinished = mark, wasRunning, let block = tracker.blocks.last, block.state == .finished {
             notifyIfUnattended(block)
             recordInRecall(block)
+            reportToAgent(block)
         }
 
         switch mark {

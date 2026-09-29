@@ -32,6 +32,21 @@ final class AIConversation: ObservableObject {
     /// Shrunk to a one-line bar so command output has room (e.g. after running a command).
     @Published var isCollapsed = false
 
+    /// Rune Agent: working toward `goal` one approved command at a time.
+    struct Agent: Equatable {
+        var goal: String
+        /// Steps whose commands have run.
+        var step = 0
+        /// The command the user approved and that's running now.
+        var runningCommand: String?
+    }
+    @Published private(set) var agent: Agent?
+    var isAgent: Bool { agent != nil }
+    /// The current reply read as an agent step.
+    var agentStep: AgentPrompt.Step? { isAgent && state == .done ? AgentPrompt.step(from: reply) : nil }
+    /// The model and client in use, for the agent's next turns.
+    private var session: (model: String, client: OllamaClient, disableThinking: Bool)?
+
     /// Messages sent so far (user turns include the environment summary).
     private var history: [OllamaClient.ChatMessage] = []
     /// Tokens received but not yet shown; flushed to `reply` ~20 times a second so long
@@ -68,14 +83,66 @@ final class AIConversation: ObservableObject {
 
     func ask(_ context: AIContext, model: String, client: OllamaClient, disableThinking: Bool,
              contextLabel: String?, followUp: Bool) {
+        // A question ends agent mode; its conversation stays for follow-ups.
+        agent = nil
+        stream(messages: AIPrompt.messages(for: context, history: followUp ? history : []), prompt: context.request,
+               model: model, client: client, disableThinking: disableThinking, contextLabel: contextLabel, followUp: followUp)
+    }
+
+    // MARK: Agent
+
+    func startAgent(_ context: AIContext, model: String, client: OllamaClient, disableThinking: Bool, contextLabel: String?) {
+        let messages = AIPrompt.messages(system: AgentPrompt.systemPrompt, history: [], user: AgentPrompt.goalMessage(for: context))
+        stream(messages: messages, prompt: context.request, model: model, client: client,
+               disableThinking: disableThinking, contextLabel: contextLabel, followUp: false)
+        agent = Agent(goal: context.request)
+    }
+
+    /// The user approved the proposed command; its result is expected next.
+    func agentWillRun(_ command: String) {
+        agent?.runningCommand = command
+        agent?.step += 1
+    }
+
+    /// The approved command finished: send its result for the next step.
+    func agentStepFinished(output: String, exitCode: Int32?) {
+        guard let current = agent, let command = current.runningCommand else { return }
+        agent?.runningCommand = nil
+        let message = AgentPrompt.resultMessage(goal: current.goal, command: command, exitCode: exitCode,
+                                                output: output, step: current.step)
+        continueAgent(with: message, label: "Step \(current.step) · \(command)")
+    }
+
+    /// The user skipped the proposed command.
+    func agentSkip(_ command: String) {
+        guard let current = agent else { return }
+        continueAgent(with: AgentPrompt.skippedMessage(goal: current.goal, command: command), label: "Skipped · \(command)")
+    }
+
+    func stopAgent() {
+        stop()
+        agent = nil
+    }
+
+    private func continueAgent(with message: String, label: String) {
+        guard let current = agent, let session else { return }
+        let messages = AIPrompt.messages(system: AgentPrompt.systemPrompt, history: history, user: message)
+        stream(messages: messages, prompt: current.goal, model: session.model, client: session.client,
+               disableThinking: session.disableThinking, contextLabel: label, followUp: true)
+        agent = current
+    }
+
+    private func stream(messages: [OllamaClient.ChatMessage], prompt newPrompt: String, model: String, client: OllamaClient,
+                        disableThinking: Bool, contextLabel: String?, followUp: Bool) {
         cancel()
+        session = (model, client, disableThinking)
         if followUp {
             if !reply.isEmpty { earlier.append(Exchange(prompt: prompt, reply: reply)) }
         } else {
             history.removeAll()
             earlier.removeAll()
         }
-        prompt = context.request
+        prompt = newPrompt
         reply = ""
         isThinking = false
         isCollapsed = false
@@ -83,7 +150,6 @@ final class AIConversation: ObservableObject {
         self.contextLabel = contextLabel ?? (followUp ? self.contextLabel : nil)
         state = .waiting
 
-        let messages = AIPrompt.messages(for: context, history: history)
         pendingUserMessage = messages.last
 
         task = Task { @MainActor [weak self] in
@@ -159,6 +225,7 @@ final class AIConversation: ObservableObject {
 
     func dismiss() {
         cancel()
+        agent = nil
         isCollapsed = false
         history.removeAll()
         earlier.removeAll()
