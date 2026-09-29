@@ -40,6 +40,9 @@ Press ⌘P for the command palette: every action, your open tabs, recent folders
 **Workflows for the commands you repeat.**
 Save a command once, with blanks like `git push {{remote}} {{branch}}`, then run it from the palette. Rune selects each blank for you to fill in and Tab moves to the next. Workflows live in your config file, so they travel with your sync folder.
 
+**Fast, and right where you left off.**
+New tabs and splits open instantly, even with a heavy zsh setup, and huge outputs scroll by without slowing down. Quit or update, and your windows, tabs, splits and folders come back just as they were. Press ⌘F to search any output.
+
 **Know when it's done.**
 Start a long build, switch to something else, and Rune sends a notification when it finishes. Click it to jump straight back to that pane.
 
@@ -80,6 +83,7 @@ Rune finds your installed models automatically. You can choose one in Settings �
 | Command history | ↑ ↓ |
 | Complete file or folder | ⇥ |
 | Jump between blocks | ⌘↑ ⌘↓ |
+| Search output · next · previous | ⌘F · ⌘G · ⇧⌘G |
 | Clear screen | ⌘K |
 | Command palette | ⌘P |
 | Files sidebar | ⌘B |
