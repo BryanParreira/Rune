@@ -201,6 +201,8 @@ final class BlockOverlayView: NSView {
         let block: Block
         let rect: NSRect
         let headerRect: NSRect
+        /// Height of the blank space between the previous block and this one.
+        var gapAbove: CGFloat = 0
     }
 
     private func visibleBlockFrames() -> [BlockFrame] {
@@ -214,8 +216,11 @@ final class BlockOverlayView: NSView {
         let bottom = top + session.terminalView.getTerminal().rows
 
         var frames: [BlockFrame] = []
+        var previousLast: Int?
         for block in session.tracker.blocks {
             let last = block.lastRow(currentRow: current)
+            defer { previousLast = last }
+            let gapRows = previousLast.map { max(0, block.headerRow - $0 - 1) } ?? 0
             guard last >= top, block.headerRow <= bottom else { continue }
             // Terminal view coordinates (not flipped) → overlay coordinates (flipped).
             let topInTerminal = NSPoint(x: 0, y: geometry.topY(ofRow: block.headerRow))
@@ -224,7 +229,7 @@ final class BlockOverlayView: NSView {
             let y1 = convert(bottomInTerminal, from: terminalView).y
             let rect = NSRect(x: 0, y: y0, width: bounds.width, height: max(cellHeight, y1 - y0))
             let header = NSRect(x: 0, y: y0, width: bounds.width, height: cellHeight)
-            frames.append(BlockFrame(block: block, rect: rect, headerRect: header))
+            frames.append(BlockFrame(block: block, rect: rect, headerRect: header, gapAbove: CGFloat(min(gapRows, 2)) * cellHeight))
         }
         return frames
     }
@@ -264,10 +269,12 @@ final class BlockOverlayView: NSView {
                 NSRect(x: 0, y: frame.rect.minY, width: Self.flagPoleWidth, height: frame.rect.height).fill()
             }
 
-            // Separator above every block except one that starts at the very top.
+            // Separator above every block except one that starts at the very top, in the
+            // middle of the blank row between blocks when there is one.
             if index > 0 || frame.rect.minY > terminalFrame.minY + 1 {
                 palette.outline.setFill()
-                NSRect(x: 0, y: frame.rect.minY.rounded(.down), width: bounds.width, height: 1).fill()
+                let y = (frame.rect.minY - frame.gapAbove / 2).rounded(.down)
+                NSRect(x: 0, y: y, width: bounds.width, height: 1).fill()
             }
 
             drawHeader(block, in: frame.headerRect, palette: palette, font: contextFont, session: session,

@@ -56,13 +56,13 @@ __rune_precmd_last() {
   if [[ "$RUNE_HONOR_PROMPT" == 1 ]]; then
     if [[ "$PS1" != *'133;B'* ]]; then
       # Show the cursor: Rune hides it while the shell starts.
-      PS1=$'%{\e]133;A\a%}\n'"$PS1"$'%{\e]133;B\a\e[?25h%}'
+      PS1=$'\n%{\e]133;A\a%}\n'"$PS1"$'%{\e]133;B\a\e[?25h%}'
     fi
   else
     # Rune shows the context (cwd, git branch) itself, so the shell prompt is empty.
-    # The leading newline is the block's spacer row; the cursor stays hidden while the
-    # input editor owns the keyboard.
-    PS1=$'%{\e]133;A\a%}\n%{\e]133;B\a\e[?25l%}'
+    # The first newline leaves a blank row between blocks, the second is the block's
+    # header row; the cursor stays hidden while the input editor owns the keyboard.
+    PS1=$'\n%{\e]133;A\a%}\n%{\e]133;B\a\e[?25l%}'
     RPS1=''
     RPROMPT=''
   fi
