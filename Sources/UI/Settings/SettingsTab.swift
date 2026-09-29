@@ -203,6 +203,8 @@ struct KeyboardShortcut: Identifiable {
         .init(action: "New window", keys: ["⌘", "N"]),
         .init(action: "Show / hide Rune from any app (default)", keys: ["⌃", "`"]),
         .init(action: "Command palette", keys: ["⌘", "P"]),
+        .init(action: "Open a link or file path in the output", keys: ["⌘", "click"]),
+        .init(action: "Rune Agent: work through a task step by step", keys: ["⌥", "⌘", "↵"]),
         .init(action: "Split pane right", keys: ["⌘", "D"]),
         .init(action: "Split pane down", keys: ["⌘", "⇧", "D"]),
         .init(action: "Close pane (or tab)", keys: ["⌘", "W"]),
@@ -708,6 +710,11 @@ struct TerminalPage: View {
             }
             SettingRow(model: model, title: "Option key acts as Meta", key: "optionAsMeta", detail: "Turn off to type special characters with Option.") {
                 SwitchControl(isOn: model.binding("optionAsMeta", { $0.optionAsMeta }))
+            }
+            SettingRow(model: model, title: "Open ⌘-clicked files in", key: "openFilesIn",
+                       detail: "⌘-click a path in the output (like src/app.ts:42:7) to open it. Your editor opens it at that line when it's VS Code, Cursor, Windsurf or Zed.") {
+                DropdownField(selection: model.binding("openFilesIn", { $0.openFilesIn }), options: ["editor", "rune"],
+                              label: { $0 == "rune" ? "Rune's preview" : "My editor" }, palette: p, width: 180)
             }
             SettingRow(model: model, title: "Use Touch ID for sudo",
                        detail: "sudo asks for your fingerprint (or Apple Watch) instead of your password, in any terminal. Rune adds one line to /etc/pam.d/sudo_local, which macOS keeps across updates; macOS asks for your administrator password to make the change.") {

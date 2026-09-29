@@ -31,6 +31,7 @@ final class FilePreviewTab: TabContent {
 
     func focus() { view.focus() }
     func find(_ request: NSMenuItem) { view.find(request) }
+    func reveal(line: Int) { view.reveal(line: line) }
     /// A "Run…" button on a shell snippet was clicked: (command, the file's folder).
     var onRunSnippet: ((String, String) -> Void)? {
         get { view.onRunSnippet }
@@ -219,6 +220,31 @@ final class FilePreviewView: NSView {
         if !scrollView.isHidden { window?.makeFirstResponder(textView) }
     }
 
+    /// A line to scroll to and select once the file is shown (1-based).
+    private var pendingLine: Int?
+
+    func reveal(line: Int) {
+        pendingLine = line
+        if !currentText.isEmpty { revealPendingLine() }
+    }
+
+    private func revealPendingLine() {
+        guard let line = pendingLine else { return }
+        pendingLine = nil
+        if headerModel.mode == .preview { headerModel.onModeChange(.source) }
+        let text = textView.string as NSString
+        var start = 0
+        var current = 1
+        while current < line, start < text.length {
+            start = NSMaxRange(text.lineRange(for: NSRange(location: start, length: 0)))
+            current += 1
+        }
+        let range = text.lineRange(for: NSRange(location: min(start, text.length), length: 0))
+        window?.makeFirstResponder(textView)
+        textView.setSelectedRange(range)
+        textView.scrollRangeToVisible(range)
+    }
+
     /// Find bar actions for the code view (the rendered Markdown view has none).
     func find(_ request: NSMenuItem) {
         guard !scrollView.isHidden else { NSSound.beep(); return }
@@ -305,6 +331,7 @@ final class FilePreviewView: NSView {
             gutter.invalidateLineIndex()
             if reloadingSameFile { scrollView.contentView.scroll(to: visible) }
             showCurrentTextMode()
+            revealPendingLine()
         case .image:
             headerModel.mode = nil
             headerModel.wraps = nil
@@ -494,7 +521,7 @@ final class FilePreviewView: NSView {
     func debugRunSnippet(_ index: Int) { linkHandler.onRun?(index) }
 
     var debugSummary: String {
-        "language=\(language.displayName) chars=\((textView.string as NSString).length) detail=\(headerModel.detail) textVisible=\(!scrollView.isHidden) colored=\(CodeHighlighter.tokens(in: textView.string, language: language).count)"
+        "selection=\(textView.selectedRange()) language=\(language.displayName) chars=\((textView.string as NSString).length) detail=\(headerModel.detail) textVisible=\(!scrollView.isHidden) colored=\(CodeHighlighter.tokens(in: textView.string, language: language).count)"
     }
     #endif
 

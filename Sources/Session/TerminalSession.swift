@@ -10,6 +10,8 @@ final class RuneTerminalView: LocalProcessTerminalView {
     var onBufferSwitched: (() -> Void)?
     /// When set, keyboard input is offered here instead of the PTY. Return true to consume it.
     var inputInterceptor: ((ArraySlice<UInt8>) -> Bool)?
+    /// A ⌘-clicked link; return true if handled (otherwise SwiftTerm opens it).
+    var onOpenLink: ((String) -> Bool)?
     /// Supplies a context menu for a click location (block actions).
     var contextMenuProvider: ((NSPoint) -> NSMenu?)?
 
@@ -32,6 +34,11 @@ final class RuneTerminalView: LocalProcessTerminalView {
         bypassInterceptor = true
         send(data: bytes[...])
         bypassInterceptor = false
+    }
+
+    override func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
+        if onOpenLink?(link) == true { return }
+        super.requestOpenLink(source: source, link: link, params: params)
     }
 
     override func scrolled(source: TerminalView, position: Double) {
@@ -79,6 +86,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     var onRequestClose: (() -> Void)?
     /// Open a new tab with this text pre-filled in the input editor (not run).
     var onRequestNewTab: ((String?) -> Void)?
+    /// Show a file in a Rune preview tab, optionally at a line.
+    var onOpenFile: ((String, Int?) -> Void)?
 
     private var snapshot: ConfigSnapshot
     private var startedAt = Date()
@@ -134,6 +143,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         terminalView.onBufferSwitched = { [weak self] in self?.updateMode() }
         terminalView.inputInterceptor = { [weak self] data in self?.intercept(data) ?? false }
         terminalView.contextMenuProvider = { [weak self] point in self?.contextMenu(atTerminalPoint: point) }
+        terminalView.onOpenLink = { [weak self] link in self?.openLink(link) ?? false }
         installOSCHandlers()
         apply(snapshot)
         HistoryStore.shared.loadIfNeeded()
@@ -418,6 +428,34 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
                                 disableThinking: service.activeModelInfo?.supportsThinking ?? false, contextLabel: "Agent")
     }
 
+    /// ⌘-click on a link in the output. File paths resolve against the folders commands ran
+    /// in (newest first) and open at their line in editors that support it.
+    private func openLink(_ link: String) -> Bool {
+        var folders = [currentDirectory]
+        for block in tracker.blocks.reversed() where !block.cwd.isEmpty && !folders.contains(block.cwd) { folders.append(block.cwd) }
+        guard let target = LinkTarget.resolve(link, folders: folders) else { return false }
+        switch target {
+        case .url(let url):
+            NSWorkspace.shared.open(url)
+        case .file(let path, let line, let column):
+            var isDirectory: ObjCBool = false
+            FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+            let fileURL = URL(fileURLWithPath: path)
+            if isDirectory.boolValue {
+                NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+            } else if config.openFilesIn == "rune", let onOpenFile {
+                onOpenFile(path, line)
+            } else if let line, let app = NSWorkspace.shared.urlForApplication(toOpen: fileURL),
+                      let bundle = Bundle(url: app)?.bundleIdentifier,
+                      let editorURL = EditorLink.url(bundleIdentifier: bundle, path: path, line: line, column: column) {
+                NSWorkspace.shared.open(editorURL)
+            } else {
+                NSWorkspace.shared.open(fileURL)
+            }
+        }
+        return true
+    }
+
     /// An approved agent command finished: its result becomes the agent's next input.
     private func reportToAgent(_ block: Block) {
         let conversation = view.conversation
@@ -569,6 +607,10 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         menu.addItem(BlockMenuItem(title: "Copy Command", block: block) { [weak self] in self?.copyCommand($0) })
         menu.addItem(BlockMenuItem(title: "Copy Output", block: block) { [weak self] in self?.copyOutput($0) })
         menu.addItem(BlockMenuItem(title: "Copy as Markdown", block: block) { [weak self] in self?.copyAsMarkdown($0) })
+        menu.addItem(BlockMenuItem(title: "Filter Output…", block: block) { [weak self] b in
+            guard let self else { return }
+            self.view.showFilter(command: self.commandText(of: b), output: self.outputText(of: b, maxRows: BlockFilterModel.maxLines))
+        })
         let rerunItem = BlockMenuItem(title: "Re-run Command", block: block) { [weak self] in self?.rerun($0) }
         rerunItem.isEnabled = mode == .editor
         menu.addItem(rerunItem)

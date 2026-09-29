@@ -304,6 +304,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             guard let self, let session else { return }
             self.closePane(session)
         }
+        session.onOpenFile = { [weak self] path, line in
+            self?.openFile(path: path, pinned: true)
+            if let line, let preview = self?.selectedTab as? FilePreviewTab { preview.reveal(line: line) }
+        }
         return session
     }
 

@@ -197,6 +197,17 @@ enum DebugDriver {
                 let conversation = session.view.conversation
                 print("AGENT step=\(conversation.agent?.step ?? -1) state=\(conversation.state) parsed=\(String(describing: conversation.agentStep)) reply<<\(conversation.reply.prefix(300))>>")
                 fflush(stdout)
+            case let link where link.hasPrefix("@link:"):
+                session.terminalView.requestOpenLink(source: session.terminalView, link: String(link.dropFirst(6)), params: [:])
+            case let query where query.hasPrefix("@filter:"):
+                if let block = session.tracker.blocks.last {
+                    session.view.showFilter(command: session.commandText(of: block), output: session.outputText(of: block))
+                    if let host = session.view.subviews.compactMap({ $0 as? NSHostingView<BlockFilterView> }).first {
+                        host.rootView.model.query = String(query.dropFirst(8))
+                        print("FILTER \(host.rootView.model.matches.count)/\(host.rootView.model.totalLines) → " + host.rootView.model.matches.prefix(5).map { "\($0.id):\($0.text)" }.joined(separator: " | "))
+                        fflush(stdout)
+                    }
+                }
             case "@gap":
                 // Distance between the last non-blank row on screen and the terminal area's bottom.
                 let terminal = session.terminalView.getTerminal()

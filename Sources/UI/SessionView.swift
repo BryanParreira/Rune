@@ -19,6 +19,7 @@ final class SessionView: NSView {
     let conversation = AIConversation()
     private let aiHost = NSHostingView(rootView: AnyView(EmptyView()))
     private let aiLayout = AIPanelLayout()
+    private var filterHost: NSHostingView<BlockFilterView>?
     private var cancellables: Set<AnyCancellable> = []
     private var snapshot: ConfigSnapshot?
 
@@ -209,6 +210,32 @@ final class SessionView: NSView {
                 NSApp.sendAction(#selector(AppDelegate.openSettings(_:)), to: nil, from: nil)
             }
         ))
+    }
+
+    /// "Filter Output…": the block's lines matching a query, over the output area.
+    func showFilter(command: String, output: String) {
+        closeFilter()
+        guard let snapshot else { return }
+        let model = BlockFilterModel(command: command, output: output, palette: ChromePalette(theme: snapshot.theme)) { [weak self] in
+            self?.closeFilter()
+        }
+        let host = NSHostingView(rootView: BlockFilterView(model: model, fontSize: CGFloat(snapshot.config.fontSize)))
+        host.safeAreaRegions = []
+        host.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(host, positioned: .above, relativeTo: nil)
+        NSLayoutConstraint.activate([
+            host.topAnchor.constraint(equalTo: topAnchor),
+            host.leadingAnchor.constraint(equalTo: leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: trailingAnchor),
+            host.bottomAnchor.constraint(equalTo: terminalContainer.bottomAnchor),
+        ])
+        filterHost = host
+    }
+
+    func closeFilter() {
+        filterHost?.removeFromSuperview()
+        filterHost = nil
+        focusPreferredResponder()
     }
 
     /// Bytes typed into the terminal view while the editor owns input.
