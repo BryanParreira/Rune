@@ -638,6 +638,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             liveTimer?.invalidate()
             liveTimer = nil
         }
+        defer { updateBottomTrim() }
         if case .exited = state { return }
         let newMode = InputRouter.mode(
             integration: integration,
@@ -649,6 +650,25 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         mode = newMode
         view.modeDidChange()
         onChange?()
+    }
+
+    /// While the editor owns input, the bottom of the screen is Rune's invisible prompt: a blank
+    /// spacer row and the empty cursor row. Hides those (up to two blank rows) so output ends
+    /// flush above the input editor. Running commands keep every row visible.
+    func updateBottomTrim() {
+        let terminal = terminalView.getTerminal()
+        var hidden = 0
+        if promptIsInvisible, integration == .active, !terminal.isCurrentBufferAlternate {
+            let screenTop = geometry.linesTrimmed + geometry.screenTop
+            var row = terminal.rows - 1
+            while hidden < 2, row > 0,
+                  let line = terminal.getScrollInvariantLine(row: screenTop + row),
+                  line.translateToString(trimRight: true).isEmpty {
+                hidden += 1
+                row -= 1
+            }
+        }
+        view.terminalContainer.hiddenBottomRows = hidden
     }
 
     /// Keystrokes that reach the terminal view while the editor owns input are redirected

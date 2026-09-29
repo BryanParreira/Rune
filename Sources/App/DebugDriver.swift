@@ -118,6 +118,18 @@ enum DebugDriver {
                         window.sendEvent(event)
                     }
                 }
+            case "@gap":
+                // Distance between the last non-blank row on screen and the terminal area's bottom.
+                let terminal = session.terminalView.getTerminal()
+                let container = session.view.terminalContainer
+                let geometry = session.geometry
+                let screenTop = geometry.linesTrimmed + geometry.screenTop
+                let lastText = (0..<terminal.rows).last {
+                    !(terminal.getScrollInvariantLine(row: screenTop + $0)?.translateToString(trimRight: true).isEmpty ?? true)
+                } ?? -1
+                let bottom = session.terminalView.frame.minY + CGFloat(lastText + 1) * geometry.cellHeight
+                print("GAP hidden=\(container.hiddenBottomRows) rows=\(terminal.rows) lastText=\(lastText) cell=\(geometry.cellHeight) gap=\(container.bounds.height - bottom) mode=\(session.mode)")
+                fflush(stdout)
             case let snap where snap.hasPrefix("@snapshot:"):
                 // Renders the window's content offscreen (works even when the window is covered).
                 guard let view = session.view.window?.contentView,

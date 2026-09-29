@@ -18,6 +18,13 @@ final class TerminalContainerView: NSView {
         didSet { layoutTerminal() }
     }
 
+    /// Rows at the bottom of the terminal pushed below this view's edge (and clipped), so the
+    /// last line of output sits right above the input editor instead of the blank rows that
+    /// hold Rune's invisible prompt.
+    var hiddenBottomRows = 0 {
+        didSet { if hiddenBottomRows != oldValue { layoutTerminal() } }
+    }
+
     var background: NSColor = .black {
         didSet { layer?.backgroundColor = background.cgColor }
     }
@@ -27,6 +34,7 @@ final class TerminalContainerView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = background.cgColor
+        layer?.masksToBounds = true
         addSubview(terminalView)
     }
 
@@ -55,14 +63,25 @@ final class TerminalContainerView: NSView {
     }
 
     private func layoutTerminal() {
-        let rect = NSRect(
-            x: padding.left,
-            y: padding.top,
+        let size = NSSize(
             width: max(0, bounds.width - padding.left - padding.right),
             height: max(0, bounds.height - padding.top - padding.bottom)
         )
-        if terminalView.frame != rect {
-            terminalView.frame = rect
+        // Size first: the terminal recomputes its row count from it.
+        if terminalView.frame.size != size {
+            terminalView.setFrameSize(size)
+        }
+        var origin = NSPoint(x: padding.left, y: padding.top)
+        if hiddenBottomRows > 0 {
+            // Shift down by the hidden rows plus the unused sliver below the last row, keeping
+            // the height (and so the row count) unchanged.
+            let rows = max(1, terminalView.getTerminal().rows)
+            let cellHeight = terminalView.getOptimalFrameSize().height / CGFloat(rows)
+            let unused = max(0, size.height - cellHeight * CGFloat(rows))
+            origin.y += CGFloat(min(hiddenBottomRows, rows - 1)) * cellHeight + unused
+        }
+        if terminalView.frame.origin != origin {
+            terminalView.setFrameOrigin(origin)
         }
         overlay?.frame = bounds
     }

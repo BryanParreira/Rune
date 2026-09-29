@@ -121,6 +121,7 @@ final class SessionView: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 30) { [weak self] in
             guard let self else { return }
             self.blockRefreshPending = false
+            self.session?.updateBottomTrim()
             self.overlay.needsDisplay = true
             self.overlay.refreshHover()
         }
