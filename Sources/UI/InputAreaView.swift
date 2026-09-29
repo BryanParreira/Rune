@@ -30,6 +30,8 @@ final class InputAreaView: NSView, NSTextViewDelegate {
             addSubview(host)
         }
         chipsHost.sizingOptions = [.intrinsicContentSize]
+        // Let the row shrink to the pane's width; its folder chip truncates instead of overflowing.
+        chipsHost.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         hintHost.sizingOptions = [.intrinsicContentSize]
         chipsHost.safeAreaRegions = []
         hintHost.safeAreaRegions = []
@@ -319,6 +321,14 @@ extension InputAreaView: CommandTextViewDelegate {
         editor.insertText(text, replacementRange: editor.selectedRange())
     }
 
+    /// Puts a workflow's command in the editor with its first `{{placeholder}}` selected.
+    func insertWorkflow(_ command: String) {
+        setText(command)
+        guard let first = Workflow.placeholderRanges(in: command).first else { return }
+        editor.fillingWorkflow = true
+        editor.setSelectedRange(first)
+    }
+
     func setText(_ text: String) {
         editor.string = text
         editor.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
@@ -372,15 +382,20 @@ struct ContextChipsRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            // In a narrow pane the folder shortens first (from the left), then the branch.
             ContextChip(symbol: "folder", text: model.directory, palette: model.palette, size: model.monoFontSize - 1)
+                .layoutPriority(0)
             if let branch = model.branch {
                 ContextChip(symbol: "arrow.triangle.branch", text: branch, palette: model.palette, size: model.monoFontSize - 1)
+                    .layoutPriority(1)
             }
             if let active = ai.activeModel {
                 Button(action: showModelMenu) {
                     ContextChip(symbol: "sparkle", text: active, palette: model.palette, size: model.monoFontSize - 1)
                 }
                 .buttonStyle(.plain)
+                .fixedSize()
+                .layoutPriority(2)
                 .help("AI model (⌘↵ to ask). Click to switch.")
                 if !ai.endpoint.isLocal {
                     ContextChip(symbol: "exclamationmark.triangle", text: "remote AI: \(ai.endpoint.url.host ?? "")", palette: model.palette, size: model.monoFontSize - 1)
@@ -388,7 +403,7 @@ struct ContextChipsRow: View {
                 }
             }
         }
-        .fixedSize()
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func showModelMenu() {

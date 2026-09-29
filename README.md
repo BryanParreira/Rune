@@ -31,6 +31,18 @@ Press ⌘↵ to ask a question instead of running it. Rune answers with the cont
 **Your shell, untouched.**
 Rune loads your own zsh setup exactly as it is: oh-my-zsh, Starship, plugins, aliases. It never edits your dotfiles.
 
+**Everything is one keystroke away.**
+Press ⌘P for the command palette: every action, your open tabs, recent folders, themes and your whole command history, found with a few letters.
+
+**Split your workspace.**
+⌘D splits a tab side by side and ⇧⌘D stacks it. Each pane is its own shell with its own input, and ⌥⌘ plus an arrow key moves between them.
+
+**Workflows for the commands you repeat.**
+Save a command once, with blanks like `git push {{remote}} {{branch}}`, then run it from the palette. Rune selects each blank for you to fill in and Tab moves to the next. Workflows live in your config file, so they travel with your sync folder.
+
+**Know when it's done.**
+Start a long build, switch to something else, and Rune sends a notification when it finishes. Click it to jump straight back to that pane.
+
 **Files at a glance.**
 Press ⌘B for a sidebar of the folder you're in, with git status colors and a project-wide filter. Click a file to read it right inside Rune, with syntax colors and line numbers.
 
@@ -69,8 +81,11 @@ Rune finds your installed models automatically. You can choose one in Settings �
 | Complete file or folder | ⇥ |
 | Jump between blocks | ⌘↑ ⌘↓ |
 | Clear screen | ⌘K |
+| Command palette | ⌘P |
 | Files sidebar | ⌘B |
-| New tab · close tab | ⌘T · ⌘W |
+| Split right · split down | ⌘D · ⇧⌘D |
+| Next pane · move between panes | ⌘] · ⌥⌘ arrows |
+| New tab · close pane or tab | ⌘T · ⌘W |
 | Settings | ⌘, |
 
 ## Privacy

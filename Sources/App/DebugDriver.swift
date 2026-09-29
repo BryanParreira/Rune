@@ -118,6 +118,29 @@ enum DebugDriver {
                         window.sendEvent(event)
                     }
                 }
+            case "@splitRight", "@splitDown", "@panes", "@closePane", "@nextPane", "@palette", "@paletteRun":
+                guard let controller = session.view.window?.windowController as? MainWindowController else { break }
+                switch step {
+                case "@splitRight": controller.splitPane(vertical: true)
+                case "@splitDown": controller.splitPane(vertical: false)
+                case "@closePane": controller.closeTab(nil)
+                case "@nextPane": controller.selectNextPane(nil)
+                case "@palette": controller.showCommandPalette(nil)
+                case "@paletteRun": controller.debugPalette?.runSelected()
+                default: controller.debugPanes()
+                }
+            case let query where query.hasPrefix("@paletteQuery:"):
+                guard let controller = session.view.window?.windowController as? MainWindowController,
+                      let palette = controller.debugPalette else { print("PALETTE closed"); break }
+                palette.query = String(query.dropFirst(14))
+                print("PALETTE \"\(palette.query)\" → " + palette.results.prefix(5).map { "\($0.kind.rawValue):\($0.title)" }.joined(separator: " | "))
+                fflush(stdout)
+            case "@editor":
+                if let controller = session.view.window?.windowController as? MainWindowController, let focused = controller.selectedSession {
+                    let editor = focused.view.inputArea.editor
+                    print("EDITOR text=<\(editor.string)> sel=\(editor.selectedRange()) workflow=\(editor.fillingWorkflow)")
+                    fflush(stdout)
+                }
             case "@gap":
                 // Distance between the last non-blank row on screen and the terminal area's bottom.
                 let terminal = session.terminalView.getTerminal()

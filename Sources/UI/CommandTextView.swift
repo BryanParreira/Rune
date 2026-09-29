@@ -1,4 +1,5 @@
 import AppKit
+import RuneKit
 
 protocol CommandTextViewDelegate: AnyObject {
     func commandTextViewSubmit(_ view: CommandTextView)
@@ -23,6 +24,9 @@ final class CommandTextView: NSTextView {
     private var placeholderColor: NSColor = .tertiaryLabelColor
     /// Grey completion shown after the caret (from history), accepted with → / End / ⌃E / ⌃F.
     var suggestionSuffix: String? { didSet { if oldValue != suggestionSuffix { needsDisplay = true } } }
+    /// Set while a workflow from the palette is being filled in: Tab jumps between its
+    /// `{{placeholders}}` and Return won't run it until they're all replaced.
+    var fillingWorkflow = false
 
     convenience init() {
         self.init(frame: .zero)
@@ -101,6 +105,11 @@ final class CommandTextView: NSTextView {
 
     override var acceptsFirstResponder: Bool { true }
 
+    override func didChangeText() {
+        super.didChangeText()
+        if string.isEmpty { fillingWorkflow = false }
+    }
+
     override func keyDown(with event: NSEvent) {
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let plain = mods.subtracting([.numericPad, .function, .capsLock]).isEmpty
@@ -112,6 +121,12 @@ final class CommandTextView: NSTextView {
             } else if mods.contains(.shift) || mods.contains(.option) {
                 insertNewlineIgnoringFieldEditor(nil)
             } else if plain {
+                if fillingWorkflow, let placeholder = Workflow.placeholderRanges(in: string).first {
+                    setSelectedRange(placeholder)
+                    scrollRangeToVisible(placeholder)
+                    return
+                }
+                fillingWorkflow = false
                 commandDelegate?.commandTextViewSubmit(self)
             } else {
                 super.keyDown(with: event)
@@ -128,6 +143,14 @@ final class CommandTextView: NSTextView {
         case 119: // End
             if acceptSuggestion(wordOnly: false) { return }
         case 48 where plain: // Tab
+            if fillingWorkflow {
+                let selection = selectedRange()
+                if let next = Workflow.nextPlaceholder(in: string, from: selection.location + selection.length) {
+                    setSelectedRange(next)
+                    return
+                }
+                fillingWorkflow = false
+            }
             commandDelegate?.commandTextViewComplete(self)
             return
         case 53: // Escape

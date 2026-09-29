@@ -15,6 +15,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configStore = store
         ConfigStore.current = store
         AIService.shared.start(store: store)
+        CommandNotifier.shared.start()
+        CommandNotifier.shared.onOpen = { [weak self] sessionID in
+            _ = self?.windowControllers.first { $0.reveal(sessionID: sessionID) }
+        }
         didFinishLaunching = true
 
         if pendingDirectories.isEmpty { pendingDirectories = [Self.launchDirectory()] }

@@ -46,6 +46,13 @@ public struct RuneConfig: Equatable, Sendable {
     public var shell: String?
     /// Folder (iCloud Drive, dotfiles repo, …) to read config/themes/workflows from.
     public var syncPath: String?
+    /// Saved commands shown in the command palette.
+    public var workflows: [Workflow] = []
+    /// Post a macOS notification when a long command finishes while Rune isn't in front
+    /// (or its tab isn't visible).
+    public var notifyWhenDone: Bool = true
+    /// How long a command must run before its completion is worth a notification.
+    public var notifyAfterSeconds: Double = 10
 
     public init() {}
 
@@ -57,7 +64,7 @@ public struct RuneConfig: Equatable, Sendable {
         "fontFamily", "fontSize", "lineHeight", "theme", "paddingX", "paddingY", "cursorStyle",
         "cursorBlink", "scrollback", "optionAsMeta", "showWelcome", "honorPrompt", "inputMode", "shell",
         "aiEnabled", "ollamaEndpoint", "aiModel", "aiIncludeBlockContext",
-        "syncPath", "hosts",
+        "syncPath", "hosts", "workflows", "notifyWhenDone", "notifyAfterSeconds",
     ]
 
     /// Written to ~/.config/rune/config.json on first launch.
@@ -126,6 +133,11 @@ extension RuneConfig {
         aiModel = reader.optionalString("aiModel")
         if let v = reader.bool("aiIncludeBlockContext") { aiIncludeBlockContext = v }
         syncPath = reader.optionalString("syncPath")
+        if let raw = dictionary["workflows"], !(raw is NSNull) {
+            workflows = Workflow.parse(raw, warnings: &reader.warnings)
+        }
+        if let v = reader.bool("notifyWhenDone") { notifyWhenDone = v }
+        if let v = reader.number("notifyAfterSeconds", range: 1...3600) { notifyAfterSeconds = v }
 
         for key in dictionary.keys.sorted() where !Self.knownKeys.contains(key) {
             if key.hasPrefix("_") || key.hasPrefix("$") { continue }

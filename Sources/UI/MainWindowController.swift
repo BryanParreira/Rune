@@ -3,7 +3,7 @@ import Combine
 import RuneKit
 import SwiftUI
 
-/// Something that can live in a tab: a terminal session or the Settings page.
+/// Something that can live in a tab: terminal panes, a file, or the Settings page.
 protocol TabContent: AnyObject {
     var id: UUID { get }
     var title: String { get }
@@ -15,8 +15,7 @@ protocol TabContent: AnyObject {
     func closeContent()
 }
 
-extension TerminalSession: TabContent {
-    var contentView: NSView { view }
+extension TerminalSession {
     func focus() { view.focusPreferredResponder() }
     func closeContent() {
         onChange = nil
@@ -25,8 +24,19 @@ extension TerminalSession: TabContent {
     }
 }
 
+/// Reports every first-responder change, so the window knows which split pane has focus.
+final class RuneWindow: NSWindow {
+    var onFirstResponderChange: ((NSResponder?) -> Void)?
+
+    override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
+        let accepted = super.makeFirstResponder(responder)
+        if accepted { onFirstResponderChange?(firstResponder) }
+        return accepted
+    }
+}
+
 /// One Rune window: custom tab bar in the titlebar, config warning strip, and the active tab.
-final class MainWindowController: NSWindowController, NSWindowDelegate {
+final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuItemValidation {
     static let tabBarHeight: CGFloat = 38
 
     private let configStore: ConfigStore
@@ -48,6 +58,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         return saved > 0 ? min(max(saved, 180), 520) : 260
     }()
 
+    fileprivate var paletteHost: NSHostingView<CommandPaletteView>?
+    fileprivate var paletteModel: PaletteModel?
+
     /// Called after the window closes so the app can drop its reference.
     var onClose: ((MainWindowController) -> Void)?
 
@@ -57,7 +70,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         tabsModel = TabsModel(palette: palette)
         warningModel = WarningModel(palette: palette)
 
-        let window = NSWindow(
+        let window = RuneWindow(
             contentRect: NSRect(x: 0, y: 0, width: 960, height: 620),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
@@ -73,6 +86,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
         super.init(window: window)
         window.delegate = self
+        window.onFirstResponderChange = { [weak self] responder in
+            guard let self, let tab = self.selectedTab as? TerminalTab, tab.noteFocus(responder) else { return }
+            self.refreshTabs()
+        }
 
         buildLayout(in: window)
         wireModels()
@@ -196,16 +213,29 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         tabs.indices.contains(selectedIndex) ? tabs[selectedIndex] : nil
     }
 
+    /// The focused pane of the selected terminal tab.
     var selectedSession: TerminalSession? {
-        selectedTab as? TerminalSession
+        (selectedTab as? TerminalTab)?.focusedSession
     }
+
+    private var terminalTabs: [TerminalTab] { tabs.compactMap { $0 as? TerminalTab } }
 
     /// The session new tabs inherit their directory from (the selected one, or the last terminal).
     private var directorySource: TerminalSession? {
-        selectedSession ?? tabs.compactMap { $0 as? TerminalSession }.last
+        selectedSession ?? terminalTabs.last?.focusedSession
     }
 
     func addTab(directory: String, prefill: String? = nil) {
+        let session = makeSession(directory: directory)
+        let tab = TerminalTab(session: session, palette: ChromePalette(theme: configStore.snapshot.theme))
+        insert(tab)
+        start(session, prefill: prefill)
+        #if DEBUG
+        if tabs.count == 1 { DebugDriver.runIfRequested(session: session) }
+        #endif
+    }
+
+    private func makeSession(directory: String) -> TerminalSession {
         let session = TerminalSession(snapshot: configStore.snapshot, directory: directory)
         session.onChange = { [weak self] in self?.refreshTabs() }
         session.onRequestNewTab = { [weak self, weak session] text in
@@ -213,19 +243,58 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         }
         session.onRequestClose = { [weak self, weak session] in
             guard let self, let session else { return }
-            self.closeTab(id: session.id)
+            self.closePane(session)
         }
-        insert(session)
+        return session
+    }
 
+    private func start(_ session: TerminalSession, prefill: String?) {
         // Size the view before the shell starts so it gets the right winsize immediately.
         contentArea.layoutSubtreeIfNeeded()
         session.start()
         session.focus()
         if let prefill { session.view.inputArea.setText(prefill) }
-        #if DEBUG
-        if tabs.count == 1 { DebugDriver.runIfRequested(session: session) }
-        #endif
     }
+
+    /// Splits the focused pane: side by side (`vertical`) or stacked.
+    func splitPane(vertical: Bool) {
+        guard let tab = selectedTab as? TerminalTab else { return }
+        let session = makeSession(directory: tab.focusedSession?.currentDirectory ?? NSHomeDirectory())
+        tab.split(adding: session, vertical: vertical)
+        start(session, prefill: nil)
+        refreshTabs()
+    }
+
+    /// Closes one pane (the whole tab when it's the last one).
+    private func closePane(_ session: TerminalSession) {
+        guard let tab = terminalTabs.first(where: { $0.contains(session) }) else { return }
+        if !tab.remove(session) {
+            closeTab(id: tab.id)
+        } else {
+            refreshTabs()
+        }
+    }
+
+    /// The tab and pane showing `sessionID`, brought to the front (e.g. from a notification).
+    @discardableResult
+    func reveal(sessionID: UUID) -> Bool {
+        for (index, tab) in tabs.enumerated() {
+            guard let terminal = tab as? TerminalTab,
+                  let session = terminal.sessions.first(where: { $0.id == sessionID }) else { continue }
+            select(index: index)
+            terminal.focus(session)
+            window?.makeKeyAndOrderFront(nil)
+            return true
+        }
+        return false
+    }
+
+    /// Every tab, for the command palette.
+    var tabSummaries: [(id: UUID, title: String, isSelected: Bool)] {
+        tabs.enumerated().map { ($1.id, $1.title, $0 == selectedIndex) }
+    }
+
+    func selectTab(withID id: UUID) { selectTab(id: id) }
 
     /// Shows the Settings tab, creating it next to the current tab if needed.
     func openSettingsTab() {
@@ -333,10 +402,55 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         addTab(directory: directorySource?.currentDirectory ?? NSHomeDirectory())
     }
 
+    /// ⌘W: closes the focused pane when the tab is split, otherwise the tab.
     @objc func closeTab(_ sender: Any?) {
-        if let tab = selectedTab {
+        if let tab = selectedTab as? TerminalTab, tab.paneCount > 1, let session = tab.focusedSession {
+            requestClosePane(session, in: tab)
+        } else if let tab = selectedTab {
             requestCloseTab(id: tab.id)
         }
+    }
+
+    private func requestClosePane(_ session: TerminalSession, in tab: TerminalTab) {
+        guard let program = session.runningProgram, let window else {
+            closePane(session)
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Close this pane?"
+        alert.informativeText = "“\(program)” is still running in this pane. Closing it will stop it."
+        alert.addButton(withTitle: "Close Pane")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+        alert.beginSheetModal(for: window) { [weak self, weak session] response in
+            guard response == .alertFirstButtonReturn, let session else { return }
+            self?.closePane(session)
+        }
+    }
+
+    @objc func splitRight(_ sender: Any?) { splitPane(vertical: true) }
+    @objc func splitDown(_ sender: Any?) { splitPane(vertical: false) }
+    @objc func selectNextPane(_ sender: Any?) { (selectedTab as? TerminalTab)?.cyclePane(forward: true); refreshTabs() }
+    @objc func selectPreviousPane(_ sender: Any?) { (selectedTab as? TerminalTab)?.cyclePane(forward: false); refreshTabs() }
+    @objc func selectPaneLeft(_ sender: Any?) { movePane(.left) }
+    @objc func selectPaneRight(_ sender: Any?) { movePane(.right) }
+    @objc func selectPaneAbove(_ sender: Any?) { movePane(.up) }
+    @objc func selectPaneBelow(_ sender: Any?) { movePane(.down) }
+
+    private func movePane(_ direction: TerminalTab.Direction) {
+        (selectedTab as? TerminalTab)?.movePane(direction)
+        refreshTabs()
+    }
+
+    /// Split and pane commands only apply to terminal tabs.
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        let paneActions: [Selector] = [#selector(splitRight(_:)), #selector(splitDown(_:))]
+        let navigation: [Selector] = [#selector(selectNextPane(_:)), #selector(selectPreviousPane(_:)), #selector(selectPaneLeft(_:)),
+                                      #selector(selectPaneRight(_:)), #selector(selectPaneAbove(_:)), #selector(selectPaneBelow(_:))]
+        guard let action = item.action else { return true }
+        if paneActions.contains(action) { return selectedTab is TerminalTab }
+        if navigation.contains(action) { return ((selectedTab as? TerminalTab)?.paneCount ?? 0) > 1 }
+        return true
     }
 
     /// Programs that would be killed by closing this window.
@@ -487,3 +601,163 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         onClose?(self)
     }
 }
+
+// MARK: - Command palette
+
+extension MainWindowController {
+    @objc func showCommandPalette(_ sender: Any?) {
+        // ⌘P again closes it.
+        if paletteHost != nil {
+            closeCommandPalette()
+            return
+        }
+        guard let root = window?.contentView else { return }
+        let model = PaletteModel(items: paletteItems(), palette: ChromePalette(theme: configStore.snapshot.theme)) { [weak self] in
+            self?.closeCommandPalette()
+        }
+        let host = NSHostingView(rootView: CommandPaletteView(model: model))
+        host.safeAreaRegions = []
+        host.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(host, positioned: .above, relativeTo: nil)
+        NSLayoutConstraint.activate([
+            host.topAnchor.constraint(equalTo: root.topAnchor),
+            host.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            host.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
+        paletteHost = host
+        paletteModel = model
+    }
+
+    func closeCommandPalette() {
+        paletteHost?.removeFromSuperview()
+        paletteHost = nil
+        paletteModel = nil
+        selectedTab?.focus()
+    }
+
+    private func paletteItems() -> [PaletteItem] {
+        var items: [PaletteItem] = []
+        func action(_ title: String, _ symbol: String, _ shortcut: String? = nil, keywords: String = "", _ run: @escaping () -> Void) {
+            items.append(PaletteItem(id: "action:" + title, kind: .action, title: title, symbol: symbol, shortcut: shortcut, keywords: keywords, run: run))
+        }
+        let isTerminal = selectedTab is TerminalTab
+        let panes = (selectedTab as? TerminalTab)?.paneCount ?? 0
+
+        // Actions
+        action("New Tab", "plus.square", "⌘T") { [weak self] in self?.newTab(nil) }
+        action("New Window", "macwindow.badge.plus", "⌘N") { NSApp.sendAction(#selector(AppDelegate.newWindow(_:)), to: nil, from: nil) }
+        if isTerminal {
+            action("Split Pane Right", "rectangle.split.2x1", "⌘D", keywords: "vertical side") { [weak self] in self?.splitPane(vertical: true) }
+            action("Split Pane Down", "rectangle.split.1x2", "⇧⌘D", keywords: "horizontal below") { [weak self] in self?.splitPane(vertical: false) }
+        }
+        if panes > 1 {
+            action("Close Pane", "xmark.rectangle", "⌘W") { [weak self] in self?.closeTab(nil) }
+            action("Focus Next Pane", "arrow.right.square", "⌘]") { [weak self] in self?.selectNextPane(nil) }
+        } else {
+            action("Close Tab", "xmark.square", "⌘W") { [weak self] in self?.closeTab(nil) }
+        }
+        action("Toggle File Tree", "sidebar.left", "⌘B", keywords: "files sidebar explorer") { [weak self] in self?.toggleFileTree(nil) }
+        if isTerminal {
+            action("Clear Screen", "eraser", "⌘K") { [weak self] in self?.clearScreen(nil) }
+            action("Select Previous Block", "arrow.up.square", "⌘↑") { [weak self] in self?.selectPreviousBlock(nil) }
+        }
+        action("Settings", "gearshape", "⌘,", keywords: "preferences") { [weak self] in self?.openSettingsTab() }
+        action("Open config.json", "doc.text", keywords: "settings file edit") { NSApp.sendAction(#selector(AppDelegate.openConfig(_:)), to: nil, from: nil) }
+        action("Reload Config", "arrow.clockwise", "⇧⌘R") { NSApp.sendAction(#selector(AppDelegate.reloadConfig(_:)), to: nil, from: nil) }
+        if UpdateController.shared.isAvailable {
+            action("Check for Updates…", "arrow.down.circle", keywords: "upgrade version") { UpdateController.shared.checkForUpdates(nil) }
+        }
+        action("Welcome Guide", "hand.wave", keywords: "onboarding permissions setup") { NSApp.sendAction(#selector(AppDelegate.showOnboarding(_:)), to: nil, from: nil) }
+
+        // Workflows
+        for workflow in configStore.snapshot.config.workflows {
+            items.append(PaletteItem(id: "workflow:" + workflow.id, kind: .workflow, title: workflow.name, subtitle: workflow.command,
+                                     symbol: "bolt", keywords: workflow.description ?? "") { [weak self] in
+                self?.insertCommand(workflow.command, asWorkflow: true)
+            })
+        }
+
+        // Tabs
+        for tab in tabSummaries where !tab.isSelected {
+            items.append(PaletteItem(id: "tab:\(tab.id)", kind: .tab, title: tab.title, subtitle: "Switch to tab", symbol: "square.on.square") { [weak self] in
+                self?.selectTab(withID: tab.id)
+            })
+        }
+
+        // Recent folders
+        let current = selectedSession?.currentDirectory
+        for path in RecentDirectories.shared.paths.prefix(20) where path != current {
+            let display = TabTitle.abbreviate(path: path, home: NSHomeDirectory())
+            items.append(PaletteItem(id: "folder:" + path, kind: .folder, title: (path as NSString).lastPathComponent, subtitle: display,
+                                     symbol: "folder") { [weak self] in
+                self?.changeDirectory(to: path)
+            })
+        }
+
+        // Themes
+        let currentTheme = configStore.snapshot.config.theme
+        for theme in configStore.availableThemes() {
+            items.append(PaletteItem(id: "theme:" + theme, kind: .theme, title: "Theme: " + theme,
+                                     subtitle: theme == currentTheme ? "Current theme" : nil, symbol: "paintpalette",
+                                     keywords: "appearance colors") { [weak self] in
+                self?.configStore.write(key: "theme", value: theme)
+            })
+        }
+
+        // History (newest first, unique)
+        var seen = Set<String>()
+        for command in HistoryStore.shared.history.entries.reversed() where seen.insert(command).inserted {
+            items.append(PaletteItem(id: "history:" + command, kind: .history, title: command, symbol: "clock.arrow.circlepath") { [weak self] in
+                self?.insertCommand(command, asWorkflow: false)
+            })
+            if seen.count >= 300 { break }
+        }
+        return items
+    }
+
+    /// Puts a command in the focused pane's input (never runs it).
+    private func insertCommand(_ command: String, asWorkflow: Bool) {
+        guard let session = selectedSession else { return }
+        switch session.mode {
+        case .editor:
+            if asWorkflow {
+                session.view.inputArea.insertWorkflow(command)
+            } else {
+                session.view.inputArea.setText(command)
+            }
+        case .shellPrompt:
+            session.terminalView.sendToShell(Array(command.utf8))
+            session.focus()
+        default:
+            NSSound.beep()
+        }
+    }
+
+    private func changeDirectory(to path: String) {
+        guard let session = selectedSession else { return }
+        let command = "cd " + FileListing.shellQuoted(path)
+        switch session.mode {
+        case .editor: session.submit(command)
+        case .shellPrompt: session.terminalView.sendToShell(Array((command + "\r").utf8))
+        default: NSSound.beep()
+        }
+    }
+}
+
+#if DEBUG
+extension MainWindowController {
+    var debugPalette: PaletteModel? { paletteModel }
+
+    func debugPanes() {
+        guard let tab = selectedTab as? TerminalTab else { print("PANES none"); return }
+        for session in tab.sessions {
+            let frame = session.view.convert(session.view.bounds, to: nil)
+            let focus = session === tab.focusedSession ? "*" : " "
+            print("PANES \(focus) \(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height)) cols=\(session.terminalView.getTerminal().cols) rows=\(session.terminalView.getTerminal().rows) alpha=\(session.view.alphaValue) cwd=\(session.currentDirectory)")
+        }
+        print("PANES count=\(tab.paneCount) tabs=\(tabs.count)")
+        fflush(stdout)
+    }
+}
+#endif

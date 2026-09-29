@@ -48,3 +48,25 @@ final class HistoryStore {
         history.append(command)
     }
 }
+
+/// Folders recently visited in any Rune pane, newest first (for the command palette).
+/// Stored per Mac in user defaults; paths only, never commands or output.
+final class RecentDirectories {
+    static let shared = RecentDirectories()
+    private static let key = "RuneRecentDirectories"
+    private static let limit = 40
+
+    private(set) var paths: [String]
+
+    private init() {
+        paths = UserDefaults.standard.stringArray(forKey: Self.key) ?? []
+    }
+
+    func record(_ path: String) {
+        guard !path.isEmpty else { return }
+        paths.removeAll { $0 == path }
+        paths.insert(path, at: 0)
+        if paths.count > Self.limit { paths.removeLast(paths.count - Self.limit) }
+        UserDefaults.standard.set(paths, forKey: Self.key)
+    }
+}

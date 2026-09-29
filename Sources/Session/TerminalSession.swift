@@ -63,7 +63,9 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     let tracker: BlockTracker
 
     private(set) var state: State = .notStarted
-    private(set) var currentDirectory: String
+    private(set) var currentDirectory: String {
+        didSet { if currentDirectory != oldValue { RecentDirectories.shared.record(currentDirectory) } }
+    }
     private(set) var gitBranch: String?
     private(set) var integration: IntegrationState = .pending
     private(set) var mode: InputMode = .editor
@@ -525,7 +527,11 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         if case .promptStart = mark, let last = tracker.blocks.last, position.row < last.headerRow {
             anchorLines.removeAll()
         }
+        let wasRunning = tracker.isCommandRunning
         let changed = tracker.handle(mark, at: position)
+        if case .commandFinished = mark, wasRunning, let block = tracker.blocks.last, block.state == .finished {
+            notifyIfUnattended(block)
+        }
 
         switch mark {
         case .promptStart, .commandStart, .outputStart, .commandFinished:
@@ -560,6 +566,18 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         if case .commandFinished = mark { refreshGitBranch() }
         if changed { view.blocksDidChange() }
         updateMode()
+    }
+
+    /// A long command finished while this pane wasn't in view: post a notification.
+    private func notifyIfUnattended(_ block: Block) {
+        let settings = config
+        let duration = block.duration()
+        guard settings.notifyWhenDone, duration >= settings.notifyAfterSeconds else { return }
+        let window = view.window
+        let watching = NSApp.isActive && window?.isKeyWindow == true && window?.isMiniaturized == false
+            && !view.isHiddenOrHasHiddenAncestor
+        guard !watching else { return }
+        CommandNotifier.shared.commandFinished(command: block.command, exitCode: block.exitCode, duration: duration, sessionID: id)
     }
 
     /// Keeps anchors only for rows that blocks still reference.

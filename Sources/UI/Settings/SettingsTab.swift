@@ -34,6 +34,7 @@ final class SettingsModel: ObservableObject {
         case appearance = "Appearance"
         case terminal = "Terminal"
         case input = "Input"
+        case workflows = "Workflows"
         case ai = "AI"
         case keyboard = "Keyboard shortcuts"
         case sync = "Sync & machines"
@@ -161,7 +162,9 @@ enum SettingsIndex {
         case .appearance:
             return ["Theme", "Font", "Font size", "Line height", "Cursor", "Blinking cursor", "Padding", "Nerd Font", "icons", "colors"]
         case .terminal:
-            return ["Shell", "Show shell prompt", "PS1", "Starship", "Scrollback", "Option key", "Meta"]
+            return ["Shell", "Show shell prompt", "PS1", "Starship", "Scrollback", "Option key", "Meta", "Notifications", "Notify when done", "long commands"]
+        case .workflows:
+            return ["Workflows", "saved commands", "snippets", "command palette", "placeholders"]
         case .input:
             return ["New session panel", "welcome", "editor", "history", "completion", "Type commands in", "zsh prompt", "autosuggestions", "syntax highlighting", "plugins"]
         case .ai:
@@ -194,10 +197,16 @@ struct KeyboardShortcut: Identifiable {
         .init(action: "Clear screen", keys: ["⌘", "K"]),
         .init(action: "Toggle file tree", keys: ["⌘", "B"]),
         .init(action: "New tab", keys: ["⌘", "T"]),
-        .init(action: "Close tab", keys: ["⌘", "W"]),
         .init(action: "Switch to tab 1–8 / last tab", keys: ["⌘", "1…9"]),
         .init(action: "Next / previous tab", keys: ["⌘", "⇧", "] ["]),
         .init(action: "New window", keys: ["⌘", "N"]),
+        .init(action: "Command palette", keys: ["⌘", "P"]),
+        .init(action: "Split pane right", keys: ["⌘", "D"]),
+        .init(action: "Split pane down", keys: ["⌘", "⇧", "D"]),
+        .init(action: "Close pane (or tab)", keys: ["⌘", "W"]),
+        .init(action: "Next / previous pane", keys: ["⌘", "] ["]),
+        .init(action: "Move to the pane in a direction", keys: ["⌥", "⌘", "←→↑↓"]),
+        .init(action: "Next workflow placeholder", keys: ["⇥"]),
         .init(action: "Settings", keys: ["⌘", ","]),
         .init(action: "Find", keys: ["⌘", "F"]),
     ]
@@ -270,6 +279,7 @@ struct SettingsView: View {
         case .appearance: AppearancePage(model: model)
         case .terminal: TerminalPage(model: model)
         case .input: InputPage(model: model)
+        case .workflows: WorkflowsPage(model: model)
         case .ai: AIPage(model: model)
         case .keyboard: KeyboardPage(model: model)
         case .sync: SyncPage(model: model)
@@ -696,6 +706,14 @@ struct TerminalPage: View {
             SettingRow(model: model, title: "Option key acts as Meta", key: "optionAsMeta", detail: "Turn off to type special characters with Option.") {
                 SwitchControl(isOn: model.binding("optionAsMeta", { $0.optionAsMeta }))
             }
+            SettingRow(model: model, title: "Notify when long commands finish", key: "notifyWhenDone",
+                       detail: "A macOS notification when a command finishes while Rune is in the background or its tab isn't visible. Click it to jump back.") {
+                SwitchControl(isOn: model.binding("notifyWhenDone", { $0.notifyWhenDone }))
+            }
+            SettingRow(model: model, title: "Only for commands longer than", key: "notifyAfterSeconds") {
+                NumberField(value: model.binding("notifyAfterSeconds", { $0.notifyAfterSeconds }),
+                            range: 1...3600, step: 5, format: { "\(Int($0)) s" }, palette: p)
+            }
         }
     }
 }
@@ -989,5 +1007,151 @@ struct AboutPage: View {
                 }
             }
         }
+    }
+}
+
+struct WorkflowsPage: View {
+    @ObservedObject var model: SettingsModel
+    /// Index being edited; `workflows.count` means a new one.
+    @State private var editing: Int?
+    @State private var name = ""
+    @State private var command = ""
+    @State private var summary = ""
+
+    private var workflows: [Workflow] { model.config.workflows }
+
+    var body: some View {
+        let p = model.palette
+        VStack(alignment: .leading, spacing: 0) {
+            PageTitle(text: "Workflows", palette: p)
+            Text("Saved commands you can run from the command palette (⌘P). Write {{name}} for a value to fill in: Rune selects each one in turn and Tab moves to the next. Workflows live in config.json, so they sync along with your settings.")
+                .font(.system(size: 12))
+                .foregroundColor(Color(nsColor: p.secondary))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 18)
+
+            ForEach(Array(workflows.enumerated()), id: \.offset) { index, workflow in
+                if editing == index {
+                    form(palette: p)
+                } else {
+                    row(workflow, index: index, palette: p)
+                }
+                SettingsDivider(palette: p)
+            }
+            if editing == workflows.count {
+                form(palette: p)
+            } else if editing == nil {
+                Button {
+                    begin(index: workflows.count, with: nil)
+                } label: {
+                    Label("Add Workflow", systemImage: "plus")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(Color(nsColor: p.accent))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 14)
+            }
+        }
+    }
+
+    private func row(_ workflow: Workflow, index: Int, palette p: ChromePalette) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "bolt")
+                .font(.system(size: 12))
+                .foregroundColor(Color(nsColor: p.ansiYellow))
+                .frame(width: 18, height: 18)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(workflow.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(Color(nsColor: p.text))
+                Text(workflow.command)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(Color(nsColor: p.secondary))
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+                if let description = workflow.description {
+                    Text(description)
+                        .font(.system(size: 11.5))
+                        .foregroundColor(Color(nsColor: p.hint))
+                }
+            }
+            Spacer()
+            if editing == nil {
+                Button("Edit") { begin(index: index, with: workflow) }
+                    .buttonStyle(.plain)
+                    .foregroundColor(Color(nsColor: p.accent))
+                Button("Delete") { save(removing: index) }
+                    .buttonStyle(.plain)
+                    .foregroundColor(Color(nsColor: p.error))
+            }
+        }
+        .font(.system(size: 12.5))
+        .padding(.vertical, 12)
+    }
+
+    private func form(palette p: ChromePalette) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            field("Name", text: $name, placeholder: "Deploy to staging", mono: false, palette: p)
+            field("Command", text: $command, placeholder: "git push {{remote}} {{branch}}", mono: true, palette: p)
+            field("Description", text: $summary, placeholder: "Optional", mono: false, palette: p)
+            HStack(spacing: 14) {
+                Button("Save") { save(removing: nil) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(Color(nsColor: command.trimmingCharacters(in: .whitespaces).isEmpty ? p.hint : p.accent))
+                    .disabled(command.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .keyboardShortcut(.defaultAction)
+                Button("Cancel") { editing = nil }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 13))
+                    .foregroundColor(Color(nsColor: p.secondary))
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(.top, 2)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: p.surface1)))
+        .padding(.vertical, 10)
+    }
+
+    private func field(_ label: String, text: Binding<String>, placeholder: String, mono: Bool, palette p: ChromePalette) -> some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundColor(Color(nsColor: p.secondary))
+                .frame(width: 84, alignment: .leading)
+            TextField(placeholder, text: text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13, design: mono ? .monospaced : .default))
+                .foregroundColor(Color(nsColor: p.text))
+                .padding(.horizontal, 8)
+                .frame(height: 28)
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(nsColor: p.foreground.withAlphaComponent(0.16)), lineWidth: 1))
+        }
+    }
+
+    private func begin(index: Int, with workflow: Workflow?) {
+        name = workflow?.name ?? ""
+        command = workflow?.command ?? ""
+        summary = workflow?.description ?? ""
+        editing = index
+    }
+
+    /// Writes the list back to config.json: the edited entry saved, or `removing` deleted.
+    private func save(removing: Int?) {
+        var list = workflows
+        if let removing, list.indices.contains(removing) {
+            list.remove(at: removing)
+        } else if let editing {
+            let trimmedCommand = command.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedCommand.isEmpty else { return }
+            let trimmedName = name.trimmingCharacters(in: .whitespaces)
+            let trimmedSummary = summary.trimmingCharacters(in: .whitespaces)
+            let workflow = Workflow(name: trimmedName.isEmpty ? trimmedCommand : trimmedName, command: trimmedCommand,
+                                    description: trimmedSummary.isEmpty ? nil : trimmedSummary)
+            if list.indices.contains(editing) { list[editing] = workflow } else { list.append(workflow) }
+        }
+        model.set("workflows", list.map(\.jsonObject))
+        editing = nil
     }
 }

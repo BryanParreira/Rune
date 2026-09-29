@@ -59,6 +59,9 @@ enum MainMenu {
         menu.addItem(item("New Tab", #selector(MainWindowController.newTab(_:)), "t"))
         menu.addItem(item("New Window", #selector(AppDelegate.newWindow(_:)), "n"))
         menu.addItem(.separator())
+        menu.addItem(item("Split Pane Right", #selector(MainWindowController.splitRight(_:)), "d"))
+        menu.addItem(item("Split Pane Down", #selector(MainWindowController.splitDown(_:)), "d", [.command, .shift]))
+        menu.addItem(.separator())
         menu.addItem(item("Close Tab", #selector(MainWindowController.closeTab(_:)), "w"))
         menu.addItem(item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]))
         return menu
@@ -78,6 +81,7 @@ enum MainMenu {
 
     private static func viewMenu() -> NSMenu {
         let menu = NSMenu(title: "View")
+        menu.addItem(item("Command Palette…", #selector(MainWindowController.showCommandPalette(_:)), "p"))
         menu.addItem(item("Toggle File Tree", #selector(MainWindowController.toggleFileTree(_:)), "b"))
         menu.addItem(.separator())
         menu.addItem(item("Select Previous Block", #selector(MainWindowController.selectPreviousBlock(_:)), "\u{F700}"))
@@ -94,6 +98,13 @@ enum MainMenu {
         menu.addItem(.separator())
         menu.addItem(item("Show Next Tab", #selector(MainWindowController.selectNextTab(_:)), "]", [.command, .shift]))
         menu.addItem(item("Show Previous Tab", #selector(MainWindowController.selectPreviousTab(_:)), "[", [.command, .shift]))
+        menu.addItem(.separator())
+        menu.addItem(item("Next Pane", #selector(MainWindowController.selectNextPane(_:)), "]"))
+        menu.addItem(item("Previous Pane", #selector(MainWindowController.selectPreviousPane(_:)), "["))
+        menu.addItem(item("Pane on the Left", #selector(MainWindowController.selectPaneLeft(_:)), "\u{F702}", [.command, .option]))
+        menu.addItem(item("Pane on the Right", #selector(MainWindowController.selectPaneRight(_:)), "\u{F703}", [.command, .option]))
+        menu.addItem(item("Pane Above", #selector(MainWindowController.selectPaneAbove(_:)), "\u{F700}", [.command, .option]))
+        menu.addItem(item("Pane Below", #selector(MainWindowController.selectPaneBelow(_:)), "\u{F701}", [.command, .option]))
         for number in 1...9 {
             let title = number == 9 ? "Select Last Tab" : "Select Tab \(number)"
             let entry = item(title, #selector(MainWindowController.selectTabByNumber(_:)), "\(number)")

@@ -54,10 +54,10 @@ final class BlockOverlayView: NSView {
         guard let session = sessionView?.session, session.mode != .fullscreenApp else { return nil }
         let terminal = session.terminalView.getTerminal()
         guard session.geometry.lineCount > terminal.rows else { return nil }
-        // The terminal can extend below the visible area (hidden blank rows); use what shows.
-        let frame = session.terminalView.frame.intersection(bounds)
-        guard frame.height > 8 else { return nil }
-        return NSRect(x: bounds.maxX - 10, y: frame.minY + 2, width: 6, height: frame.height - 4)
+        // The whole pane, not the terminal's frame: that is shifted down when blank rows at the
+        // bottom are hidden.
+        guard bounds.height > 24 else { return nil }
+        return NSRect(x: bounds.maxX - 10, y: bounds.minY + 8, width: 6, height: bounds.height - 16)
     }
 
     private func thumbRect(in track: NSRect) -> NSRect? {
