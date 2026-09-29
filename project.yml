@@ -120,6 +120,18 @@ targets:
         NSLocationUsageDescription: A command you run in Rune wants to use your location.
         NSBluetoothAlwaysUsageDescription: A command you run in Rune wants to use Bluetooth.
         NSLocalNetworkUsageDescription: Rune connects to Ollama and other services on your local network when you use them.
+        # Finder > right-click a folder > Services (Quick Actions).
+        NSServices:
+          - NSMenuItem: { default: New Rune Tab Here }
+            NSMessage: newTabHere
+            NSPortName: Rune
+            NSRequiredContext: {}
+            NSSendFileTypes: [public.folder]
+          - NSMenuItem: { default: New Rune Window Here }
+            NSMessage: newWindowHere
+            NSPortName: Rune
+            NSRequiredContext: {}
+            NSSendFileTypes: [public.folder]
         CFBundleDocumentTypes:
           - CFBundleTypeName: Folder
             CFBundleTypeRole: Viewer

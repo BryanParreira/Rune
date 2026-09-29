@@ -14,8 +14,12 @@ import RuneKit
 ///   @ai:question    → ask the AI
 ///   @dump           → print AI conversation state to stdout
 enum DebugDriver {
+    /// The script runs once per launch, in the first window (not again in windows it opens).
+    private static var started = false
+
     static func runIfRequested(session: TerminalSession) {
-        guard let script = ProcessInfo.processInfo.environment["RUNE_DEBUG_SCRIPT"], !script.isEmpty else { return }
+        guard !started, let script = ProcessInfo.processInfo.environment["RUNE_DEBUG_SCRIPT"], !script.isEmpty else { return }
+        started = true
         let steps = script.components(separatedBy: "||")
         run(steps[...], session: session, delay: Double(ProcessInfo.processInfo.environment["RUNE_DEBUG_STEP"] ?? "") ?? 3)
     }
@@ -204,6 +208,16 @@ enum DebugDriver {
                 (session.view.window?.windowController as? MainWindowController)?.debugStyleSelectedTab(String(style.dropFirst(10)))
             case "@renameTab":
                 (session.view.window?.windowController as? MainWindowController)?.renameTab(nil)
+            case let service where service.hasPrefix("@service:"):
+                // `@service:tab:/path` or `@service:window:/path`, as Finder would send it.
+                let parts = service.dropFirst(9).split(separator: ":", maxSplits: 1).map(String.init)
+                let pasteboard = NSPasteboard(name: NSPasteboard.Name("RuneDebugService"))
+                pasteboard.clearContents()
+                pasteboard.writeObjects([URL(fileURLWithPath: parts.last ?? "/") as NSURL])
+                var message: NSString?
+                if let delegate = NSApp.delegate as? AppDelegate {
+                    if parts.first == "window" { delegate.newWindowHere(pasteboard, userData: nil, error: &message) } else { delegate.newTabHere(pasteboard, userData: nil, error: &message) }
+                }
             case "@newTab":
                 (session.view.window?.windowController as? MainWindowController)?.newTab(nil)
             case "@closeTab":

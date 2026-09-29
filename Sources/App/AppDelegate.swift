@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         didFinishLaunching = true
         setUpGlobalHotKey(store)
+        NSApp.servicesProvider = self
 
         // Opened on a specific folder (Finder, `rune`, --cwd): open just that.
         let openedOnFolder = !pendingDirectories.isEmpty || CommandLine.arguments.contains("--cwd")
@@ -135,6 +136,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         directories.forEach(open(directory:))
+        NSApp.activate()
+    }
+
+    // MARK: - Finder services
+
+    /// Services > New Rune Tab Here, on folders selected in Finder.
+    @objc func newTabHere(_ pasteboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString?>) {
+        openFromService(pasteboard, newWindow: false)
+    }
+
+    /// Services > New Rune Window Here.
+    @objc func newWindowHere(_ pasteboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString?>) {
+        openFromService(pasteboard, newWindow: true)
+    }
+
+    private func openFromService(_ pasteboard: NSPasteboard, newWindow: Bool) {
+        let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        let directories = urls.compactMap(Self.directory(for:))
+        guard !directories.isEmpty else { return }
+        guard didFinishLaunching, !isFirstRunOnboarding else {
+            pendingDirectories.append(contentsOf: directories)
+            return
+        }
+        // Started at login with no window yet: this is the window the user asked for.
+        startupWindowsPending = false
+        for directory in directories {
+            if newWindow { makeWindow(directory: directory) } else { open(directory: directory) }
+        }
         NSApp.activate()
     }
 
