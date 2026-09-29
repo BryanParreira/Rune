@@ -18,7 +18,10 @@ final class TerminalTab: TabContent {
         return sessions.first
     }
 
-    var title: String { focusedSession?.title ?? "Terminal" }
+    /// The name and color the user gave this tab, if any.
+    var style = TabStyle()
+
+    var title: String { style.title ?? focusedSession?.title ?? "Terminal" }
     var runningProgram: String? { sessions.lazy.compactMap(\.runningProgram).first }
     var contentView: NSView { root }
     var paneCount: Int { sessions.count }
@@ -31,8 +34,9 @@ final class TerminalTab: TabContent {
     }
 
     /// Rebuilds a saved split layout, creating one session per pane (not started yet).
-    init(layout: PaneLayout, palette: ChromePalette, makeSession: (String) -> TerminalSession) {
+    init(layout: PaneLayout, style: TabStyle?, palette: ChromePalette, makeSession: (String) -> TerminalSession) {
         dividerColor = palette.outline
+        self.style = style ?? TabStyle()
         var created: [TerminalSession] = []
         func build(_ node: PaneLayout) -> NSView {
             switch node {
@@ -64,6 +68,11 @@ final class TerminalTab: TabContent {
             return children.count == 1 ? children[0] : .split(vertical: split.isVertical, children: children)
         }
         return root.child.flatMap(walk) ?? .pane(directory: focusedSession?.currentDirectory ?? NSHomeDirectory())
+    }
+
+    /// What reopens this tab: its panes, name and color.
+    var saved: SavedSession.Tab {
+        .terminal(layout, style: style.isEmpty ? nil : style)
     }
 
     func contains(_ session: TerminalSession) -> Bool {

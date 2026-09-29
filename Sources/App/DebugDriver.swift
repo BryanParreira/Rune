@@ -200,6 +200,14 @@ enum DebugDriver {
                 let blocks = session.tracker.blocks.suffix(3).map { "[\($0.command) exit=\($0.exitCode.map(String.init) ?? "-") cwd=\($0.cwd)]" }.joined(separator: " ")
                 print("REMOTE state=\(session.remote) mode=\(session.mode) editorText=<\(session.view.inputArea.editor.string)> blocks=\(blocks)")
                 fflush(stdout)
+            case let style where style.hasPrefix("@tabStyle:"):
+                (session.view.window?.windowController as? MainWindowController)?.debugStyleSelectedTab(String(style.dropFirst(10)))
+            case "@renameTab":
+                (session.view.window?.windowController as? MainWindowController)?.renameTab(nil)
+            case "@newTab":
+                (session.view.window?.windowController as? MainWindowController)?.newTab(nil)
+            case "@closeTab":
+                (session.view.window?.windowController as? MainWindowController)?.closeTab(nil)
             case "@reopen":
                 (session.view.window?.windowController as? MainWindowController)?.reopenClosedTab(nil)
             case "@gap":

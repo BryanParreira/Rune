@@ -23,7 +23,7 @@ public struct SavedSession: Codable, Equatable, Sendable {
     }
 
     public enum Tab: Codable, Equatable, Sendable {
-        case terminal(PaneLayout)
+        case terminal(PaneLayout, style: TabStyle? = nil)
         case file(path: String)
     }
 
@@ -44,7 +44,7 @@ public struct SavedSession: Codable, Equatable, Sendable {
             var window = window
             window.tabs = window.tabs.compactMap { tab in
                 switch tab {
-                case .terminal(let layout): return .terminal(layout.replacingMissingDirectories(fileExists: fileExists, home: home))
+                case .terminal(let layout, let style): return .terminal(layout.replacingMissingDirectories(fileExists: fileExists, home: home), style: style)
                 case .file(let path): return fileExists(path) ? tab : nil
                 }
             }
@@ -54,6 +54,26 @@ public struct SavedSession: Codable, Equatable, Sendable {
         }
         return result
     }
+}
+
+/// A name and color the user gave a tab (either may be unset: the tab then shows the
+/// running program or folder, without a color).
+public struct TabStyle: Codable, Equatable, Sendable {
+    public var title: String?
+    public var color: TabColor?
+
+    public init(title: String? = nil, color: TabColor? = nil) {
+        self.title = title
+        self.color = color
+    }
+
+    public var isEmpty: Bool { title == nil && color == nil }
+}
+
+public enum TabColor: String, Codable, CaseIterable, Sendable {
+    case red, orange, yellow, green, blue, purple, pink
+
+    public var displayName: String { rawValue.capitalized }
 }
 
 /// Split panes as a tree: a pane is a shell in a folder, a split holds panes side by side

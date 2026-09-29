@@ -124,7 +124,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         for (index, tab) in tabs.enumerated() {
             if index == selectedIndex { selected = saved.count }
             if let terminal = tab as? TerminalTab {
-                saved.append(.terminal(terminal.layout))
+                saved.append(terminal.saved)
             } else if let file = tab as? FilePreviewTab, file.isPinned {
                 saved.append(.file(path: file.path))
             }
@@ -147,8 +147,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     /// Opens a tab from saved state (session restore, launch configurations, reopen closed).
     func openSavedTab(_ tab: SavedSession.Tab) {
         switch tab {
-        case .terminal(let layout):
-            let terminal = TerminalTab(layout: layout, palette: ChromePalette(theme: configStore.snapshot.theme)) { directory in
+        case .terminal(let layout, let style):
+            let terminal = TerminalTab(layout: layout, style: style, palette: ChromePalette(theme: configStore.snapshot.theme)) { directory in
                 self.makeSession(directory: directory)
             }
             insert(terminal)
@@ -160,6 +160,43 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         case .file(let path):
             guard FileManager.default.fileExists(atPath: path) else { return }
             insert(makeFileTab(path: path, pinned: true))
+        }
+    }
+
+    // MARK: - Tab names and colors
+
+    /// Shell > Rename Tab…: edits the selected tab's name in the tab bar.
+    @objc func renameTab(_ sender: Any?) {
+        guard let terminal = selectedTab as? TerminalTab else { NSSound.beep(); return }
+        tabsModel.editingID = terminal.id
+    }
+
+    private func setStyle(ofTab id: UUID, _ change: (inout TabStyle) -> Void) {
+        guard let terminal = tabs.first(where: { $0.id == id }) as? TerminalTab else { return }
+        change(&terminal.style)
+        if let title = terminal.style.title?.trimmingCharacters(in: .whitespaces) {
+            terminal.style.title = title.isEmpty ? nil : title
+        }
+        refreshTabs()
+    }
+
+    /// Asks once if any of them is running something.
+    private func closeOtherTabs(keeping id: UUID) {
+        let others = tabs.filter { $0.id != id }
+        let close = { [weak self] in
+            others.forEach { self?.closeTab(id: $0.id) }
+            self?.selectTab(id: id)
+        }
+        let running = others.compactMap(\.runningProgram)
+        guard !running.isEmpty, let window else { return close() }
+        let alert = NSAlert()
+        alert.messageText = "Close the other tabs?"
+        alert.informativeText = Self.describe(running) + " Closing the other tabs will stop \(running.count == 1 ? "it" : "them")."
+        alert.addButton(withTitle: "Close Tabs")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+        alert.beginSheetModal(for: window) { response in
+            if response == .alertFirstButtonReturn { close() }
         }
     }
 
@@ -236,6 +273,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         tabsModel.onNew = { [weak self] in self?.newTab(nil) }
         tabsModel.onToggleSidebar = { [weak self] in self?.toggleFileTree(nil) }
         tabsModel.onOpenSettings = { [weak self] in self?.openSettingsTab() }
+        tabsModel.onRename = { [weak self] id, title in self?.setStyle(ofTab: id) { $0.title = title } }
+        tabsModel.onSetColor = { [weak self] id, color in self?.setStyle(ofTab: id) { $0.color = color } }
+        tabsModel.onCloseOthers = { [weak self] id in self?.closeOtherTabs(keeping: id) }
         fileTree.onInsertPath = { [weak self] path in
             guard let session = self?.fileTreeSession else { return }
             let quoted = FileListing.shellQuoted(path)
@@ -388,10 +428,19 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         (selectedTab as? FilePreviewTab)?.contentView as? FilePreviewView
     }
 
+    /// `name|color` for the selected tab, through the same calls as the tab bar.
+    func debugStyleSelectedTab(_ spec: String) {
+        guard let id = selectedTab?.id else { return }
+        let parts = spec.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+        if let name = parts.first, !name.isEmpty { tabsModel.onRename(id, name == "-" ? "" : name) }
+        if parts.count > 1 { tabsModel.onSetColor(id, TabColor(rawValue: parts[1])) }
+    }
+
     func debugDumpTabs() {
         for (i, tab) in tabs.enumerated() {
             let kind = tab is FilePreviewTab ? ((tab as? FilePreviewTab)?.isPinned == true ? "file(pinned)" : "file(preview)") : String(describing: type(of: tab))
-            print("TABS \(i)\(i == selectedIndex ? "*" : " ") \(kind) \(tab.title)")
+            let style = (tab as? TerminalTab).map { " style=\($0.style.title ?? "-")/\($0.style.color?.rawValue ?? "-")" } ?? ""
+            print("TABS \(i)\(i == selectedIndex ? "*" : " ") \(kind) \(tab.title)\(style)")
         }
         if let preview = selectedTab as? FilePreviewTab, let view = preview.contentView as? FilePreviewView {
             print("TABS preview " + view.debugSummary)
@@ -478,7 +527,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let tab = tabs.remove(at: index)
         if let terminal = tab as? TerminalTab {
-            ClosedTabs.shared.push(.terminal(terminal.layout))
+            ClosedTabs.shared.push(terminal.saved)
         } else if let file = tab as? FilePreviewTab {
             ClosedTabs.shared.push(.file(path: file.path))
         }
@@ -497,7 +546,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     private var fileTreeSession: TerminalSession? { directorySource }
 
     private func refreshTabs() {
-        tabsModel.tabs = tabs.map { TabItem(id: $0.id, title: $0.title, isPreview: ($0 as? FilePreviewTab)?.isPinned == false) }
+        tabsModel.tabs = tabs.map { tab in
+            let terminal = tab as? TerminalTab
+            return TabItem(id: tab.id, title: tab.title, isPreview: (tab as? FilePreviewTab)?.isPinned == false,
+                           color: terminal?.style.color, customTitle: terminal.map { $0.style.title } ?? nil, canStyle: terminal != nil)
+        }
         tabsModel.selectedID = selectedTab?.id
         if let directory = fileTreeSession?.currentDirectory {
             fileTree.setRoot(directory)
@@ -572,6 +625,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         guard let action = item.action else { return true }
         if paneActions.contains(action) { return selectedTab is TerminalTab }
         if action == #selector(reopenClosedTab(_:)) { return !ClosedTabs.shared.isEmpty }
+        if action == #selector(renameTab(_:)) { return selectedTab is TerminalTab }
         if navigation.contains(action) { return ((selectedTab as? TerminalTab)?.paneCount ?? 0) > 1 }
         return true
     }
@@ -811,6 +865,10 @@ extension MainWindowController {
         if isTerminal {
             action("Split Pane Right", "rectangle.split.2x1", "⌘D", keywords: "vertical side") { [weak self] in self?.splitPane(vertical: true) }
             action("Split Pane Down", "rectangle.split.1x2", "⇧⌘D", keywords: "horizontal below") { [weak self] in self?.splitPane(vertical: false) }
+            action("Rename Tab…", "character.cursor.ibeam", keywords: "name title label color") { [weak self] in self?.renameTab(nil) }
+        }
+        if !ClosedTabs.shared.isEmpty {
+            action("Reopen Closed Tab", "arrow.uturn.backward.square", "⇧⌘T", keywords: "undo close restore") { [weak self] in self?.reopenClosedTab(nil) }
         }
         if panes > 1 {
             action("Close Pane", "xmark.rectangle", "⌘W") { [weak self] in self?.closeTab(nil) }
