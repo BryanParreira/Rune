@@ -183,7 +183,7 @@ struct CommandPaletteView: View {
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color(nsColor: p.surface1))
-                    .shadow(color: .black.opacity(0.45), radius: 30, y: 16)
+                    .shadow(color: .black.opacity(p.isLight ? 0.18 : 0.45), radius: 30, y: 16)
             )
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(nsColor: p.outline), lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))

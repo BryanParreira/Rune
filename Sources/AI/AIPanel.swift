@@ -308,7 +308,7 @@ private struct PanelButton: View {
                 if let systemImage { Image(systemName: systemImage).font(.system(size: 9, weight: .semibold)) }
                 Text(title).font(.system(size: 12, weight: .medium))
             }
-            .foregroundColor(prominent ? .white : Color(nsColor: palette.text))
+            .foregroundColor(prominent ? Color(nsColor: palette.onAccent) : Color(nsColor: palette.text))
             .padding(.horizontal, 12)
             .frame(height: 26)
             .background(

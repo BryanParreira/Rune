@@ -64,7 +64,7 @@ public struct Theme: Equatable, Sendable {
         selectionForeground: RGB(0x2A, 0x28, 0x22),
         accent: RGB(0xB4, 0x53, 0x09),
         ansi: [
-            "#2a2822", "#b3261e", "#3f7d3a", "#9a6a00", "#2f5d9e", "#8a3f8f", "#1f7a7a", "#857f73",
+            "#2a2822", "#b3261e", "#34702f", "#855a00", "#2f5d9e", "#8a3f8f", "#17706f", "#857f73",
             "#6b6760", "#d0342c", "#4f9148", "#b8860b", "#3a6fc4", "#a64fa6", "#2a9090", "#3a3830",
         ].compactMap(RGB.init(hex:))
     )
@@ -81,7 +81,7 @@ public struct Theme: Equatable, Sendable {
         accent: RGB(0xF5, 0xB8, 0x3D),
         ansi: [
             "#2a2825", "#f2766b", "#9ccc7a", "#f5c451", "#86a8e8", "#d49ae0", "#7fcfc4", "#d8d3c8",
-            "#5a564e", "#ff8e82", "#b4dd93", "#ffd66e", "#a3bff0", "#e3b3ec", "#9fe0d6", "#f7f4ee",
+            "#6b665c", "#ff8e82", "#b4dd93", "#ffd66e", "#a3bff0", "#e3b3ec", "#9fe0d6", "#f7f4ee",
         ].compactMap(RGB.init(hex:))
     )
 

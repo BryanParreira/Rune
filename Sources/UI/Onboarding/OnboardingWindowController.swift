@@ -295,7 +295,7 @@ struct OnboardingView: View {
                         .font(.system(size: 11, weight: .bold))
                 }
                 .font(.system(size: 13.5, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(Color(nsColor: p.onAccent))
                 .padding(.horizontal, 20)
                 .frame(height: 38)
                 .background(
@@ -393,7 +393,7 @@ private struct StepRow: View {
                 } else {
                     Text("\(step.rawValue + 1)")
                         .font(.system(size: 11.5, weight: .semibold, design: .rounded))
-                        .foregroundColor(isCurrent ? .white : Color(nsColor: p.secondary))
+                        .foregroundColor(isCurrent ? Color(nsColor: p.onAccent) : Color(nsColor: p.secondary))
                 }
             }
             .frame(width: 24, height: 24)
@@ -530,7 +530,7 @@ private struct SmallButton: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(prominent ? .white : Color(nsColor: palette.text))
+                .foregroundColor(prominent ? Color(nsColor: palette.onAccent) : Color(nsColor: palette.text))
                 .padding(.horizontal, 13)
                 .frame(height: 27)
                 .background(Capsule().fill(Color(nsColor: prominent ? palette.accent : palette.foreground.withAlphaComponent(0.1))))

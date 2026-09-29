@@ -356,7 +356,7 @@ private struct SidebarItem: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 14))
-                .foregroundColor(selected ? .white : Color(nsColor: hovering ? palette.text : palette.secondary.withAlphaComponent(0.8)))
+                .foregroundColor(selected ? Color(nsColor: palette.onAccent) : Color(nsColor: hovering ? palette.text : palette.secondary.withAlphaComponent(0.8)))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 7)
