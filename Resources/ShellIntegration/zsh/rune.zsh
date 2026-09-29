@@ -93,6 +93,34 @@ add-zsh-hook precmd __rune_precmd_first
 add-zsh-hook precmd __rune_precmd_last
 add-zsh-hook preexec __rune_preexec
 
+# Show pictures inline (Rune understands iTerm2's image protocol), unless an imgcat is
+# already installed: imgcat photo.png [chart.svg…]
+if (( ! $+commands[imgcat] )); then
+  imgcat() {
+    local file
+    if (( $# == 0 )); then
+      print -u2 "usage: imgcat <image>…"
+      return 1
+    fi
+    local -i pixels cells
+    for file in "$@"; do
+      if [[ ! -r "$file" || -d "$file" ]]; then
+        print -u2 "imgcat: can't read $file"
+        continue
+      fi
+      # Size in text columns: the image's width at Retina scale (~8pt per column),
+      # between 4 columns and the window's width.
+      pixels=$(sips -g pixelWidth "$file" 2>/dev/null | awk '/pixelWidth/ { print $2 }')
+      (( pixels > 0 )) || pixels=640
+      cells=$(( pixels / 16 ))
+      (( cells < 4 )) && cells=4
+      (( cells > COLUMNS - 2 )) && cells=$(( COLUMNS - 2 ))
+      builtin printf '\e]1337;File=inline=1;width=%d;preserveAspectRatio=1:%s\a\n' "$cells" \
+        "$(base64 < "$file" | tr -d '\n')"
+    done
+  }
+fi
+
 # Commands arrive as bracketed pastes; don't render them highlighted.
 typeset -ga zle_highlight
 zle_highlight=(${zle_highlight:#paste:*} paste:none)
