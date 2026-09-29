@@ -29,6 +29,12 @@ Output is grouped with the command that produced it, its folder and how long it 
 **An input that feels like an editor.**
 Type at the bottom, like a chat. Edit multi-line commands, accept suggestions from your history with →, and see typos in red before you press Enter. Tab completes subcommands and flags for git, docker, npm, brew, kubectl and more, with a short note on what each does, plus your npm scripts, Makefile targets and git branches.
 
+**An agent that asks first.**
+Press ⌥⌘↵ with a goal, like "get this project running" or "why does the build fail?", and Rune Agent works through it one command at a time. Each step shows the command and why it's next, flags anything risky, and waits for you to press Run. It reads the result and decides the next step, all with the AI on your Mac.
+
+**Output you can click.**
+⌘-click a URL or a file path in any output, like `src/app.ts:42:7` in a compiler error, and it opens right at that line in VS Code, Cursor or Zed. Filter a long output down to the lines you care about from the block's menu.
+
 **Recall: everything you've run, searchable.**
 Press ⌃R to search every command *and its output* across all your sessions: "that docker command from last week", "the error that mentioned port 3000". It's stored only on your Mac, with secrets removed. Start a command with a space and it's never recorded.
 
@@ -111,6 +117,8 @@ Rune finds your installed models automatically. You can choose one in Settings �
 | Run command | ↵ |
 | New line | ⇧↵ |
 | Ask AI · follow up | ⌘↵ |
+| Rune Agent: work through a task step by step | ⌥⌘↵ |
+| Open a link or file path from the output | ⌘-click |
 | Accept suggestion | → |
 | Command history | ↑ ↓ |
 | Complete commands, flags, files | ⇥ |
