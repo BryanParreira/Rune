@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ConfigStore.current = store
         AIService.shared.start(store: store)
         RecallService.shared.prune(keepingDays: store.snapshot.config.recallDays)
+        Self.adoptNewDesignDefaults(store)
         CommandNotifier.shared.start()
         CommandNotifier.shared.onOpen = { [weak self] sessionID in
             _ = self?.windowControllers.first { $0.reveal(sessionID: sessionID) }
@@ -161,6 +162,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var isTerminating = false
+
+    /// One time, when updating to the Paper design: configs still on the old defaults
+    /// (every install had "rune-dark" + "SF Mono") move to the new ones. Anyone can switch
+    /// back in Settings (the old look is "Rune Classic").
+    private static func adoptNewDesignDefaults(_ store: ConfigStore) {
+        let key = "RuneDesignDefaultsVersion"
+        guard !isAutomatedRun, UserDefaults.standard.integer(forKey: key) < 1 else { return }
+        UserDefaults.standard.set(1, forKey: key)
+        let config = store.snapshot.config
+        if config.theme == "rune-dark" { store.write(key: "theme", value: "paper") }
+        if config.fontFamily == "SF Mono" { store.write(key: "fontFamily", value: "JetBrains Mono") }
+    }
 
     func applicationWillTerminate(_ notification: Notification) {
         isTerminating = true

@@ -87,7 +87,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         window.minSize = NSSize(width: 420, height: 240)
         window.tabbingMode = .disallowed
         window.setFrameAutosaveName("RuneMainWindow")
-        window.appearance = NSAppearance(named: .darkAqua)
+        window.appearance = NSAppearance(named: configStore.snapshot.theme.isLight ? .aqua : .darkAqua)
 
         super.init(window: window)
         window.delegate = self
@@ -257,6 +257,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         }
         fileTreeHost?.rootView = makeFileTreeView(palette: palette)
         window?.backgroundColor = palette.background
+        window?.appearance = NSAppearance(named: snapshot.theme.isLight ? .aqua : .darkAqua)
         window?.contentView?.layer?.backgroundColor = palette.background.cgColor
         for tab in tabs {
             tab.apply(snapshot)

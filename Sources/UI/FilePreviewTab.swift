@@ -765,7 +765,7 @@ enum MarkdownPage {
         <!doctype html><html><head><meta charset="utf-8">
         <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:">
         <style>
-        :root { color-scheme: dark; }
+        :root { color-scheme: \(p.isLight ? "light" : "dark"); }
         html { background: \(css(p.background)); }
         body { margin: 0; padding: 36px 48px 64px; color: \(css(p.text));
                font: 14.5px/1.65 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; -webkit-font-smoothing: antialiased; }

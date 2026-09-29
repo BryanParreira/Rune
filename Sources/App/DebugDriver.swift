@@ -168,6 +168,12 @@ enum DebugDriver {
                 }
             case "@recallInsert":
                 (session.view.window?.windowController as? MainWindowController)?.debugRecall?.insertSelected()
+            case "@fonts":
+                for name in ["Caveat", "Instrument Serif", "JetBrains Mono"] {
+                    print("FONT \(name): \(NSFontManager.shared.availableMembers(ofFontFamily: name)?.count ?? 0) faces")
+                }
+                print("FONT terminal uses \(session.terminalView.font.familyName ?? "?")")
+                fflush(stdout)
             case "@gap":
                 // Distance between the last non-blank row on screen and the terminal area's bottom.
                 let terminal = session.terminalView.getTerminal()

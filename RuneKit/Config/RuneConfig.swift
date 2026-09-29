@@ -18,9 +18,9 @@ public enum InputStyle: String, CaseIterable, Sendable {
 /// Fully resolved Rune settings. Every field has a default, so a missing or
 /// partially invalid config file still produces a usable value.
 public struct RuneConfig: Equatable, Sendable {
-    public var fontFamily: String = "SF Mono"
+    public var fontFamily: String = "JetBrains Mono"
     public var fontSize: Double = 13
-    public var theme: String = "rune-dark"
+    public var theme: String = "paper"
     public var lineHeight: Double = 1.2
     public var paddingX: Double = 16
     public var paddingY: Double = 12
@@ -81,10 +81,10 @@ public struct RuneConfig: Equatable, Sendable {
     /// Written to ~/.config/rune/config.json on first launch.
     public static let defaultFileContents = """
     {
-      "fontFamily": "SF Mono",
+      "fontFamily": "JetBrains Mono",
       "fontSize": 13,
       "lineHeight": 1.2,
-      "theme": "rune-dark",
+      "theme": "paper",
       "paddingX": 16,
       "paddingY": 12,
       "cursorStyle": "bar",

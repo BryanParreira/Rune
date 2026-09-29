@@ -68,7 +68,12 @@ targets:
           - Info.plist
           - Rune.entitlements
           - "ShellIntegration/**"
+          - "Fonts/**"
       - path: Resources/ShellIntegration
+        type: folder
+        buildPhase: resources
+      # Bundled fonts (SIL OFL), registered for the app by ATSApplicationFontsPath.
+      - path: Resources/Fonts
         type: folder
         buildPhase: resources
     dependencies:
@@ -90,6 +95,7 @@ targets:
         NSHighResolutionCapable: true
         NSSupportsAutomaticTermination: false
         NSSupportsSuddenTermination: false
+        ATSApplicationFontsPath: Fonts
         NSHumanReadableCopyright: "© 2026 Bryan Bernardo Parreira. All rights reserved."
         # In-app updates (Sparkle). The feed is the publisher's release channel; forks can
         # override RUNE_FEED_URL / RUNE_UPDATE_PUBLIC_KEY or leave them empty to disable updates.

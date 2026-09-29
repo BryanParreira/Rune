@@ -1,7 +1,7 @@
 import SwiftUI
 
 final class WelcomeModel: ObservableObject {
-    @Published var palette = ChromePalette(theme: .runeDark)
+    @Published var palette = ChromePalette(theme: .paper)
     @Published var fontSize: CGFloat = 13
     @Published var horizontalPadding: CGFloat = 16
 
@@ -20,11 +20,11 @@ struct WelcomePanel: View {
     }
 
     private let shortcuts = [
-        Shortcut(keys: ["↑"], text: "cycle past commands"),
-        Shortcut(keys: ["⇧", "↵"], text: "add a new line to your command"),
-        Shortcut(keys: ["⇥"], text: "complete files and folders"),
-        Shortcut(keys: ["⌘", "↑"], text: "select and jump between blocks"),
+        Shortcut(keys: ["⌘", "P"], text: "command palette: every action in one search"),
+        Shortcut(keys: ["⌃", "R"], text: "Recall: search past commands and their output"),
         Shortcut(keys: ["⌘", "↵"], text: "ask AI (runs on your Mac)"),
+        Shortcut(keys: ["⇥"], text: "complete commands, flags, files and folders"),
+        Shortcut(keys: ["⌘", "D"], text: "split the pane"),
         Shortcut(keys: ["⌘", "B"], text: "show files and folders"),
         Shortcut(keys: ["⌘", ","], text: "open settings"),
     ]
@@ -38,8 +38,11 @@ struct WelcomePanel: View {
                     .interpolation(.high)
                     .frame(width: model.fontSize + 11, height: model.fontSize + 11)
                 Text("New session")
-                    .font(.system(size: model.fontSize + 5, weight: .semibold))
+                    .font(.serif(model.fontSize + 11))
                     .foregroundColor(Color(nsColor: palette.text))
+                MarginNote(text: "go ahead, type what you need ↓", color: palette.accent, size: model.fontSize + 7)
+                    .padding(.leading, 10)
+                    .offset(y: 3)
                 Spacer()
                 Button(action: model.onDismiss) {
                     Image(systemName: "xmark")

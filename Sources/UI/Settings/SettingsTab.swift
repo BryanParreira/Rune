@@ -377,9 +377,9 @@ struct PageTitle: View {
     let palette: ChromePalette
     var body: some View {
         Text(text)
-            .font(.system(size: 23, weight: .bold))
+            .font(.serif(32))
             .foregroundColor(Color(nsColor: palette.text))
-            .padding(.bottom, 15)
+            .padding(.bottom, 13)
     }
 }
 
@@ -617,7 +617,7 @@ struct AppearancePage: View {
 
             SectionHeader(text: "Themes", palette: p)
             SettingRow(model: model, title: "Theme", key: "theme", detail: "Add your own as themes/<name>.json in the config folder.") {
-                DropdownField(selection: model.binding("theme", { $0.theme }), options: model.themes, label: { $0 }, palette: p)
+                DropdownField(selection: model.binding("theme", { $0.theme }), options: model.themes, label: { Theme.displayName($0) }, palette: p)
             }
 
             SectionHeader(text: "Text", palette: p)

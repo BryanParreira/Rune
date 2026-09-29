@@ -140,8 +140,8 @@ struct CommandPaletteView: View {
                 Rectangle().fill(Color(nsColor: p.outline)).frame(height: 1)
 
                 if model.results.isEmpty {
-                    Text("No matches")
-                        .font(.system(size: 13))
+                    Text("no matches — try fewer letters")
+                        .font(.hand(20))
                         .foregroundColor(Color(nsColor: p.hint))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 28)

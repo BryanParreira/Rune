@@ -52,7 +52,63 @@ public struct Theme: Equatable, Sendable {
         ].compactMap(RGB.init(hex:))
     )
 
-    public static let builtIn: [String: Theme] = [runeDark.name: runeDark]
+    /// Default: warm beige paper, softer than white, with ink text, amber accents and a
+    /// yellow highlighter for selections. ANSI colors are deepened to read on a light page.
+    public static let paper = Theme(
+        name: "paper",
+        background: RGB(0xEE, 0xE7, 0xDA),
+        foreground: RGB(0x2A, 0x28, 0x22),
+        cursor: RGB(0x2A, 0x28, 0x22),
+        // Highlighter yellow (#facc15) at ~35% over the paper.
+        selectionBackground: RGB(0xF2, 0xDE, 0x95),
+        selectionForeground: RGB(0x2A, 0x28, 0x22),
+        accent: RGB(0xB4, 0x53, 0x09),
+        ansi: [
+            "#2a2822", "#b3261e", "#3f7d3a", "#9a6a00", "#2f5d9e", "#8a3f8f", "#1f7a7a", "#857f73",
+            "#6b6760", "#d0342c", "#4f9148", "#b8860b", "#3a6fc4", "#a64fa6", "#2a9090", "#3a3830",
+        ].compactMap(RGB.init(hex:))
+    )
+
+    /// Warm dark: the same paper feel at night.
+    public static let paperNight = Theme(
+        name: "paper-night",
+        background: RGB(0x12, 0x11, 0x0E),
+        foreground: RGB(0xF0, 0xED, 0xE8),
+        cursor: RGB(0xF5, 0xB8, 0x3D),
+        // Highlighter yellow at ~25% over the page.
+        selectionBackground: RGB(0x4C, 0x40, 0x10),
+        selectionForeground: RGB(0xF7, 0xF4, 0xEE),
+        accent: RGB(0xF5, 0xB8, 0x3D),
+        ansi: [
+            "#2a2825", "#f2766b", "#9ccc7a", "#f5c451", "#86a8e8", "#d49ae0", "#7fcfc4", "#d8d3c8",
+            "#5a564e", "#ff8e82", "#b4dd93", "#ffd66e", "#a3bff0", "#e3b3ec", "#9fe0d6", "#f7f4ee",
+        ].compactMap(RGB.init(hex:))
+    )
+
+    public static let builtIn: [String: Theme] = [
+        paper.name: paper, paperNight.name: paperNight, runeDark.name: runeDark,
+    ]
+
+    /// Relative luminance of the background (0 = black, 1 = white).
+    public var backgroundLuminance: Double {
+        func channel(_ value: UInt8) -> Double {
+            let c = Double(value) / 255
+            return c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * channel(background.r) + 0.7152 * channel(background.g) + 0.0722 * channel(background.b)
+    }
+
+    public var isLight: Bool { backgroundLuminance > 0.4 }
+
+    /// Name shown in Settings.
+    public static func displayName(_ name: String) -> String {
+        switch name {
+        case "paper": return "Paper (light)"
+        case "paper-night": return "Paper Night (dark)"
+        case "rune-dark": return "Rune Classic (dark)"
+        default: return name
+        }
+    }
 }
 
 extension Theme {
@@ -96,15 +152,15 @@ public enum ThemeLoader {
             let file = dir.appendingPathComponent("themes", isDirectory: true).appendingPathComponent("\(name).json")
             guard fm.fileExists(atPath: file.path) else { continue }
             guard let dict = ConfigLoader.readJSONObject(at: file, warnings: &warnings) else {
-                return Theme.builtIn[name] ?? .runeDark
+                return Theme.builtIn[name] ?? .paper
             }
             // A user theme may "extend" a built-in; otherwise it layers on rune-dark.
             let baseName = dict["extends"] as? String
-            let base = baseName.flatMap { Theme.builtIn[$0] } ?? Theme.builtIn[name] ?? .runeDark
+            let base = baseName.flatMap { Theme.builtIn[$0] } ?? Theme.builtIn[name] ?? .paper
             return Theme(overlay: dict, name: name, base: base, warnings: &warnings)
         }
         if let builtIn = Theme.builtIn[name] { return builtIn }
         warnings.append("Theme \"\(name)\" not found; using rune-dark")
-        return .runeDark
+        return .paper
     }
 }

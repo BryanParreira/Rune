@@ -31,7 +31,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
-        window.appearance = NSAppearance(named: .darkAqua)
+        window.appearance = NSAppearance(named: store.snapshot.theme.isLight ? .aqua : .darkAqua)
         window.isReleasedWhenClosed = false
         window.title = "Welcome to Rune"
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
@@ -429,18 +429,26 @@ private struct PressableStyle: ButtonStyle {
 private struct Heading: View {
     let step: OnboardingModel.Step
     let title: String
+    /// A word in the title marked with the highlighter.
+    var highlight: String?
     let subtitle: String
+    /// Handwritten note beside the step label.
+    var note: String?
     let palette: ChromePalette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("STEP \(step.rawValue + 1) OF \(OnboardingModel.Step.allCases.count)")
-                .font(.system(size: 10.5, weight: .semibold))
-                .tracking(0.8)
-                .foregroundColor(Color(nsColor: palette.accent))
-            Text(title)
-                .font(.system(size: 26, weight: .bold))
-                .tracking(-0.5)
+            HStack(alignment: .firstTextBaseline, spacing: 14) {
+                Text("STEP \(step.rawValue + 1) OF \(OnboardingModel.Step.allCases.count)")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .tracking(0.8)
+                    .foregroundColor(Color(nsColor: palette.accent))
+                if let note {
+                    MarginNote(text: note, color: palette.secondary, size: 19)
+                }
+            }
+            titleView
+                .font(.serif(36))
                 .foregroundColor(Color(nsColor: palette.text))
             Text(subtitle)
                 .font(.system(size: 13.5))
@@ -449,6 +457,19 @@ private struct Heading: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: 440, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var titleView: some View {
+        if let highlight, let range = title.range(of: highlight) {
+            HStack(spacing: 0) {
+                Text(String(title[..<range.lowerBound]))
+                Text(highlight).highlighterMark(palette.highlight)
+                Text(String(title[range.upperBound...]))
+            }
+        } else {
+            Text(title)
+        }
     }
 }
 
@@ -535,9 +556,9 @@ private struct WelcomeStep: View {
     var body: some View {
         let p = model.palette
         VStack(alignment: .leading, spacing: 26) {
-            Heading(step: .welcome, title: "A faster, calmer terminal",
+            Heading(step: .welcome, title: "A faster, calmer terminal", highlight: "calmer",
                     subtitle: "Rune keeps your shell and adds the parts that make it easier to use. Setup takes under a minute.",
-                    palette: p)
+                    note: "no account needed", palette: p)
             Card(palette: p) {
                 Row(symbol: "square.stack.3d.up.fill", tint: p.accent, title: "Command blocks",
                     detail: "Each command and its output stay together. Copy, rerun or jump between them with ⌘↑ ⌘↓.",
@@ -559,9 +580,9 @@ private struct PermissionsStep: View {
     var body: some View {
         let p = model.palette
         VStack(alignment: .leading, spacing: 26) {
-            Heading(step: .permissions, title: "Give Rune access",
+            Heading(step: .permissions, title: "Give Rune access", highlight: "access",
                     subtitle: "Commands you run use Rune's permissions. Allow access now so macOS doesn't interrupt you mid-command.",
-                    palette: p)
+                    note: "you can change these later", palette: p)
             Card(palette: p) {
                 Row(symbol: "folder.fill", tint: p.ansiBlue, title: "Desktop, Documents & Downloads",
                     detail: "macOS asks once for each folder.", palette: p) {
@@ -599,9 +620,9 @@ private struct SetupStep: View {
     var body: some View {
         let p = model.palette
         VStack(alignment: .leading, spacing: 26) {
-            Heading(step: .setup, title: "Make it yours",
+            Heading(step: .setup, title: "Make it yours", highlight: "yours",
                     subtitle: "Choose how you type commands and set up private AI. Both can be changed later in Settings.",
-                    palette: p)
+                    note: "all of it stays on your Mac", palette: p)
             Card(palette: p) {
                 Row(symbol: "keyboard", tint: p.accent, title: "Type commands in",
                     detail: model.config.inputMode == .editor ? "Rune's editor: suggestions, highlighting, completion." : "Your zsh prompt: every zsh plugin works as usual.",

@@ -168,7 +168,7 @@ enum FontResolver {
             guard let font = manager.font(withFamily: family, traits: [], weight: 5, size: 13) else { return false }
             return font.isFixedPitch || manager.traits(of: font).contains(.fixedPitchFontMask)
         }
-        return (["SF Mono"] + families.filter { $0 != "SF Mono" }).removingDuplicates()
+        return (["JetBrains Mono", "SF Mono"] + families.filter { $0 != "SF Mono" && $0 != "JetBrains Mono" }).removingDuplicates()
     }
 }
 

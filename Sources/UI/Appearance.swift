@@ -49,6 +49,10 @@ struct ChromePalette: Equatable {
     let accent: NSColor
     let error: NSColor
     let success: NSColor
+    /// Light page (Paper) vs dark: picks the window appearance and a few contrast tweaks.
+    let isLight: Bool
+    /// Highlighter-pen yellow, for marks behind words and selected rows.
+    let highlight: NSColor
     /// ANSI colors used for input syntax highlighting.
     let ansiYellow: NSColor
     let ansiBlue: NSColor
@@ -71,6 +75,8 @@ struct ChromePalette: Equatable {
         tabSelected = fg.withAlphaComponent(0.06)
         tabHover = fg.withAlphaComponent(0.03)
         accent = theme.accent.nsColor
+        isLight = theme.isLight
+        highlight = NSColor(srgbRed: 250 / 255, green: 204 / 255, blue: 21 / 255, alpha: theme.isLight ? 0.45 : 0.28)
         error = theme.ansi.count > 1 ? theme.ansi[1].nsColor : NSColor(srgbRed: 188 / 255, green: 54 / 255, blue: 42 / 255, alpha: 1)
         success = theme.ansi.count > 2 ? theme.ansi[2].nsColor : NSColor(srgbRed: 28 / 255, green: 160 / 255, blue: 90 / 255, alpha: 1)
         func ansi(_ i: Int) -> NSColor { theme.ansi.count > i ? theme.ansi[i].nsColor : fg }
