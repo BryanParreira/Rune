@@ -162,7 +162,7 @@ enum SettingsIndex {
         case .appearance:
             return ["Theme", "Font", "Font size", "Line height", "Cursor", "Blinking cursor", "Padding", "Nerd Font", "icons", "colors"]
         case .terminal:
-            return ["Shell", "Show shell prompt", "PS1", "Starship", "Scrollback", "Option key", "Meta", "Notifications", "Notify when done", "long commands", "Restore", "Reopen", "session", "tabs at launch", "Secrets", "API keys", "tokens", "redact"]
+            return ["Shell", "Show shell prompt", "PS1", "Starship", "Scrollback", "Option key", "Meta", "Notifications", "Notify when done", "long commands", "Restore", "Reopen", "session", "tabs at launch", "Secrets", "API keys", "tokens", "redact", "Recall", "history", "output search"]
         case .workflows:
             return ["Workflows", "saved commands", "snippets", "command palette", "placeholders"]
         case .input:
@@ -706,6 +706,27 @@ struct TerminalPage: View {
             }
             SettingRow(model: model, title: "Option key acts as Meta", key: "optionAsMeta", detail: "Turn off to type special characters with Option.") {
                 SwitchControl(isOn: model.binding("optionAsMeta", { $0.optionAsMeta }))
+            }
+            SettingRow(model: model, title: "Rune Recall", key: "recallEnabled",
+                       detail: "Keeps a searchable history of the commands you run and their output (last 2,000 lines each), stored only on this Mac with secrets removed. Commands typed with a leading space are skipped. Search it with ⌃R or ⇧⌘H.") {
+                SwitchControl(isOn: model.binding("recallEnabled", { $0.recallEnabled }))
+            }
+            SettingRow(model: model, title: "Keep Recall history for", key: "recallDays") {
+                NumberField(value: model.binding("recallDays", { $0.recallDays }), range: 1...3650, step: 30,
+                            format: { "\(Int($0)) days" }, palette: p)
+            }
+            SettingRow(model: model, title: "Clear Recall history", detail: "Deletes everything Recall has stored on this Mac.") {
+                Button("Clear…") {
+                    let alert = NSAlert()
+                    alert.messageText = "Clear Recall history?"
+                    alert.informativeText = "Every recorded command and its output will be deleted from this Mac. This can't be undone."
+                    alert.addButton(withTitle: "Clear History")
+                    alert.addButton(withTitle: "Cancel")
+                    alert.alertStyle = .warning
+                    if alert.runModal() == .alertFirstButtonReturn { RecallService.shared.removeAll() }
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(Color(nsColor: p.error))
             }
             SettingRow(model: model, title: "Hide secrets in output", key: "hideSecrets",
                        detail: "Masks API keys, tokens and private keys (AWS, GitHub, OpenAI, Stripe, Slack…) on screen; click one to show it. Secrets are always removed before anything is sent to AI.") {

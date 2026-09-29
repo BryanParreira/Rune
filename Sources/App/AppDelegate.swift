@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configStore = store
         ConfigStore.current = store
         AIService.shared.start(store: store)
+        RecallService.shared.prune(keepingDays: store.snapshot.config.recallDays)
         CommandNotifier.shared.start()
         CommandNotifier.shared.onOpen = { [weak self] sessionID in
             _ = self?.windowControllers.first { $0.reveal(sessionID: sessionID) }

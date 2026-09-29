@@ -91,6 +91,7 @@ enum MainMenu {
         let menu = NSMenu(title: "View")
         menu.addItem(item("Command Palette…", #selector(MainWindowController.showCommandPalette(_:)), "p"))
         menu.addItem(item("Toggle File Tree", #selector(MainWindowController.toggleFileTree(_:)), "b"))
+        menu.addItem(item("Search History (Recall)…", #selector(MainWindowController.showRecall(_:)), "h", [.command, .shift]))
         menu.addItem(.separator())
         menu.addItem(item("Select Previous Block", #selector(MainWindowController.selectPreviousBlock(_:)), "\u{F700}"))
         menu.addItem(item("Select Next Block", #selector(MainWindowController.selectNextBlock(_:)), "\u{F701}"))

@@ -49,6 +49,10 @@ public struct RuneConfig: Equatable, Sendable {
     public var shell: String?
     /// Folder (iCloud Drive, dotfiles repo, …) to read config/themes/workflows from.
     public var syncPath: String?
+    /// Rune Recall: keep a searchable history of commands and their output on this Mac.
+    public var recallEnabled: Bool = true
+    /// Days of Recall history to keep.
+    public var recallDays: Double = 90
     /// Mask API keys and tokens in terminal output (click one to reveal it).
     public var hideSecrets: Bool = true
     /// Reopen the previous windows, tabs, splits and folders at launch.
@@ -71,7 +75,7 @@ public struct RuneConfig: Equatable, Sendable {
         "fontFamily", "fontSize", "lineHeight", "theme", "paddingX", "paddingY", "cursorStyle",
         "cursorBlink", "scrollback", "optionAsMeta", "showWelcome", "honorPrompt", "inputMode", "shell",
         "aiEnabled", "ollamaEndpoint", "aiModel", "aiIncludeBlockContext",
-        "syncPath", "hosts", "workflows", "notifyWhenDone", "notifyAfterSeconds", "gpuRendering", "restoreSession", "hideSecrets",
+        "syncPath", "hosts", "workflows", "notifyWhenDone", "notifyAfterSeconds", "gpuRendering", "restoreSession", "hideSecrets", "recallEnabled", "recallDays",
     ]
 
     /// Written to ~/.config/rune/config.json on first launch.
@@ -147,6 +151,8 @@ extension RuneConfig {
         if let v = reader.bool("notifyWhenDone") { notifyWhenDone = v }
         if let v = reader.bool("restoreSession") { restoreSession = v }
         if let v = reader.bool("hideSecrets") { hideSecrets = v }
+        if let v = reader.bool("recallEnabled") { recallEnabled = v }
+        if let v = reader.number("recallDays", range: 1...3650) { recallDays = v }
         if let v = reader.number("notifyAfterSeconds", range: 1...3600) { notifyAfterSeconds = v }
 
         for key in dictionary.keys.sorted() where !Self.knownKeys.contains(key) {

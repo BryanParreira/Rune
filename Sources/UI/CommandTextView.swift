@@ -172,6 +172,10 @@ final class CommandTextView: NSTextView {
             case "l":
                 commandDelegate?.commandTextViewClearScreen(self)
                 return
+            case "r":
+                // Like the shell's reverse history search, but over commands and their output.
+                NSApp.sendAction(#selector(MainWindowController.showRecall(_:)), to: nil, from: self)
+                return
             case "e", "f":
                 if acceptSuggestion(wordOnly: false) { return }
             default:

@@ -156,6 +156,18 @@ enum DebugDriver {
                 if let controller = session.view.window?.windowController as? MainWindowController, let index = Int(run.dropFirst(12)) {
                     controller.debugSelectedPreview()?.debugRunSnippet(index)
                 }
+            case "@recall":
+                (session.view.window?.windowController as? MainWindowController)?.showRecall(nil)
+            case let query where query.hasPrefix("@recallQuery:"):
+                if let recall = (session.view.window?.windowController as? MainWindowController)?.debugRecall {
+                    recall.query = String(query.dropFirst(13))
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                        print("RECALL \"\(recall.query)\" → " + recall.results.prefix(4).map { "\($0.command) [\($0.output.prefix(30).replacingOccurrences(of: "\n", with: "⏎"))]" }.joined(separator: " | "))
+                        fflush(stdout)
+                    }
+                }
+            case "@recallInsert":
+                (session.view.window?.windowController as? MainWindowController)?.debugRecall?.insertSelected()
             case "@gap":
                 // Distance between the last non-blank row on screen and the terminal area's bottom.
                 let terminal = session.terminalView.getTerminal()

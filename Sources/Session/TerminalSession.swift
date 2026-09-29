@@ -89,6 +89,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     private(set) var hasPrompted = false
     /// A folder to move to once the shell is ready.
     private var pendingDirectory: String?
+    /// Commands submitted with a leading space, not to be recorded in Recall.
+    private var privateCommands: Set<String> = []
     private var sawOSC7 = false
     private var cwdPollScheduled = false
     private var integrationTimeout: DispatchWorkItem?
@@ -317,9 +319,16 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
 
     /// Runs `command` in the shell (Enter in the editor).
     func submit(_ command: String) {
-        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        var trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, state == .running else { return }
-        HistoryStore.shared.append(trimmed)
+        // A leading space means "don't remember this" (zsh's HIST_IGNORE_SPACE): keep it out
+        // of Rune's history and Recall, and pass the space on so zsh skips it too.
+        if command.hasPrefix(" ") {
+            privateCommands.insert(trimmed)
+            trimmed = " " + trimmed
+        } else {
+            HistoryStore.shared.append(trimmed)
+        }
         historyNavigator.reset()
         selectedBlockID = nil
         view.dismissWelcomeForSession()
@@ -473,9 +482,12 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         return geometry.text(rows: block.commandRow...last)
     }
 
-    func outputText(of block: Block) -> String {
+    func outputText(of block: Block, maxRows: Int? = nil) -> String {
         let current = geometry.cursorPosition.row
-        guard let rows = block.outputRows(currentRow: current) else { return "" }
+        guard var rows = block.outputRows(currentRow: current) else { return "" }
+        if let maxRows, rows.count > maxRows {
+            rows = (rows.upperBound - maxRows + 1)...rows.upperBound
+        }
         return geometry.text(rows: rows)
     }
 
@@ -581,6 +593,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         let changed = tracker.handle(mark, at: position)
         if case .commandFinished = mark, wasRunning, let block = tracker.blocks.last, block.state == .finished {
             notifyIfUnattended(block)
+            recordInRecall(block)
         }
 
         switch mark {
@@ -616,6 +629,17 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         if case .commandFinished = mark { refreshGitBranch() }
         if changed { view.blocksDidChange() }
         updateMode()
+    }
+
+    /// Saves the command and (the end of) its output to Rune Recall. Commands typed with a
+    /// leading space are skipped, like zsh's HIST_IGNORE_SPACE.
+    private func recordInRecall(_ block: Block) {
+        let command = commandText(of: block).trimmingCharacters(in: .whitespacesAndNewlines)
+        if privateCommands.remove(command) != nil { return }
+        guard config.recallEnabled, !block.command.hasPrefix(" "), !command.isEmpty else { return }
+        RecallService.shared.record(command: command, output: outputText(of: block, maxRows: RecallService.maxOutputLines),
+                                    directory: block.cwd.isEmpty ? currentDirectory : block.cwd,
+                                    exitCode: block.exitCode, duration: block.duration())
     }
 
     /// A long command finished while this pane wasn't in view: post a notification.

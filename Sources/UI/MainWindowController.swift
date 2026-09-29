@@ -59,7 +59,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     }()
 
     fileprivate var paletteHost: NSHostingView<CommandPaletteView>?
+    fileprivate var recallHost: NSHostingView<RecallView>?
     fileprivate var paletteModel: PaletteModel?
+    fileprivate var recallModel: RecallModel?
 
     /// Called after the window closes so the app can drop its reference.
     var onClose: ((MainWindowController) -> Void)?
@@ -700,6 +702,44 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     }
 }
 
+// MARK: - Recall
+
+extension MainWindowController {
+    /// ⌃R in the editor, ⇧⌘H, or the palette: search everything run in Rune.
+    @objc func showRecall(_ sender: Any?) {
+        if recallHost != nil {
+            closeRecall()
+            return
+        }
+        guard let root = window?.contentView else { return }
+        let model = RecallModel(
+            palette: ChromePalette(theme: configStore.snapshot.theme),
+            onClose: { [weak self] in self?.closeRecall() },
+            onInsert: { [weak self] command in self?.insertCommand(command, asWorkflow: false) },
+            onOpenFolder: { [weak self] folder in self?.changeDirectory(to: folder) }
+        )
+        let host = NSHostingView(rootView: RecallView(model: model))
+        host.safeAreaRegions = []
+        host.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(host, positioned: .above, relativeTo: nil)
+        NSLayoutConstraint.activate([
+            host.topAnchor.constraint(equalTo: root.topAnchor),
+            host.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            host.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
+        recallHost = host
+        recallModel = model
+    }
+
+    func closeRecall() {
+        recallHost?.removeFromSuperview()
+        recallHost = nil
+        recallModel = nil
+        selectedTab?.focus()
+    }
+}
+
 // MARK: - Command palette
 
 extension MainWindowController {
@@ -756,6 +796,11 @@ extension MainWindowController {
             action("Close Tab", "xmark.square", "⌘W") { [weak self] in self?.closeTab(nil) }
         }
         action("Toggle File Tree", "sidebar.left", "⌘B", keywords: "files sidebar explorer") { [weak self] in self?.toggleFileTree(nil) }
+        if configStore.snapshot.config.recallEnabled {
+            action("Recall: Search History", "clock.arrow.circlepath", "⌃R", keywords: "history output search find past") { [weak self] in
+                self?.showRecall(nil)
+            }
+        }
         if isTerminal {
             action("Clear Screen", "eraser", "⌘K") { [weak self] in self?.clearScreen(nil) }
             action("Select Previous Block", "arrow.up.square", "⌘↑") { [weak self] in self?.selectPreviousBlock(nil) }
@@ -815,7 +860,7 @@ extension MainWindowController {
     }
 
     /// Puts a command in the focused pane's input (never runs it).
-    private func insertCommand(_ command: String, asWorkflow: Bool) {
+    fileprivate func insertCommand(_ command: String, asWorkflow: Bool) {
         guard let session = selectedSession else { return }
         switch session.mode {
         case .editor:
@@ -832,7 +877,7 @@ extension MainWindowController {
         }
     }
 
-    private func changeDirectory(to path: String) {
+    fileprivate func changeDirectory(to path: String) {
         guard let session = selectedSession else { return }
         let command = "cd " + FileListing.shellQuoted(path)
         switch session.mode {
@@ -846,6 +891,7 @@ extension MainWindowController {
 #if DEBUG
 extension MainWindowController {
     var debugPalette: PaletteModel? { paletteModel }
+    var debugRecall: RecallModel? { recallModel }
 
     func debugPanes() {
         guard let tab = selectedTab as? TerminalTab else { print("PANES none"); return }
