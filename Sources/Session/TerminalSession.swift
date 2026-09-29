@@ -409,15 +409,16 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         let listing = FileListing.entries(at: currentDirectory, showHidden: false)
             .prefix(AIPrompt.maxListing + 40)
             .map { $0.isDirectory ? $0.name + "/" : $0.name }
+        // Credentials never leave the terminal, even to a local model (logs, history, remote hosts).
         let context = AIContext(
-            request: trimmed,
+            request: SecretRedactor.redact(trimmed),
             cwd: currentDirectory,
             osVersion: "macOS " + ProcessInfo.processInfo.operatingSystemVersionString,
             shell: (ProcessInfo.processInfo.environment["SHELL"] as NSString?)?.lastPathComponent ?? "zsh",
             gitBranch: gitBranch,
             directoryListing: Array(listing),
-            blockCommand: block.map { commandText(of: $0) },
-            blockOutput: block.map { outputText(of: $0) },
+            blockCommand: block.map { SecretRedactor.redact(commandText(of: $0)) },
+            blockOutput: block.map { SecretRedactor.redact(outputText(of: $0)) },
             blockExitCode: block?.exitCode
         )
         let label = block.map { b -> String in

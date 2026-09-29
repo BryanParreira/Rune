@@ -162,7 +162,7 @@ enum SettingsIndex {
         case .appearance:
             return ["Theme", "Font", "Font size", "Line height", "Cursor", "Blinking cursor", "Padding", "Nerd Font", "icons", "colors"]
         case .terminal:
-            return ["Shell", "Show shell prompt", "PS1", "Starship", "Scrollback", "Option key", "Meta", "Notifications", "Notify when done", "long commands", "Restore", "Reopen", "session", "tabs at launch"]
+            return ["Shell", "Show shell prompt", "PS1", "Starship", "Scrollback", "Option key", "Meta", "Notifications", "Notify when done", "long commands", "Restore", "Reopen", "session", "tabs at launch", "Secrets", "API keys", "tokens", "redact"]
         case .workflows:
             return ["Workflows", "saved commands", "snippets", "command palette", "placeholders"]
         case .input:
@@ -706,6 +706,10 @@ struct TerminalPage: View {
             }
             SettingRow(model: model, title: "Option key acts as Meta", key: "optionAsMeta", detail: "Turn off to type special characters with Option.") {
                 SwitchControl(isOn: model.binding("optionAsMeta", { $0.optionAsMeta }))
+            }
+            SettingRow(model: model, title: "Hide secrets in output", key: "hideSecrets",
+                       detail: "Masks API keys, tokens and private keys (AWS, GitHub, OpenAI, Stripe, Slack…) on screen; click one to show it. Secrets are always removed before anything is sent to AI.") {
+                SwitchControl(isOn: model.binding("hideSecrets", { $0.hideSecrets }))
             }
             SettingRow(model: model, title: "Reopen windows and tabs at launch", key: "restoreSession",
                        detail: "Brings back your windows, tabs, split panes and their folders after quitting or updating. Only folder and file paths are saved, on this Mac.") {

@@ -49,6 +49,8 @@ public struct RuneConfig: Equatable, Sendable {
     public var shell: String?
     /// Folder (iCloud Drive, dotfiles repo, …) to read config/themes/workflows from.
     public var syncPath: String?
+    /// Mask API keys and tokens in terminal output (click one to reveal it).
+    public var hideSecrets: Bool = true
     /// Reopen the previous windows, tabs, splits and folders at launch.
     public var restoreSession: Bool = true
     /// Saved commands shown in the command palette.
@@ -69,7 +71,7 @@ public struct RuneConfig: Equatable, Sendable {
         "fontFamily", "fontSize", "lineHeight", "theme", "paddingX", "paddingY", "cursorStyle",
         "cursorBlink", "scrollback", "optionAsMeta", "showWelcome", "honorPrompt", "inputMode", "shell",
         "aiEnabled", "ollamaEndpoint", "aiModel", "aiIncludeBlockContext",
-        "syncPath", "hosts", "workflows", "notifyWhenDone", "notifyAfterSeconds", "gpuRendering", "restoreSession",
+        "syncPath", "hosts", "workflows", "notifyWhenDone", "notifyAfterSeconds", "gpuRendering", "restoreSession", "hideSecrets",
     ]
 
     /// Written to ~/.config/rune/config.json on first launch.
@@ -144,6 +146,7 @@ extension RuneConfig {
         }
         if let v = reader.bool("notifyWhenDone") { notifyWhenDone = v }
         if let v = reader.bool("restoreSession") { restoreSession = v }
+        if let v = reader.bool("hideSecrets") { hideSecrets = v }
         if let v = reader.number("notifyAfterSeconds", range: 1...3600) { notifyAfterSeconds = v }
 
         for key in dictionary.keys.sorted() where !Self.knownKeys.contains(key) {

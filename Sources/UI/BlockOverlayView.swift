@@ -42,6 +42,7 @@ final class BlockOverlayView: NSView {
         let local = convert(point, from: superview)
         if !actionBar.isHidden, actionBar.frame.contains(local) { return super.hitTest(point) }
         if let sticky = stickyHeader, sticky.rect.contains(local) { return self }
+        if secretMasks.contains(where: { $0.rect.contains(local) }) { return self }
         if let track = indicatorTrack(), NSRect(x: track.maxX - 14, y: track.minY, width: 16, height: track.height).contains(local) {
             return self
         }
@@ -102,6 +103,12 @@ final class BlockOverlayView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)
+        if let mask = secretMasks.first(where: { $0.rect.contains(location) }) {
+            // Reveal this secret (for this window's lifetime).
+            revealedSecrets.insert(mask.text)
+            needsDisplay = true
+            return
+        }
         if let sticky = stickyHeader, sticky.rect.contains(location), let session = sessionView?.session {
             // Jump back to where this command's output starts.
             session.terminalView.scrollTo(row: max(0, sticky.block.headerRow - session.geometry.linesTrimmed))
@@ -266,6 +273,7 @@ final class BlockOverlayView: NSView {
             drawHeader(block, in: frame.headerRect, palette: palette, font: contextFont, session: session,
                        reserveForActions: block.id == hoveredBlockID)
         }
+        drawSecretMasks(palette: palette, session: session)
         NSGraphicsContext.restoreGraphicsState()
         // Outside the terminal clip: it sits flush with the top of the pane.
         stickyHeader = stickyHeaderFrame(frames: frames, terminalFrame: terminalFrame, session: session)
@@ -273,6 +281,64 @@ final class BlockOverlayView: NSView {
             drawStickyHeader(sticky, palette: palette, font: contextFont, session: session)
         }
         drawScrollIndicator(palette: palette)
+    }
+
+    // MARK: - Secrets
+
+    /// Masked credentials currently on screen (overlay coordinates) and their text.
+    private var secretMasks: [(rect: NSRect, text: String)] = []
+    /// Secrets the user clicked to see.
+    private var revealedSecrets: Set<String> = []
+
+    private func drawSecretMasks(palette: ChromePalette, session: TerminalSession) {
+        secretMasks.removeAll()
+        guard session.config.hideSecrets, session.mode != .fullscreenApp else { return }
+        let terminalView = session.terminalView
+        let terminal = terminalView.getTerminal()
+        let geometry = session.geometry
+        let cellHeight = geometry.cellHeight
+        // The same cell width SwiftTerm uses (the advance of "W").
+        let font = terminalView.font
+        let cellWidth = font.advancement(forGlyph: font.glyph(withName: "W")).width
+        guard cellHeight > 0, cellWidth > 0 else { return }
+        let top = geometry.topVisibleRow
+        let labelFont = NSFont.systemFont(ofSize: max(9, terminalView.font.pointSize - 3), weight: .medium)
+
+        for row in top..<(top + terminal.rows) {
+            guard let line = terminal.getScrollInvariantLine(row: row) else { continue }
+            // One character per cell, so a match's position maps straight to columns.
+            var text = ""
+            var cellStarts: [Int] = []
+            var utf16 = 0
+            for col in 0..<min(line.count, terminal.cols) {
+                var character = line[col].getCharacter()
+                if character == "\u{0}" { character = " " }
+                cellStarts.append(utf16)
+                utf16 += character.utf16.count
+                text.append(character)
+            }
+            guard text.count >= 16 else { continue }
+            for match in SecretRedactor.matches(in: text) {
+                let secret = (text as NSString).substring(with: match.range)
+                guard !revealedSecrets.contains(secret),
+                      let startCol = cellStarts.firstIndex(where: { $0 >= match.range.location }) else { continue }
+                let endCol = cellStarts.lastIndex(where: { $0 < NSMaxRange(match.range) }) ?? startCol
+                let origin = convert(NSPoint(x: CGFloat(startCol) * cellWidth, y: geometry.topY(ofRow: row)), from: terminalView)
+                let rect = NSRect(x: origin.x - 2, y: origin.y, width: CGFloat(endCol - startCol + 1) * cellWidth + 4, height: cellHeight)
+                palette.surface2.setFill()
+                NSBezierPath(roundedRect: rect.insetBy(dx: 0, dy: 1), xRadius: 3, yRadius: 3).fill()
+                let attrs: [NSAttributedString.Key: Any] = [.font: labelFont, .foregroundColor: palette.hint]
+                // The longest label that fits.
+                for candidate in ["🔒 \(match.kind) · click to show", "🔒 \(match.kind)", "🔒 hidden"] {
+                    let label = candidate as NSString
+                    let size = label.size(withAttributes: attrs)
+                    guard size.width < rect.width - 8 else { continue }
+                    label.draw(at: NSPoint(x: rect.minX + 6, y: rect.midY - size.height / 2), withAttributes: attrs)
+                    break
+                }
+                secretMasks.append((rect, secret))
+            }
+        }
     }
 
     // MARK: - Sticky header
