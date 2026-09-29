@@ -52,7 +52,7 @@ Press ⌘P for the command palette: every action, your open tabs, recent folders
 ⌘D splits a tab side by side and ⇧⌘D stacks it. Each pane is its own shell with its own input, and ⌥⌘ plus an arrow key moves between them.
 
 **Workflows for the commands you repeat.**
-Save a command once, with blanks like `git push {{remote}} {{branch}}`, then run it from the palette. Rune selects each blank for you to fill in and Tab moves to the next. Workflows live in your config file, so they travel with your sync folder.
+Save a command once, with blanks like `git push {{remote}} {{branch}}`, then run it from the palette. Rune selects each blank for you to fill in and Tab moves to the next. Workflows live in your config file, so they travel with your sync folder. Commit a `.rune/workflows.json` to a repository and everyone on the team gets the same workflows there, no cloud account involved.
 
 **Fast, and right where you left off.**
 New tabs and splits open instantly, even with a heavy zsh setup, and huge outputs scroll by without slowing down. Quit or update, and your windows, tabs, splits and folders come back just as they were. Press ⌘F to search any output.
@@ -74,7 +74,7 @@ Rune's Paper theme is a soft, warm beige with ink-colored text and a highlighter
 Press ⌘B for a sidebar of the folder you're in, with git status colors and a project-wide filter. Click a file to read it right inside Rune, with syntax colors and line numbers.
 
 **Thoughtful everywhere.**
-Press ⌃\` in any app to bring Rune forward, and again to tuck it away. Full-screen apps like vim and htop take over cleanly. Closing a tab that's still running something asks first. Settings are searchable, and Rune updates itself quietly with verified releases.
+Press ⌃\` in any app to bring Rune forward, and again to tuck it away, or switch it to the Quick Terminal, which slides down from the top of the screen over whatever you're doing. `imgcat photo.png` shows pictures right in the output. Full-screen apps like vim and htop take over cleanly. Closing a tab that's still running something asks first. Settings are searchable, and Rune updates itself quietly with verified releases.
 
 <br>
 
