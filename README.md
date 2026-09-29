@@ -27,7 +27,7 @@ a private AI that runs entirely on your Mac, and a warm paper look that's easy o
 Output is grouped with the command that produced it, its folder and how long it took. Failed commands stand out in red with their exit code. Hover to copy the command or its output, or run it again. Jump between blocks with ⌘↑ and ⌘↓.
 
 **An input that feels like an editor.**
-Type at the bottom, like a chat. Edit multi-line commands, accept suggestions from your history with →, and see typos in red before you press Enter. Tab completes subcommands and flags for git, docker, npm, brew, kubectl and more, with a short note on what each does, plus your npm scripts, Makefile targets and git branches.
+Type at the bottom, like a chat. Edit multi-line commands, accept suggestions from your history with →, and see typos in red before you press Enter. Mistype `gti status` or `cd Documetns` anyway, and Rune suggests the fix: press Tab to use it. Tab completes subcommands and flags for git, docker, npm, brew, kubectl and more, with a short note on what each does, plus your npm scripts, Makefile targets and git branches.
 
 **Your input box, even over SSH.**
 When `ssh` (or `docker exec`, `kubectl exec`, `su`…) lands you in a shell on another machine, Rune offers to keep its input box there: blocks, history suggestions and ⌘↵ AI work like they do locally. Passwords and logins always go straight to the session, and nothing is saved on the server.
@@ -57,11 +57,14 @@ Press ⌘P for the command palette: every action, your open tabs, recent folders
 **Split your workspace.**
 ⌘D splits a tab side by side and ⇧⌘D stacks it. Each pane is its own shell with its own input, and ⌥⌘ plus an arrow key moves between them.
 
+**Layouts for your projects.**
+Set up a window the way you like it (a tab for the server with its dev command running, another split between the app and the logs), then save it with Shell › Save Window as Layout. Open it again from the palette and everything comes back, commands included. Layouts are small JSON files in `~/.config/rune/layouts` you can edit or share. Name and color tabs with a double-click or a right-click.
+
 **Workflows for the commands you repeat.**
 Save a command once, with blanks like `git push {{remote}} {{branch}}`, then run it from the palette. Rune selects each blank for you to fill in and Tab moves to the next. Workflows live in your config file, so they travel with your sync folder. Commit a `.rune/workflows.json` to a repository and everyone on the team gets the same workflows there, no cloud account involved.
 
 **Fast, and right where you left off.**
-New tabs and splits open instantly, even with a heavy zsh setup, and huge outputs scroll by without slowing down. Quit or update, and your windows, tabs, splits and folders come back just as they were. Press ⌘F to search any output.
+New tabs and splits open instantly, even with a heavy zsh setup, and huge outputs scroll by without slowing down. Quit or update, and your windows, tabs, splits and folders come back just as they were. Closed a tab by accident? ⇧⌘T brings it back. Press ⌘F to search any output.
 
 **Know when it's done.**
 Start a long build, switch to something else, and Rune sends a notification when it finishes. Click it to jump straight back to that pane.
@@ -77,7 +80,7 @@ Rune's Paper theme is a soft, warm beige with ink-colored text and a highlighter
 </div>
 
 **Files at a glance.**
-Press ⌘B for a sidebar of the folder you're in, with git status colors and a project-wide filter. Click a file to read it right inside Rune, with syntax colors and line numbers.
+Press ⌘B for a sidebar of the folder you're in, with git status colors and a project-wide filter. Click a file to read it right inside Rune, with syntax colors and line numbers. In a git repository, switch to Changes to see every edited file with its added and removed lines, and click one for a colored diff. In Finder, right-click a folder and choose Services › New Rune Tab Here.
 
 **Thoughtful everywhere.**
 Press ⌃\` in any app to bring Rune forward, and again to tuck it away. `imgcat photo.png` shows pictures right in the output. Full-screen apps like vim and htop take over cleanly. Closing a tab that's still running something asks first. Settings are searchable, and Rune updates itself quietly with verified releases.
@@ -131,6 +134,8 @@ Rune finds your installed models automatically. You can choose one in Settings �
 | Split right · split down | ⌘D · ⇧⌘D |
 | Next pane · move between panes | ⌘] · ⌥⌘ arrows |
 | New tab · close pane or tab | ⌘T · ⌘W |
+| Reopen closed tab | ⇧⌘T |
+| Rename tab | double-click the tab |
 | Settings | ⌘, |
 
 ## Privacy
