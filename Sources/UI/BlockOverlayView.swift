@@ -41,6 +41,7 @@ final class BlockOverlayView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? {
         let local = convert(point, from: superview)
         if !actionBar.isHidden, actionBar.frame.contains(local) { return super.hitTest(point) }
+        if let sticky = stickyHeader, sticky.rect.contains(local) { return self }
         if let track = indicatorTrack(), NSRect(x: track.maxX - 14, y: track.minY, width: 16, height: track.height).contains(local) {
             return self
         }
@@ -100,6 +101,13 @@ final class BlockOverlayView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        let location = convert(event.locationInWindow, from: nil)
+        if let sticky = stickyHeader, sticky.rect.contains(location), let session = sessionView?.session {
+            // Jump back to where this command's output starts.
+            session.terminalView.scrollTo(row: max(0, sticky.block.headerRow - session.geometry.linesTrimmed))
+            session.view.blocksDidChange()
+            return
+        }
         guard let track = indicatorTrack(), let thumb = thumbRect(in: track), let session = sessionView?.session else { return }
         let point = convert(event.locationInWindow, from: nil)
         draggingThumb = true
@@ -259,7 +267,56 @@ final class BlockOverlayView: NSView {
                        reserveForActions: block.id == hoveredBlockID)
         }
         NSGraphicsContext.restoreGraphicsState()
+        // Outside the terminal clip: it sits flush with the top of the pane.
+        stickyHeader = stickyHeaderFrame(frames: frames, terminalFrame: terminalFrame, session: session)
+        if let sticky = stickyHeader {
+            drawStickyHeader(sticky, palette: palette, font: contextFont, session: session)
+        }
         drawScrollIndicator(palette: palette)
+    }
+
+    // MARK: - Sticky header
+
+    /// The block whose output fills the top of the pane while its own header has scrolled
+    /// away: its command stays pinned there (click to jump back to its start).
+    private var stickyHeader: (block: Block, rect: NSRect)?
+
+    private func stickyHeaderFrame(frames: [BlockFrame], terminalFrame: NSRect, session: TerminalSession) -> (block: Block, rect: NSRect)? {
+        let top = max(terminalFrame.minY, bounds.minY)
+        let height = ceil(session.geometry.cellHeight * 1.5)
+        guard let frame = frames.first(where: { $0.headerRect.minY < top - 1 && $0.rect.maxY > top + height * 2 }) else { return nil }
+        // Flush with the top of the pane (the strip above the first visible row is padding).
+        return (frame.block, NSRect(x: 0, y: bounds.minY, width: bounds.width, height: height))
+    }
+
+    private func drawStickyHeader(_ sticky: (block: Block, rect: NSRect), palette: ChromePalette, font: NSFont, session: TerminalSession) {
+        let rect = sticky.rect
+        palette.surface1.setFill()
+        rect.fill()
+        palette.outline.setFill()
+        NSRect(x: 0, y: rect.maxY - 1, width: rect.width, height: 1).fill()
+        if sticky.block.isFailed {
+            palette.error.setFill()
+            NSRect(x: 0, y: rect.minY, width: Self.flagPoleWidth, height: rect.height).fill()
+        }
+
+        let left = session.terminalView.frame.minX
+        let right = bounds.width - left
+        var status = Self.format(duration: sticky.block.duration())
+        if sticky.block.state == .running { status = "running  ·  " + status }
+        if sticky.block.isFailed, let code = sticky.block.exitCode { status = "exit \(code)  ·  " + status }
+        let statusAttrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: sticky.block.isFailed ? palette.error : palette.hint]
+        let statusSize = (status as NSString).size(withAttributes: statusAttrs)
+        (status as NSString).draw(at: NSPoint(x: right - statusSize.width, y: rect.midY - statusSize.height / 2), withAttributes: statusAttrs)
+
+        let command = session.commandText(of: sticky.block).components(separatedBy: .newlines).first ?? ""
+        let commandFont = NSFont.monospacedSystemFont(ofSize: font.pointSize + 1, weight: .medium)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let attrs: [NSAttributedString.Key: Any] = [.font: commandFont, .foregroundColor: palette.text, .paragraphStyle: paragraph]
+        let lineHeight = ceil(commandFont.ascender - commandFont.descender)
+        let textRect = NSRect(x: left, y: rect.midY - lineHeight / 2, width: max(0, right - statusSize.width - 16 - left), height: lineHeight)
+        (command as NSString).draw(with: textRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attrs)
     }
 
     private func drawHeader(_ block: Block, in rect: NSRect, palette: ChromePalette, font: NSFont,
