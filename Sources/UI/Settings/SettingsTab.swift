@@ -204,7 +204,6 @@ struct KeyboardShortcut: Identifiable {
         .init(action: "Show / hide Rune from any app (default)", keys: ["⌃", "`"]),
         .init(action: "Command palette", keys: ["⌘", "P"]),
         .init(action: "Open a link or file path in the output", keys: ["⌘", "click"]),
-        .init(action: "Rune Agent: work through a task step by step", keys: ["⌥", "⌘", "↵"]),
         .init(action: "Split pane right", keys: ["⌘", "D"]),
         .init(action: "Split pane down", keys: ["⌘", "⇧", "D"]),
         .init(action: "Close pane (or tab)", keys: ["⌘", "W"]),

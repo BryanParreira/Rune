@@ -315,15 +315,6 @@ extension InputAreaView: CommandTextViewDelegate {
         chipsModel.completions = result.isUnique ? [] : result.candidates.map { CompletionItem(name: $0, detail: nil) }
     }
 
-    func commandTextViewAskAgent(_ view: CommandTextView) {
-        guard let session = sessionView?.session else { return }
-        let text = editor.string
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        session.askAgent(text)
-        editor.string = ""
-        textDidChange(Notification(name: NSText.didChangeNotification))
-    }
-
     func commandTextViewAskAI(_ view: CommandTextView) {
         guard let sessionView, let session = sessionView.session else { return }
         let text = editor.string
@@ -513,7 +504,7 @@ struct InputHintLine: View {
                     hint(ai.isEnabled ? "↑ history   ⌘↵ ask AI   ⇧↵ new line   ⇥ complete   ⌘↑ blocks"
                                       : "↑ history   ⇧↵ new line   ⇥ complete   ⌘↑ blocks")
                 case .typing:
-                    hint(ai.isEnabled ? "↵ run   ⌘↵ ask AI   ⌥⌘↵ agent   → accept suggestion"
+                    hint(ai.isEnabled ? "↵ run   ⌘↵ ask AI   → accept suggestion   ⇧↵ new line"
                                       : "↵ run   → accept suggestion   ⇧↵ new line   ⇥ complete")
                 case .question:
                     Text("Looks like a question  ·  ⌘↵ ask AI  ·  ↵ runs it as a command")

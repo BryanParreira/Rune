@@ -23,10 +23,10 @@ struct WelcomePanel: View {
         Shortcut(keys: ["⌘", "P"], text: "command palette: every action in one search"),
         Shortcut(keys: ["⌃", "R"], text: "Recall: search past commands and their output"),
         Shortcut(keys: ["⌘", "↵"], text: "ask AI (runs on your Mac)"),
-        Shortcut(keys: ["⌥", "⌘", "↵"], text: "Rune Agent: works through a task, one approved step at a time"),
         Shortcut(keys: ["⇥"], text: "complete commands, flags, files and folders"),
         Shortcut(keys: ["⌘", "D"], text: "split the pane"),
         Shortcut(keys: ["⌘", "B"], text: "show files and folders"),
+        Shortcut(keys: ["⌘", ","], text: "open settings"),
     ]
 
     var body: some View {

@@ -19,9 +19,6 @@ struct AIPanel: View {
     let fontSize: CGFloat
     let horizontalPadding: CGFloat
     var onRun: (String) -> Void
-    /// Agent: skip the proposed step / stop the agent.
-    var onSkip: (String) -> Void
-    var onStopAgent: () -> Void
     var onEdit: (String) -> Void
     var onPullModel: (String) -> Void
     var onOpenSettings: () -> Void
@@ -45,16 +42,11 @@ struct AIPanel: View {
                 .foregroundColor(Color(nsColor: palette.secondary))
                 .lineLimit(1)
                 .truncationMode(.tail)
-            if conversation.isActive || conversation.agent?.runningCommand != nil {
+            if conversation.isActive {
                 ProgressView().controlSize(.mini)
             }
-            if let agent = conversation.agent, agent.runningCommand != nil {
-                Text("Agent · running step \(agent.step)")
-                    .font(.system(size: fontSize - 3, weight: .medium))
-                    .foregroundColor(Color(nsColor: palette.accent))
-            }
             Spacer(minLength: 8)
-            Text(conversation.isAgent ? "esc stop" : "⌘↵ follow up")
+            Text("⌘↵ follow up")
                 .font(.system(size: fontSize - 3))
                 .foregroundColor(Color(nsColor: palette.hint))
             Button("Show") { conversation.expand() }
@@ -108,21 +100,6 @@ struct AIPanel: View {
             Image(systemName: "sparkle")
                 .font(.system(size: fontSize - 2, weight: .semibold))
                 .foregroundColor(Color(nsColor: palette.accent))
-            if let agent = conversation.agent {
-                Text("AGENT")
-                    .font(.system(size: fontSize - 5, weight: .bold))
-                    .tracking(0.6)
-                    .foregroundColor(Color(nsColor: palette.onAccent))
-                    .padding(.horizontal, 6)
-                    .frame(height: 16)
-                    .background(Capsule().fill(Color(nsColor: palette.accent)))
-                    .help("Rune Agent works one approved step at a time")
-                if agent.step > 0 {
-                    Text("step \(agent.step)/\(AgentPrompt.maxSteps)")
-                        .font(.system(size: fontSize - 3))
-                        .foregroundColor(Color(nsColor: palette.hint))
-                }
-            }
             Text(conversation.prompt.isEmpty ? "Ask AI" : conversation.prompt)
                 .font(.system(size: fontSize - 1, weight: .medium))
                 .foregroundColor(Color(nsColor: palette.text))
@@ -175,11 +152,6 @@ struct AIPanel: View {
                     if conversation.state == .streaming {
                         ProgressView().controlSize(.mini)
                     }
-                    if case .done = conversation.agentStep, let agent = conversation.agent {
-                        Label("Agent finished after \(agent.step) step\(agent.step == 1 ? "" : "s")", systemImage: "checkmark.circle.fill")
-                            .font(.system(size: fontSize - 2, weight: .semibold))
-                            .foregroundColor(Color(nsColor: palette.success))
-                    }
                     Color.clear.frame(height: 1).id("end")
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -207,16 +179,9 @@ struct AIPanel: View {
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         case .command(let command, let complete):
-            if conversation.isAgent {
-                AgentStepCard(command: command, palette: palette, fontSize: fontSize,
-                              enabled: complete && conversation.state == .done,
-                              risk: CommandRisk.reason(for: command),
-                              onRun: { onRun(command) }, onSkip: { onSkip(command) }, onStop: onStopAgent)
-            } else {
-                CommandCard(command: command, palette: palette, fontSize: fontSize,
-                            enabled: complete && conversation.state != .waiting,
-                            onRun: { onRun(command) }, onEdit: { onEdit(command) })
-            }
+            CommandCard(command: command, palette: palette, fontSize: fontSize,
+                        enabled: complete && conversation.state != .waiting,
+                        onRun: { onRun(command) }, onEdit: { onEdit(command) })
         case .code(let language, let code, _):
             CodeBox(language: language, code: code, palette: palette, fontSize: fontSize)
         }
@@ -290,52 +255,6 @@ private struct CodeBox: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(nsColor: palette.background)))
         .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color(nsColor: palette.outline), lineWidth: 1))
-    }
-}
-
-/// One agent step: the command, a warning if it's risky, and Run / Skip / Stop. Nothing runs
-/// until the user presses Run.
-private struct AgentStepCard: View {
-    let command: String
-    let palette: ChromePalette
-    let fontSize: CGFloat
-    let enabled: Bool
-    let risk: String?
-    let onRun: () -> Void
-    let onSkip: () -> Void
-    let onStop: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(command)
-                .font(.system(size: fontSize, design: .monospaced))
-                .foregroundColor(Color(nsColor: palette.text))
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(nsColor: palette.background)))
-                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(Color(nsColor: risk == nil ? palette.outline : palette.error.withAlphaComponent(0.6)), lineWidth: 1))
-            if let risk {
-                Label("This command \(risk). Check it before running.", systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: fontSize - 2.5, weight: .medium))
-                    .foregroundColor(Color(nsColor: palette.error))
-            }
-            HStack(spacing: 8) {
-                PanelButton(title: risk == nil ? "Run step" : "Run anyway", systemImage: "play.fill", prominent: true, palette: palette, action: onRun)
-                    .disabled(!enabled)
-                PanelButton(title: "Skip", systemImage: "forward.fill", prominent: false, palette: palette, action: onSkip)
-                    .disabled(!enabled)
-                PanelButton(title: "Stop agent", systemImage: "stop.fill", prominent: false, palette: palette, action: onStop)
-                Spacer()
-                Text("You approve every step")
-                    .font(.system(size: fontSize - 3))
-                    .foregroundColor(Color(nsColor: palette.hint))
-            }
-            .opacity(enabled ? 1 : 0.6)
-        }
     }
 }
 
