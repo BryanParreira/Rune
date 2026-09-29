@@ -41,12 +41,42 @@
 	<string>public.app-category.developer-tools</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>A command you run in Rune wants to control another app.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>A command you run in Rune wants to use Bluetooth.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>A command you run in Rune wants to access your calendars.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>A command you run in Rune wants to use the camera.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>A command you run in Rune wants to access your contacts.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Commands you run in Rune may read and write files on your Desktop.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Commands you run in Rune may read and write files in Documents.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Commands you run in Rune may read and write files in Downloads.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 Bryan Bernardo Parreira. All rights reserved.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Rune connects to Ollama and other services on your local network when you use them.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>A command you run in Rune wants to use your location.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>A command you run in Rune wants to use the microphone.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>Commands you run in Rune may read and write files on network volumes.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>A command you run in Rune wants to access your photos.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>A command you run in Rune wants to access your reminders.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Commands you run in Rune may read and write files on external drives.</string>
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
 	<key>NSSupportsSuddenTermination</key>

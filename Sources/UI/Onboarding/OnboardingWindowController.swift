@@ -4,8 +4,8 @@ import RuneKit
 import SwiftUI
 
 /// First-launch guide: asks for the macOS permissions a terminal needs (folder access, optional
-/// Full Disk Access), sets up AI and a few preferences. Shown once per Mac; reopen it from
-/// Rune → Welcome Guide…
+/// Full Disk Access), sets up AI and a few preferences. Shown once per Mac, before the first
+/// terminal window; reopen it from Rune → Welcome Guide…
 final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     static let completedKey = "RuneOnboardingCompletedVersion"
     static let currentVersion = 1
@@ -14,12 +14,16 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         UserDefaults.standard.integer(forKey: completedKey) < currentVersion
     }
 
+    static let size = NSSize(width: 780, height: 520)
+
     private let model: OnboardingModel
+    /// Called once when the guide closes (finished, skipped, or closed with the red button).
+    var onClose: (() -> Void)?
 
     init(store: ConfigStore) {
         model = OnboardingModel(store: store)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 540),
+            contentRect: NSRect(origin: .zero, size: Self.size),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -29,6 +33,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window.isMovableByWindowBackground = true
         window.appearance = NSAppearance(named: .darkAqua)
         window.isReleasedWhenClosed = false
+        window.title = "Welcome to Rune"
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        window.standardWindowButton(.zoomButton)?.isHidden = true
         window.center()
         super.init(window: window)
         window.delegate = self
@@ -51,6 +58,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         // Closing the window counts as done; the guide stays available from the menu.
         markCompleted()
         model.stopPolling()
+        let onClose = onClose
+        self.onClose = nil
+        onClose?()
     }
 
     private func markCompleted() {
@@ -68,6 +78,8 @@ final class OnboardingModel: ObservableObject {
 
     let store: ConfigStore
     @Published var step: Step = .welcome
+    /// +1 moving forward, -1 going back; steers the page transition.
+    private(set) var direction = 1
     @Published private(set) var folderAccess: [String: Access] = [:]
     @Published private(set) var isRequestingFolders = false
     @Published private(set) var fullDiskAccess = false
@@ -90,11 +102,15 @@ final class OnboardingModel: ObservableObject {
     var palette: ChromePalette { ChromePalette(theme: store.snapshot.theme) }
 
     func next() {
-        if let next = Step(rawValue: step.rawValue + 1) { step = next }
+        guard let next = Step(rawValue: step.rawValue + 1) else { return }
+        direction = 1
+        step = next
     }
 
     func back() {
-        if let previous = Step(rawValue: step.rawValue - 1) { step = previous }
+        guard let previous = Step(rawValue: step.rawValue - 1) else { return }
+        direction = -1
+        step = previous
     }
 
     // MARK: Folders
@@ -187,87 +203,112 @@ final class OnboardingModel: ObservableObject {
 
 // MARK: - Views
 
+extension OnboardingModel.Step {
+    var title: String {
+        switch self {
+        case .welcome: return "Welcome"
+        case .permissions: return "Access"
+        case .setup: return "Setup"
+        }
+    }
+
+    var caption: String {
+        switch self {
+        case .welcome: return "What Rune does"
+        case .permissions: return "Folders & disk"
+        case .setup: return "Input & private AI"
+        }
+    }
+}
+
 struct OnboardingView: View {
     @ObservedObject var model: OnboardingModel
     let onFinish: () -> Void
 
     var body: some View {
         let p = model.palette
-        ZStack {
-            // Obsidian backdrop with a soft light, echoing the app icon.
-            LinearGradient(colors: [Color(nsColor: p.surface2), Color(nsColor: p.background)], startPoint: .top, endPoint: .bottom)
-            RadialGradient(colors: [Color(nsColor: p.accent).opacity(0.10), .clear], center: .top, startRadius: 0, endRadius: 360)
-
-            VStack(spacing: 0) {
-                Group {
-                    switch model.step {
-                    case .welcome: WelcomeStep(model: model)
-                    case .permissions: PermissionsStep(model: model)
-                    case .setup: SetupStep(model: model)
-                    }
+        HStack(spacing: 0) {
+            StepRail(model: model)
+                .frame(width: 236)
+            Rectangle().fill(Color(nsColor: p.outline)).frame(width: 1)
+            VStack(alignment: .leading, spacing: 0) {
+                ZStack(alignment: .topLeading) {
+                    page
+                        .id(model.step)
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .offset(x: 18 * CGFloat(model.direction))),
+                            removal: .opacity.combined(with: .offset(x: -12 * CGFloat(model.direction)))))
                 }
-                .id(model.step)
-                .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 8)), removal: .opacity))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 footer
             }
-            .padding(.horizontal, 56)
-            .padding(.top, 52)
-            .padding(.bottom, 32)
+            .padding(.horizontal, 44)
+            .padding(.top, 48)
+            .padding(.bottom, 28)
+            .background(
+                ZStack {
+                    Color(nsColor: p.background)
+                    RadialGradient(colors: [Color(nsColor: p.accent).opacity(0.08), .clear],
+                                   center: .topTrailing, startRadius: 0, endRadius: 420)
+                }
+            )
         }
-        .frame(width: 600, height: 540)
-        .animation(.easeOut(duration: 0.22), value: model.step)
+        .frame(width: OnboardingWindowController.size.width, height: OnboardingWindowController.size.height)
+        .animation(.spring(response: 0.34, dampingFraction: 0.9), value: model.step)
         .tint(Color(nsColor: p.accent))
+    }
+
+    @ViewBuilder
+    private var page: some View {
+        switch model.step {
+        case .welcome: WelcomeStep(model: model)
+        case .permissions: PermissionsStep(model: model)
+        case .setup: SetupStep(model: model)
+        }
     }
 
     private var footer: some View {
         let p = model.palette
-        return VStack(spacing: 14) {
+        return HStack(spacing: 18) {
+            if model.step != .welcome {
+                Button { model.back() } label: {
+                    Label("Back", systemImage: "chevron.left").labelStyle(.titleAndIcon)
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(Color(nsColor: p.secondary))
+            }
+            Spacer()
+            if model.step != .setup {
+                Button("Skip") { onFinish() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(Color(nsColor: p.hint))
+                    .help("Skip setup. You can reopen this from Rune → Welcome Guide.")
+            }
             Button {
                 model.step == .setup ? onFinish() : model.next()
             } label: {
-                Text(primaryTitle)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 42)
-                    .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Color(nsColor: p.accent)))
-                    .contentShape(Rectangle())
+                HStack(spacing: 8) {
+                    Text(primaryTitle)
+                    Image(systemName: model.step == .setup ? "arrow.right" : "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                }
+                .font(.system(size: 13.5, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 20)
+                .frame(height: 38)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(LinearGradient(colors: [Color(nsColor: p.accent.blended(withFraction: 0.12, of: .white) ?? p.accent),
+                                                      Color(nsColor: p.accent)], startPoint: .top, endPoint: .bottom))
+                )
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
+                .shadow(color: Color(nsColor: p.accent).opacity(0.25), radius: 8, y: 3)
+                .contentShape(Rectangle())
             }
             .buttonStyle(PressableStyle())
             .keyboardShortcut(.defaultAction)
-
-            // Back · progress dots · Skip, with the dots always centered.
-            HStack(spacing: 0) {
-                Group {
-                    if model.step != .welcome {
-                        Button("Back") { model.back() }
-                            .buttonStyle(.plain)
-                    }
-                }
-                .frame(width: 80, alignment: .leading)
-                Spacer(minLength: 0)
-                HStack(spacing: 7) {
-                    ForEach(OnboardingModel.Step.allCases, id: \.rawValue) { step in
-                        Capsule()
-                            .fill(Color(nsColor: step == model.step ? p.text : p.foreground.withAlphaComponent(0.18)))
-                            .frame(width: step == model.step ? 18 : 6, height: 6)
-                    }
-                }
-                Spacer(minLength: 0)
-                Group {
-                    if model.step != .setup {
-                        Button("Skip") { onFinish() }
-                            .buttonStyle(.plain)
-                            .help("You can reopen this from Rune → Welcome Guide")
-                    }
-                }
-                .frame(width: 80, alignment: .trailing)
-            }
-            .font(.system(size: 12.5, weight: .medium))
-            .foregroundColor(Color(nsColor: p.secondary))
-            .frame(height: 20)
         }
     }
 
@@ -280,46 +321,146 @@ struct OnboardingView: View {
     }
 }
 
-private struct PressableStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.985 : 1)
-            .opacity(configuration.isPressed ? 0.9 : 1)
+/// Left column: the app, the three steps with progress, and the privacy promise.
+private struct StepRail: View {
+    @ObservedObject var model: OnboardingModel
+
+    var body: some View {
+        let p = model.palette
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 44, height: 44)
+                    .shadow(color: .black.opacity(0.45), radius: 8, y: 4)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Rune").font(.system(size: 16, weight: .bold)).foregroundColor(Color(nsColor: p.text))
+                    Text(versionText).font(.system(size: 11, weight: .medium)).foregroundColor(Color(nsColor: p.hint))
+                }
+            }
+            .padding(.top, 58)
+            .padding(.bottom, 34)
+
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(OnboardingModel.Step.allCases, id: \.rawValue) { step in
+                    StepRow(step: step, current: model.step, palette: p)
+                }
+            }
+
+            Spacer()
+
+            HStack(alignment: .top, spacing: 9) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(nsColor: p.success))
+                    .padding(.top, 1)
+                Text("No accounts, no telemetry. Your commands and AI chats stay on this Mac.")
+                    .font(.system(size: 11.5))
+                    .foregroundColor(Color(nsColor: p.hint))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.bottom, 28)
+        }
+        .padding(.horizontal, 24)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Color(nsColor: p.surface1))
+    }
+
+    private var versionText: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        return version.map { "Version \($0)" } ?? "Terminal"
     }
 }
 
-/// Title block shared by every step.
+private struct StepRow: View {
+    let step: OnboardingModel.Step
+    let current: OnboardingModel.Step
+    let palette: ChromePalette
+
+    var body: some View {
+        let p = palette
+        let isCurrent = step == current
+        let isDone = step.rawValue < current.rawValue
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color(nsColor: isCurrent ? p.accent : (isDone ? p.success.withAlphaComponent(0.16) : p.foreground.withAlphaComponent(0.06))))
+                Circle()
+                    .stroke(Color(nsColor: isCurrent || isDone ? .clear : p.foreground.withAlphaComponent(0.14)), lineWidth: 1)
+                if isDone {
+                    Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundColor(Color(nsColor: p.success))
+                } else {
+                    Text("\(step.rawValue + 1)")
+                        .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                        .foregroundColor(isCurrent ? .white : Color(nsColor: p.secondary))
+                }
+            }
+            .frame(width: 24, height: 24)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(step.title)
+                    .font(.system(size: 13, weight: isCurrent ? .semibold : .medium))
+                    .foregroundColor(Color(nsColor: isCurrent ? p.text : p.secondary))
+                Text(step.caption)
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(nsColor: p.hint))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Color(nsColor: isCurrent ? p.foreground.withAlphaComponent(0.06) : .clear))
+        )
+    }
+}
+
+private struct PressableStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .opacity(configuration.isPressed ? 0.88 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+/// Step counter, title and subtitle at the top of each page.
 private struct Heading: View {
+    let step: OnboardingModel.Step
     let title: String
     let subtitle: String
     let palette: ChromePalette
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("STEP \(step.rawValue + 1) OF \(OnboardingModel.Step.allCases.count)")
+                .font(.system(size: 10.5, weight: .semibold))
+                .tracking(0.8)
+                .foregroundColor(Color(nsColor: palette.accent))
             Text(title)
-                .font(.system(size: 28, weight: .bold))
-                .tracking(-0.4)
+                .font(.system(size: 26, weight: .bold))
+                .tracking(-0.5)
                 .foregroundColor(Color(nsColor: palette.text))
             Text(subtitle)
-                .font(.system(size: 14))
+                .font(.system(size: 13.5))
                 .foregroundColor(Color(nsColor: palette.secondary))
-                .multilineTextAlignment(.center)
-                .lineSpacing(2)
+                .lineSpacing(2.5)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: 440)
+        .frame(maxWidth: 440, alignment: .leading)
     }
 }
 
 /// A grouped list of rows, like System Settings.
-private struct Group_<Content: View>: View {
+private struct Card<Content: View>: View {
     let palette: ChromePalette
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         VStack(spacing: 0) { content() }
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(nsColor: palette.foreground.withAlphaComponent(0.045))))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(nsColor: palette.foreground.withAlphaComponent(0.08)), lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(nsColor: palette.foreground.withAlphaComponent(0.04))))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color(nsColor: palette.foreground.withAlphaComponent(0.08)), lineWidth: 1))
     }
 }
 
@@ -339,17 +480,18 @@ private struct Row<Trailing: View>: View {
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(Color(nsColor: tint))
                     .frame(width: 32, height: 32)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: tint.withAlphaComponent(0.14))))
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: tint.withAlphaComponent(0.13))))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.system(size: 13.5, weight: .semibold)).foregroundColor(Color(nsColor: palette.text))
                     Text(detail).font(.system(size: 12)).foregroundColor(Color(nsColor: palette.secondary))
+                        .lineSpacing(1.5)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 12)
                 trailing()
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 13)
+            .padding(.vertical, 14)
             if divider {
                 Rectangle().fill(Color(nsColor: palette.foreground.withAlphaComponent(0.07))).frame(height: 1).padding(.leading, 62)
             }
@@ -368,8 +510,8 @@ private struct SmallButton: View {
             Text(title)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(prominent ? .white : Color(nsColor: palette.text))
-                .padding(.horizontal, 12)
-                .frame(height: 26)
+                .padding(.horizontal, 13)
+                .frame(height: 27)
                 .background(Capsule().fill(Color(nsColor: prominent ? palette.accent : palette.foreground.withAlphaComponent(0.1))))
                 .contentShape(Capsule())
         }
@@ -392,33 +534,22 @@ private struct WelcomeStep: View {
 
     var body: some View {
         let p = model.palette
-        VStack(spacing: 28) {
-            Image(nsImage: NSApp.applicationIconImage)
-                .resizable()
-                .interpolation(.high)
-                .frame(width: 112, height: 112)
-                .shadow(color: .black.opacity(0.5), radius: 18, y: 10)
-            Heading(title: "Welcome to Rune",
-                    subtitle: "A fast, private terminal for your Mac. Two quick steps and you're ready.",
+        VStack(alignment: .leading, spacing: 26) {
+            Heading(step: .welcome, title: "A faster, calmer terminal",
+                    subtitle: "Rune keeps your shell and adds the parts that make it easier to use. Setup takes under a minute.",
                     palette: p)
-            HStack(spacing: 12) {
-                pill("square.stack.3d.up", "Command blocks")
-                pill("keyboard", "Smart input")
-                pill("lock.shield", "Private AI")
+            Card(palette: p) {
+                Row(symbol: "square.stack.3d.up.fill", tint: p.accent, title: "Command blocks",
+                    detail: "Each command and its output stay together. Copy, rerun or jump between them with ⌘↑ ⌘↓.",
+                    palette: p) { EmptyView() }
+                Row(symbol: "text.cursor", tint: p.ansiCyan, title: "A real input editor",
+                    detail: "Suggestions from your history, syntax colors and Tab completion, with your zsh setup intact.",
+                    palette: p) { EmptyView() }
+                Row(symbol: "sparkle", tint: p.ansiYellow, title: "Private AI, when you ask",
+                    detail: "Optional local models through Ollama. Only ⌘↵ sends anything to AI.",
+                    palette: p, divider: false) { EmptyView() }
             }
         }
-    }
-
-    private func pill(_ symbol: String, _ text: String) -> some View {
-        let p = model.palette
-        return HStack(spacing: 7) {
-            Image(systemName: symbol).font(.system(size: 12)).foregroundColor(Color(nsColor: p.accent))
-            Text(text).font(.system(size: 12.5, weight: .medium)).foregroundColor(Color(nsColor: p.text))
-        }
-        .padding(.horizontal, 12)
-        .frame(height: 30)
-        .background(Capsule().fill(Color(nsColor: p.foreground.withAlphaComponent(0.06))))
-        .overlay(Capsule().stroke(Color(nsColor: p.foreground.withAlphaComponent(0.08)), lineWidth: 1))
     }
 }
 
@@ -427,11 +558,11 @@ private struct PermissionsStep: View {
 
     var body: some View {
         let p = model.palette
-        VStack(spacing: 28) {
-            Heading(title: "Give Rune access",
-                    subtitle: "Commands you run use Rune's permissions. Allow access now and macOS won't interrupt you later.",
+        VStack(alignment: .leading, spacing: 26) {
+            Heading(step: .permissions, title: "Give Rune access",
+                    subtitle: "Commands you run use Rune's permissions. Allow access now so macOS doesn't interrupt you mid-command.",
                     palette: p)
-            Group_(palette: p) {
+            Card(palette: p) {
                 Row(symbol: "folder.fill", tint: p.ansiBlue, title: "Desktop, Documents & Downloads",
                     detail: "macOS asks once for each folder.", palette: p) {
                     if model.allFoldersGranted {
@@ -445,7 +576,7 @@ private struct PermissionsStep: View {
                     }
                 }
                 Row(symbol: "externaldrive.fill", tint: p.ansiMagenta, title: "Full Disk Access",
-                    detail: "Optional. For commands that read Mail, Safari or backups. Turn on Rune in the list.",
+                    detail: "Optional. Needed for commands that read Mail, Safari or Time Machine data. Turn on Rune in the list.",
                     palette: p, divider: false) {
                     if model.fullDiskAccess {
                         Done(text: "Granted", palette: p)
@@ -454,6 +585,9 @@ private struct PermissionsStep: View {
                     }
                 }
             }
+            Label("You can change these anytime in System Settings → Privacy & Security.", systemImage: "info.circle")
+                .font(.system(size: 11.5))
+                .foregroundColor(Color(nsColor: p.hint))
         }
     }
 }
@@ -464,11 +598,11 @@ private struct SetupStep: View {
 
     var body: some View {
         let p = model.palette
-        VStack(spacing: 28) {
-            Heading(title: "Make it yours",
-                    subtitle: "Pick how you type and set up private AI. You can change this anytime in Settings.",
+        VStack(alignment: .leading, spacing: 26) {
+            Heading(step: .setup, title: "Make it yours",
+                    subtitle: "Choose how you type commands and set up private AI. Both can be changed later in Settings.",
                     palette: p)
-            Group_(palette: p) {
+            Card(palette: p) {
                 Row(symbol: "keyboard", tint: p.accent, title: "Type commands in",
                     detail: model.config.inputMode == .editor ? "Rune's editor: suggestions, highlighting, completion." : "Your zsh prompt: every zsh plugin works as usual.",
                     palette: p) {
@@ -483,6 +617,17 @@ private struct SetupStep: View {
                 Row(symbol: "sparkle", tint: p.ansiYellow, title: "Private AI",
                     detail: aiDetail, palette: p, divider: false) {
                     aiAction
+                }
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Good to know")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(Color(nsColor: p.hint))
+                HStack(spacing: 16) {
+                    Shortcut(keys: "⌘↵", label: "Ask AI", palette: p)
+                    Shortcut(keys: "⌘T", label: "New tab", palette: p)
+                    Shortcut(keys: "⌘B", label: "Files", palette: p)
+                    Shortcut(keys: "⌘,", label: "Settings", palette: p)
                 }
             }
         }
@@ -514,6 +659,27 @@ private struct SetupStep: View {
             SmallButton(title: "Get Ollama", palette: p) { ai.openDownloadPage() }
         default:
             SmallButton(title: "Check Again", palette: p) { ai.refresh() }
+        }
+    }
+}
+
+private struct Shortcut: View {
+    let keys: String
+    let label: String
+    let palette: ChromePalette
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Text(keys)
+                .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                .foregroundColor(Color(nsColor: palette.text))
+                .padding(.horizontal, 7)
+                .frame(height: 22)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(nsColor: palette.foreground.withAlphaComponent(0.08))))
+                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color(nsColor: palette.foreground.withAlphaComponent(0.1)), lineWidth: 1))
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundColor(Color(nsColor: palette.secondary))
         }
     }
 }

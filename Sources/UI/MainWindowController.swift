@@ -426,16 +426,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         let show = host.isHidden
         tabsModel.sidebarVisible = show
         fileTree.isActive = show
-        if show { host.isHidden = false }
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.18
-            context.allowsImplicitAnimation = true
-            width.animator().constant = show ? fileTreePreferredWidth : 0
-            window?.contentView?.layoutSubtreeIfNeeded()
-        }, completionHandler: { [weak self] in
-            if !show { host.isHidden = true }
-            if !show { self?.selectedTab?.focus() }
-        })
+        // Not animated: every animation frame would resize the terminal, reflowing its output
+        // and sending the shell a resize signal each time.
+        host.isHidden = !show
+        width.constant = show ? fileTreePreferredWidth : 0
+        window?.contentView?.layoutSubtreeIfNeeded()
+        if !show { selectedTab?.focus() }
         #if DEBUG
         if ProcessInfo.processInfo.environment["RUNE_DEBUG_SCRIPT"] != nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in

@@ -66,6 +66,7 @@ targets:
       - path: Resources
         excludes:
           - Info.plist
+          - Rune.entitlements
           - "ShellIntegration/**"
       - path: Resources/ShellIntegration
         type: folder
@@ -97,6 +98,22 @@ targets:
         SUEnableAutomaticChecks: true
         SUScheduledCheckInterval: 86400
         SUVerifyUpdateBeforeExtraction: true
+        # macOS shows these when a command run in Rune asks for protected data or devices.
+        NSDesktopFolderUsageDescription: Commands you run in Rune may read and write files on your Desktop.
+        NSDocumentsFolderUsageDescription: Commands you run in Rune may read and write files in Documents.
+        NSDownloadsFolderUsageDescription: Commands you run in Rune may read and write files in Downloads.
+        NSRemovableVolumesUsageDescription: Commands you run in Rune may read and write files on external drives.
+        NSNetworkVolumesUsageDescription: Commands you run in Rune may read and write files on network volumes.
+        NSAppleEventsUsageDescription: A command you run in Rune wants to control another app.
+        NSMicrophoneUsageDescription: A command you run in Rune wants to use the microphone.
+        NSCameraUsageDescription: A command you run in Rune wants to use the camera.
+        NSContactsUsageDescription: A command you run in Rune wants to access your contacts.
+        NSCalendarsUsageDescription: A command you run in Rune wants to access your calendars.
+        NSRemindersUsageDescription: A command you run in Rune wants to access your reminders.
+        NSPhotoLibraryUsageDescription: A command you run in Rune wants to access your photos.
+        NSLocationUsageDescription: A command you run in Rune wants to use your location.
+        NSBluetoothAlwaysUsageDescription: A command you run in Rune wants to use Bluetooth.
+        NSLocalNetworkUsageDescription: Rune connects to Ollama and other services on your local network when you use them.
         CFBundleDocumentTypes:
           - CFBundleTypeName: Folder
             CFBundleTypeRole: Viewer
@@ -106,6 +123,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.rune.Rune
+        CODE_SIGN_ENTITLEMENTS: Resources/Rune.entitlements
         PRODUCT_NAME: Rune
         RUNE_FEED_URL: https://github.com/BryanParreira/Rune/releases/latest/download/appcast.xml
         RUNE_UPDATE_PUBLIC_KEY: cHr50kOJ2kLrVtbwVnNzmRPNq/M9a7KEqpcpM7ks+ZA=

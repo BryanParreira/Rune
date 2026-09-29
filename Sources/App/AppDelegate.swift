@@ -17,20 +17,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AIService.shared.start(store: store)
         didFinishLaunching = true
 
-        let initial = pendingDirectories.isEmpty ? [Self.launchDirectory()] : pendingDirectories
-        pendingDirectories.removeAll()
-        for directory in initial {
-            open(directory: directory)
+        if pendingDirectories.isEmpty { pendingDirectories = [Self.launchDirectory()] }
+        if OnboardingWindowController.needsOnboarding, !Self.isAutomatedRun {
+            // First launch: the guide comes first; the terminal opens when it closes.
+            isFirstRunOnboarding = true
+            showOnboarding(nil)
+            onboardingController?.onClose = { [weak self] in
+                guard let self else { return }
+                self.isFirstRunOnboarding = false
+                self.openPendingDirectories()
+            }
+        } else {
+            openPendingDirectories()
         }
         NSApp.activate()
-        if OnboardingWindowController.needsOnboarding, !Self.isAutomatedRun {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.showOnboarding(nil) }
-        }
+    }
+
+    private func openPendingDirectories() {
+        let directories = pendingDirectories
+        pendingDirectories.removeAll()
+        directories.forEach(open(directory:))
+        NSApp.activate()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
         let directories = urls.compactMap(Self.directory(for:))
-        guard didFinishLaunching else {
+        guard didFinishLaunching, !isFirstRunOnboarding else {
             pendingDirectories.append(contentsOf: directories)
             return
         }
@@ -39,6 +51,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if isFirstRunOnboarding {
+            onboardingController?.window?.makeKeyAndOrderFront(nil)
+            return true
+        }
         if !flag {
             if let window = windowControllers.first?.window {
                 window.makeKeyAndOrderFront(nil)
@@ -110,6 +126,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var onboardingController: OnboardingWindowController?
+    /// True while the first-launch guide is open and no terminal window exists yet.
+    private var isFirstRunOnboarding = false
 
     /// Debug test runs share this Mac's preferences; they must not show or complete onboarding.
     static var isAutomatedRun: Bool {
@@ -122,7 +140,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showOnboarding(_ sender: Any?) {
         guard let configStore else { return }
-        if onboardingController == nil {
+        // Reopening from the menu starts over at the first step.
+        if onboardingController?.window?.isVisible != true {
             onboardingController = OnboardingWindowController(store: configStore)
         }
         onboardingController?.showWindow(nil)

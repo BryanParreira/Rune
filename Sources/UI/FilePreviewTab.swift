@@ -87,6 +87,14 @@ final class FilePreviewView: NSView {
     private var language: CodeLanguage = .plain
     private var watcher: DirectoryWatcher?
     private var loadGeneration = 0
+    /// Modification date and size of the file as last shown; the folder watcher fires for
+    /// any change next to it (e.g. the shell writing its history), so reloads compare this.
+    private var shownStamp: FileStamp?
+    /// Highlighting for `currentText`, computed off the main thread.
+    private var tokens: [CodeHighlighter.Token] = []
+
+    /// Files larger than this (UTF-16 units) are shown without syntax colors.
+    private static let highlightLimit = 400_000
 
     init(snapshot: ConfigSnapshot) {
         self.snapshot = snapshot
@@ -204,32 +212,50 @@ final class FilePreviewView: NSView {
     // MARK: Loading
 
     func load(path: String) {
+        let isNewFile = path != currentPath
         currentPath = path
         loadGeneration += 1
         let generation = loadGeneration
         headerModel.path = path
+        if isNewFile { shownStamp = nil }
         DispatchQueue.global(qos: .userInitiated).async {
-            let preview = FilePreview.load(path: path)
-            let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int64) ?? nil
+            let stamp = FileStamp(path: path)
+            var preview = FilePreview.load(path: path)
+            var note: String?
+            var tokens: [CodeHighlighter.Token] = []
+            // Everything expensive (pretty-printing, highlighting) happens here, off the main thread.
+            if case .text(let text, let language, let truncated) = preview {
+                var shown = text
+                if language == .json, let pretty = Self.prettyJSONIfMinified(text) {
+                    shown = pretty
+                    note = "Formatted"
+                }
+                if (shown as NSString).length <= Self.highlightLimit {
+                    tokens = CodeHighlighter.tokens(in: shown, language: language)
+                } else {
+                    note = note ?? "Large file · no colors"
+                }
+                preview = .text(shown, language: language, truncated: truncated)
+            }
             DispatchQueue.main.async {
                 guard generation == self.loadGeneration else { return }
-                self.show(preview, size: size)
+                // A change elsewhere in the folder: nothing to redraw.
+                if !isNewFile, let stamp, stamp == self.shownStamp { return }
+                self.shownStamp = stamp
+                self.tokens = tokens
+                self.show(preview, size: stamp?.size, note: note)
             }
         }
         watch(path)
     }
 
-    private func show(_ preview: FilePreview, size: Int64?) {
+    private func show(_ preview: FilePreview, size: Int64?, note: String? = nil) {
         let sizeText = size.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) }
-        headerModel.note = nil
+        headerModel.note = note
         switch preview {
-        case .text(var text, let language, let truncated):
+        case .text(let text, let language, let truncated):
             let languageChanged = language != self.language || headerModel.mode == nil && language == .markdown
             self.language = language
-            if language == .json, let pretty = Self.prettyJSONIfMinified(text) {
-                text = pretty
-                headerModel.note = "Formatted"
-            }
             let lines = text.reduce(into: 1) { count, ch in if ch == "\n" { count += 1 } }
             headerModel.detail = [language.displayName, "\(lines) line\(lines == 1 ? "" : "s")", sizeText].compactMap { $0 }.joined(separator: " · ")
             if truncated { headerModel.note = "Showing the first 2 MB" }
@@ -359,6 +385,7 @@ final class FilePreviewView: NSView {
         showOnly(messageHost)
     }
 
+    /// Applies fonts and colors (and the precomputed highlighting) to the shown text.
     private func restyleText() {
         guard let storage = textView.textStorage else { return }
         let font = snapshot.font
@@ -368,7 +395,7 @@ final class FilePreviewView: NSView {
         storage.beginEditing()
         storage.setAttributes([.font: font, .foregroundColor: palette.text, .paragraphStyle: paragraph], range: full)
         let bold = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
-        for token in CodeHighlighter.tokens(in: storage.string, language: language) where NSMaxRange(token.range) <= full.length {
+        for token in tokens where NSMaxRange(token.range) <= full.length {
             switch token.kind {
             case .comment: storage.addAttribute(.foregroundColor, value: palette.hint, range: token.range)
             case .string: storage.addAttribute(.foregroundColor, value: palette.success, range: token.range)
@@ -387,15 +414,18 @@ final class FilePreviewView: NSView {
 
     // MARK: Live reload
 
+    /// Watches the file (in-place writes, appends) and its folder (editors that save by
+    /// replacing the file). Re-armed on every load so a replaced file is followed.
     private func watch(_ path: String) {
-        let folder = URL(fileURLWithPath: (path as NSString).deletingLastPathComponent, isDirectory: true)
+        let file = URL(fileURLWithPath: path)
+        let folder = file.deletingLastPathComponent()
         if watcher == nil {
             watcher = DirectoryWatcher(debounce: 0.4) { [weak self] in
                 guard let self else { return }
                 self.load(path: self.currentPath)
             }
         }
-        watcher?.watch([folder])
+        watcher?.watch([folder, file])
     }
 
     #if DEBUG
@@ -706,5 +736,17 @@ enum MarkdownPage {
         \(body)
         </main></body></html>
         """
+    }
+}
+
+/// Identifies one version of a file on disk.
+private struct FileStamp: Equatable {
+    let modified: Date?
+    let size: Int64?
+
+    init?(path: String) {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path) else { return nil }
+        modified = attributes[.modificationDate] as? Date
+        size = (attributes[.size] as? NSNumber)?.int64Value
     }
 }

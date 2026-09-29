@@ -7,6 +7,7 @@ set -eu
 
 APP="$1"
 IDENTITY="${2:--}"
+ENTITLEMENTS="$(cd "$(dirname "$0")/.." && pwd)/Resources/Rune.entitlements"
 
 if [ "$IDENTITY" = "-" ]; then
   FLAGS="--force --sign -"
@@ -34,6 +35,6 @@ for framework in "$APP"/Contents/Frameworks/*.framework; do
   [ -d "$framework" ] && sign "$framework"
 done
 
-sign "$APP"
+sign --entitlements "$ENTITLEMENTS" "$APP"
 codesign --verify --deep --strict "$APP"
 echo "Signed $APP with ${IDENTITY}"
