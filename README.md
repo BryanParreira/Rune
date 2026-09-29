@@ -13,6 +13,10 @@ a private AI that runs entirely on your Mac, and a warm paper look that's easy o
 
 <sub>Free · macOS 14 or later · Apple Silicon and Intel · Signed and notarized by Apple</sub>
 
+<br><br>
+
+<img src="docs/assets/screenshot-paper.png" width="820" alt="Rune in the Paper theme: git history, a file listing and a failed command, each in its own block">
+
 </div>
 
 <br>
@@ -27,6 +31,10 @@ Type at the bottom, like a chat. Edit multi-line commands, accept suggestions fr
 
 **Recall: everything you've run, searchable.**
 Press ⌃R to search every command *and its output* across all your sessions: "that docker command from last week", "the error that mentioned port 3000". It's stored only on your Mac, with secrets removed. Start a command with a space and it's never recorded.
+
+<div align="center">
+<img src="docs/assets/screenshot-recall.png" width="760" alt="Recall searching past commands and their output">
+</div>
 
 **Docs you can run.**
 Open a README or any Markdown file and every shell snippet gets a Run button that puts the command in your terminal, ready for you to press Enter.
@@ -57,6 +65,10 @@ API keys and tokens in your output are masked on screen and never sent to AI. Wi
 
 **Easy on the eyes.**
 Rune's Paper theme is a soft, warm beige with ink-colored text and a highlighter for selections, with handwritten touches here and there. Prefer the dark? Paper Night keeps the same warmth after sunset.
+
+<div align="center">
+<img src="docs/assets/screenshot-night.png" width="760" alt="Rune in the Paper Night theme">
+</div>
 
 **Files at a glance.**
 Press ⌘B for a sidebar of the folder you're in, with git status colors and a project-wide filter. Click a file to read it right inside Rune, with syntax colors and line numbers.

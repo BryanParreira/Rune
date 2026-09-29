@@ -154,7 +154,7 @@ struct RecallView: View {
                         LazyVStack(spacing: 2) {
                             ForEach(Array(model.results.enumerated()), id: \.element.id) { index, entry in
                                 RecallRow(entry: entry, isSelected: index == model.selection, palette: p)
-                                    .id(index)
+                                    .id(entry.id)
                                     .contentShape(Rectangle())
                                     .onTapGesture { model.selection = index }
                                     .simultaneousGesture(TapGesture(count: 2).onEnded { model.insertSelected() })
@@ -162,7 +162,9 @@ struct RecallView: View {
                         }
                         .padding(6)
                     }
-                    .onChange(of: model.selection) { _, index in proxy.scrollTo(index) }
+                    .onChange(of: model.selection) { _, index in
+                        if model.results.indices.contains(index) { proxy.scrollTo(model.results[index].id) }
+                    }
                 }
             }
         }

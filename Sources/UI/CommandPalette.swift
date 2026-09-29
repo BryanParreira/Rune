@@ -151,7 +151,7 @@ struct CommandPaletteView: View {
                             LazyVStack(spacing: 2) {
                                 ForEach(Array(model.results.enumerated()), id: \.element.id) { index, item in
                                     PaletteRow(item: item, isSelected: index == model.selection, palette: p)
-                                        .id(index)
+                                        .id(item.id)
                                         .contentShape(Rectangle())
                                         .onTapGesture { model.run(item) }
                                         .onHover { if $0 { model.selection = index } }
@@ -161,7 +161,7 @@ struct CommandPaletteView: View {
                         }
                         .frame(maxHeight: 380)
                         .onChange(of: model.selection) { _, index in
-                            proxy.scrollTo(index)
+                            if model.results.indices.contains(index) { proxy.scrollTo(model.results[index].id) }
                         }
                     }
                 }
