@@ -811,6 +811,16 @@ extension MainWindowController {
         if UpdateController.shared.isAvailable {
             action("Check for Updates…", "arrow.down.circle", keywords: "upgrade version") { UpdateController.shared.checkForUpdates(nil) }
         }
+        if TouchIDSudo.isAvailable, !TouchIDSudo.isEnabled {
+            action("Use Touch ID for sudo…", "touchid", keywords: "fingerprint password admin") {
+                if case .failed(let reason) = TouchIDSudo.set(enabled: true) {
+                    let alert = NSAlert()
+                    alert.messageText = "Couldn't turn on Touch ID for sudo"
+                    alert.informativeText = reason
+                    alert.runModal()
+                }
+            }
+        }
         action("Welcome Guide", "hand.wave", keywords: "onboarding permissions setup") { NSApp.sendAction(#selector(AppDelegate.showOnboarding(_:)), to: nil, from: nil) }
 
         // Workflows

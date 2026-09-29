@@ -162,7 +162,7 @@ enum SettingsIndex {
         case .appearance:
             return ["Theme", "Font", "Font size", "Line height", "Cursor", "Blinking cursor", "Padding", "Nerd Font", "icons", "colors"]
         case .terminal:
-            return ["Shell", "Show shell prompt", "PS1", "Starship", "Scrollback", "Option key", "Meta", "Notifications", "Notify when done", "long commands", "Restore", "Reopen", "session", "tabs at launch", "Secrets", "API keys", "tokens", "redact", "Recall", "history", "output search"]
+            return ["Shell", "Show shell prompt", "PS1", "Starship", "Scrollback", "Option key", "Meta", "Notifications", "Notify when done", "long commands", "Restore", "Reopen", "session", "tabs at launch", "Secrets", "API keys", "tokens", "redact", "Recall", "history", "output search", "Touch ID", "sudo", "fingerprint", "password"]
         case .workflows:
             return ["Workflows", "saved commands", "snippets", "command palette", "placeholders"]
         case .input:
@@ -707,6 +707,10 @@ struct TerminalPage: View {
             SettingRow(model: model, title: "Option key acts as Meta", key: "optionAsMeta", detail: "Turn off to type special characters with Option.") {
                 SwitchControl(isOn: model.binding("optionAsMeta", { $0.optionAsMeta }))
             }
+            SettingRow(model: model, title: "Use Touch ID for sudo",
+                       detail: "sudo asks for your fingerprint (or Apple Watch) instead of your password, in any terminal. Rune adds one line to /etc/pam.d/sudo_local, which macOS keeps across updates; macOS asks for your administrator password to make the change.") {
+                TouchIDSudoControl(palette: p)
+            }
             SettingRow(model: model, title: "Rune Recall", key: "recallEnabled",
                        detail: "Keeps a searchable history of the commands you run and their output (last 2,000 lines each), stored only on this Mac with secrets removed. Commands typed with a leading space are skipped. Search it with ⌃R or ⇧⌘H.") {
                 SwitchControl(isOn: model.binding("recallEnabled", { $0.recallEnabled }))
@@ -1183,5 +1187,40 @@ struct WorkflowsPage: View {
         }
         model.set("workflows", list.map(\.jsonObject))
         editing = nil
+    }
+}
+
+/// Status and on/off button for Touch ID for sudo.
+struct TouchIDSudoControl: View {
+    let palette: ChromePalette
+    @State private var enabled = TouchIDSudo.isEnabled
+    @State private var message: String?
+
+    var body: some View {
+        let p = palette
+        HStack(spacing: 10) {
+            if let message {
+                Text(message).font(.system(size: 11.5)).foregroundColor(Color(nsColor: p.error)).lineLimit(2)
+            }
+            if !TouchIDSudo.isAvailable {
+                Text("No Touch ID on this Mac").font(.system(size: 12)).foregroundColor(Color(nsColor: p.hint))
+            } else {
+                if enabled {
+                    Label("On", systemImage: "touchid").font(.system(size: 12, weight: .semibold)).foregroundColor(Color(nsColor: p.success))
+                }
+                Button(enabled ? "Turn Off…" : "Turn On…") {
+                    switch TouchIDSudo.set(enabled: !enabled) {
+                    case .done: message = nil
+                    case .cancelled: break
+                    case .failed(let reason): message = reason
+                    }
+                    enabled = TouchIDSudo.isEnabled
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundColor(Color(nsColor: p.accent))
+            }
+        }
+        .onAppear { enabled = TouchIDSudo.isEnabled }
     }
 }
