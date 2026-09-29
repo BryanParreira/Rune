@@ -29,7 +29,8 @@ final class CommandTextView: NSTextView {
     var fillingWorkflow = false
 
     convenience init() {
-        self.init(frame: .zero)
+        // TextKit 1: line heights and the suggestion overlay use the layout manager directly.
+        self.init(usingTextLayoutManager: false)
         isRichText = false
         importsGraphics = false
         allowsUndo = true

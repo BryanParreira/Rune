@@ -1,11 +1,20 @@
 import RuneKit
 import SwiftUI
 
+/// How tall the answer area may get, set by the session view from its current size so the
+/// card (header and close button included) always fits and long answers scroll.
+final class AIPanelLayout: ObservableObject {
+    @Published var maxAnswerHeight: CGFloat = 240
+}
+
 /// Card above the input editor: the AI's streamed answer and a suggested command with
 /// Run / Edit / Cancel, or onboarding when AI isn't set up yet.
 struct AIPanel: View {
     @ObservedObject var conversation: AIConversation
+    @ObservedObject var layout: AIPanelLayout
     @ObservedObject var service = AIService.shared
+    /// Natural height of the answer's content, measured as it renders.
+    @State private var contentHeight: CGFloat = 0
     let palette: ChromePalette
     let fontSize: CGFloat
     let horizontalPadding: CGFloat
@@ -146,10 +155,17 @@ struct AIPanel: View {
                     Color.clear.frame(height: 1).id("end")
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .background(GeometryReader { geometry in
+                    Color.clear.preference(key: AnswerHeightKey.self, value: geometry.size.height)
+                })
             }
-            .frame(maxHeight: 360)
-            .fixedSize(horizontal: false, vertical: true)
-            .onChange(of: conversation.reply) { proxy.scrollTo("end", anchor: .bottom) }
+            // As tall as the answer, up to the space the pane has; beyond that it scrolls.
+            .frame(height: max(20, min(contentHeight, layout.maxAnswerHeight)))
+            .scrollIndicators(contentHeight > layout.maxAnswerHeight ? .visible : .hidden)
+            .onPreferenceChange(AnswerHeightKey.self) { contentHeight = $0 }
+            .onChange(of: conversation.reply) {
+                if conversation.isActive { proxy.scrollTo("end", anchor: .bottom) }
+            }
         }
     }
 
@@ -174,6 +190,11 @@ struct AIPanel: View {
     private func markdown(_ text: String) -> AttributedString {
         (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
     }
+}
+
+private struct AnswerHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 /// Earlier questions in this conversation, collapsed to one line each.

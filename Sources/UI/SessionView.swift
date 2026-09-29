@@ -18,6 +18,7 @@ final class SessionView: NSView {
     private var welcomeDismissed = false
     let conversation = AIConversation()
     private let aiHost = NSHostingView(rootView: AnyView(EmptyView()))
+    private let aiLayout = AIPanelLayout()
     private var cancellables: Set<AnyCancellable> = []
     private var snapshot: ConfigSnapshot?
 
@@ -89,6 +90,19 @@ final class SessionView: NSView {
     }
 
     override var isFlipped: Bool { true }
+
+    override func layout() {
+        super.layout()
+        updateAILayout()
+    }
+
+    /// The AI card may take up to 45% of the pane, minus what the output and input need;
+    /// its header, padding and buttons take ~76pt of that and the answer scrolls in the rest.
+    private func updateAILayout() {
+        let cap = min(bounds.height * 0.45, bounds.height - inputArea.fittingSize.height - 90)
+        let answer = max(48, floor(cap - 76))
+        if abs(aiLayout.maxAnswerHeight - answer) > 0.5 { aiLayout.maxAnswerHeight = answer }
+    }
 
     // MARK: - Updates from the session
 
@@ -172,6 +186,7 @@ final class SessionView: NSView {
         let palette = ChromePalette(theme: snapshot.theme)
         aiHost.rootView = AnyView(AIPanel(
             conversation: conversation,
+            layout: aiLayout,
             palette: palette,
             fontSize: CGFloat(snapshot.config.fontSize),
             horizontalPadding: CGFloat(snapshot.config.paddingX),

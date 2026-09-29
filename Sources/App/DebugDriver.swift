@@ -17,7 +17,7 @@ enum DebugDriver {
     static func runIfRequested(session: TerminalSession) {
         guard let script = ProcessInfo.processInfo.environment["RUNE_DEBUG_SCRIPT"], !script.isEmpty else { return }
         let steps = script.components(separatedBy: "||")
-        run(steps[...], session: session, delay: 3)
+        run(steps[...], session: session, delay: Double(ProcessInfo.processInfo.environment["RUNE_DEBUG_STEP"] ?? "") ?? 3)
     }
 
     /// Drives every Settings control's write path and checks the result took effect.
@@ -140,6 +140,11 @@ enum DebugDriver {
                     let editor = focused.view.inputArea.editor
                     print("EDITOR text=<\(editor.string)> sel=\(editor.selectedRange()) workflow=\(editor.fillingWorkflow)")
                     fflush(stdout)
+                }
+            case let tab where tab.hasPrefix("@tab:"):
+                if let controller = session.view.window?.windowController as? MainWindowController, let index = Int(tab.dropFirst(5)),
+                   controller.tabSummaries.indices.contains(index) {
+                    controller.selectTab(withID: controller.tabSummaries[index].id)
                 }
             case "@gap":
                 // Distance between the last non-blank row on screen and the terminal area's bottom.

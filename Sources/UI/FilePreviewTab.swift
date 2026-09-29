@@ -54,9 +54,14 @@ final class FilePreviewView: NSView {
     private let headerModel = FilePreviewHeaderModel()
     private let header: NSHostingView<FilePreviewHeader>
     private let scrollView = NSScrollView()
-    private let textView = NSTextView()
-    private let ruler: LineNumberRuler
+    /// TextKit 1 from the start: the line-number gutter reads the layout manager, and letting
+    /// AppKit switch a live TextKit 2 view over leaves it blank until the next relayout.
+    private let textView = NSTextView(usingTextLayoutManager: false)
+    private let gutter: LineNumberGutter
+    private var gutterWidth: NSLayoutConstraint?
     private let imageView = NSImageView()
+    /// Created on first use (Markdown only); `webViewIfLoaded` never creates it.
+    private var webViewIfLoaded: WKWebView?
     private lazy var webView: WKWebView = {
         let configuration = WKWebViewConfiguration()
         // Rendered documents never run scripts.
@@ -69,6 +74,7 @@ final class FilePreviewView: NSView {
         view.translatesAutoresizingMaskIntoConstraints = false
         view.isHidden = true
         addSubview(view)
+        self.webViewIfLoaded = view
         NSLayoutConstraint.activate([
             view.topAnchor.constraint(equalTo: header.bottomAnchor),
             view.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -100,7 +106,7 @@ final class FilePreviewView: NSView {
         self.snapshot = snapshot
         palette = ChromePalette(theme: snapshot.theme)
         header = NSHostingView(rootView: FilePreviewHeader(model: headerModel))
-        ruler = LineNumberRuler(textView: textView)
+        gutter = LineNumberGutter(textView: textView)
         super.init(frame: .zero)
         wantsLayer = true
 
@@ -128,11 +134,13 @@ final class FilePreviewView: NSView {
         // under a titlebar that isn't there.
         scrollView.automaticallyAdjustsContentInsets = false
         scrollView.contentInsets = NSEdgeInsetsZero
-        scrollView.verticalRulerView = ruler
-        scrollView.hasVerticalRuler = true
-        scrollView.rulersVisible = true
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollView)
+        // Line numbers live in a plain view beside the scroll view, not an NSRulerView: recent
+        // macOS versions back rulers with a window-sized layer that paints over everything.
+        gutter.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(gutter)
+        gutter.onWidthChange = { [weak self] width in self?.gutterWidth?.constant = width }
 
         imageView.imageScaling = .scaleProportionallyDown
         imageView.translatesAutoresizingMaskIntoConstraints = false
@@ -147,18 +155,24 @@ final class FilePreviewView: NSView {
         // The header always draws above the scrolling content.
         header.removeFromSuperview()
         addSubview(header, positioned: .above, relativeTo: nil)
-        // Redraw line numbers on every scroll step (AppKit otherwise reuses stale pixels).
+        // Line numbers follow the text on every scroll step.
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scrollView.contentView,
-                                               queue: .main) { [weak self] _ in self?.ruler.needsDisplay = true }
+                                               queue: .main) { [weak self] _ in self?.gutter.needsDisplay = true }
+        let gutterWidth = gutter.widthAnchor.constraint(equalToConstant: gutter.thickness)
+        self.gutterWidth = gutterWidth
 
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: topAnchor),
             header.leadingAnchor.constraint(equalTo: leadingAnchor),
             header.trailingAnchor.constraint(equalTo: trailingAnchor),
             header.heightAnchor.constraint(equalToConstant: 56),
+            gutter.topAnchor.constraint(equalTo: header.bottomAnchor),
+            gutter.leadingAnchor.constraint(equalTo: leadingAnchor),
+            gutter.bottomAnchor.constraint(equalTo: bottomAnchor),
+            gutterWidth,
             scrollView.topAnchor.constraint(equalTo: header.bottomAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: gutter.trailingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
             imageView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 24),
@@ -201,10 +215,9 @@ final class FilePreviewView: NSView {
         textView.backgroundColor = palette.background
         textView.insertionPointColor = palette.accent
         textView.selectedTextAttributes = [.backgroundColor: palette.accent.withAlphaComponent(0.3)]
-        ruler.font = NSFont.monospacedDigitSystemFont(ofSize: max(9, snapshot.font.pointSize - 2), weight: .regular)
-        ruler.textColor = palette.foreground.withAlphaComponent(0.28)
-        ruler.backgroundColor = palette.background
-        ruler.separatorColor = .clear
+        gutter.font = NSFont.monospacedDigitSystemFont(ofSize: max(9, snapshot.font.pointSize - 2), weight: .regular)
+        gutter.textColor = palette.foreground.withAlphaComponent(0.28)
+        gutter.backgroundColor = palette.background
         restyleText()
         if headerModel.mode == .preview { renderMarkdown() }
     }
@@ -269,7 +282,7 @@ final class FilePreviewView: NSView {
             currentText = text
             textView.string = text
             restyleText()
-            ruler.invalidateLineIndex()
+            gutter.invalidateLineIndex()
             if reloadingSameFile { scrollView.contentView.scroll(to: visible) }
             showCurrentTextMode()
         case .image:
@@ -291,10 +304,10 @@ final class FilePreviewView: NSView {
 
     private func showOnly(_ view: NSView) {
         scrollView.isHidden = view !== scrollView
+        gutter.isHidden = view !== scrollView
         imageView.isHidden = view !== imageView
         messageHost.isHidden = view !== messageHost
-        if view !== webView, webView.superview != nil { webView.isHidden = true }
-        if view === webView { webView.isHidden = false }
+        webViewIfLoaded?.isHidden = view !== webViewIfLoaded
     }
 
     private func showCurrentTextMode() {
@@ -312,11 +325,11 @@ final class FilePreviewView: NSView {
         textView.isHorizontallyResizable = !wraps
         textView.textContainer?.widthTracksTextView = wraps
         textView.textContainer?.containerSize = NSSize(
-            width: wraps ? max(100, scrollView.contentSize.width - ruler.ruleThickness) : CGFloat.greatestFiniteMagnitude,
+            width: wraps ? max(100, scrollView.contentSize.width) : CGFloat.greatestFiniteMagnitude,
             height: CGFloat.greatestFiniteMagnitude)
         if wraps { textView.frame.size.width = scrollView.contentSize.width }
         scrollView.hasHorizontalScroller = !wraps
-        if restyle { ruler.needsDisplay = true }
+        if restyle { gutter.needsDisplay = true }
     }
 
     /// Pretty-prints JSON whose lines are too long to read (minified files).
@@ -409,7 +422,7 @@ final class FilePreviewView: NSView {
             }
         }
         storage.endEditing()
-        ruler.needsDisplay = true
+        gutter.needsDisplay = true
     }
 
     // MARK: Live reload
@@ -596,27 +609,37 @@ private struct IconAction: View {
     }
 }
 
-/// Line numbers for a (read-only) text view.
-final class LineNumberRuler: NSRulerView {
-    var font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular) { didSet { needsDisplay = true } }
-    var textColor = NSColor.secondaryLabelColor
-    var backgroundColor = NSColor.textBackgroundColor
-    var separatorColor = NSColor.separatorColor
+/// Line numbers for a (read-only) text view, drawn beside its scroll view. Only the visible
+/// lines are drawn, so scrolling a large file stays cheap.
+final class LineNumberGutter: NSView {
+    var font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular) {
+        didSet { updateThickness(); needsDisplay = true }
+    }
+    var textColor = NSColor.secondaryLabelColor { didSet { needsDisplay = true } }
+    var backgroundColor = NSColor.textBackgroundColor { didSet { needsDisplay = true } }
+    /// Called when the width needed for the largest line number changes.
+    var onWidthChange: ((CGFloat) -> Void)?
+    private(set) var thickness: CGFloat = 44
+
     private weak var textView: NSTextView?
     /// UTF-16 offsets where each line starts.
     private var lineStarts: [Int] = [0]
 
     init(textView: NSTextView) {
         self.textView = textView
-        super.init(scrollView: nil, orientation: .verticalRuler)
-        clientView = textView
-        ruleThickness = 44
+        super.init(frame: .zero)
+        // Since macOS 14 views don't clip by default and `draw(_:)` may be handed a dirty rect
+        // far outside the view; unclipped, this gutter's background painted over the window.
+        clipsToBounds = true
     }
 
     @available(*, unavailable)
-    required init(coder: NSCoder) {
+    required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")
     }
+
+    override var isFlipped: Bool { true }
+    override var isOpaque: Bool { true }
 
     func invalidateLineIndex() {
         guard let text = textView?.string as NSString? else { return }
@@ -628,12 +651,18 @@ final class LineNumberRuler: NSRulerView {
             if index < text.length || text.hasSuffix("\n") { starts.append(index) }
         }
         lineStarts = starts
-        // Width of the widest line number actually needed (min 2 digits) plus even padding.
-        let digits = max(2, String(starts.count).count)
-        let sample = String(repeating: "8", count: digits) as NSString
-        let width = ceil(sample.size(withAttributes: [.font: font]).width)
-        ruleThickness = width + 22
+        updateThickness()
         needsDisplay = true
+    }
+
+    /// Width of the widest line number actually needed (min 2 digits) plus even padding.
+    private func updateThickness() {
+        let digits = max(2, String(lineStarts.count).count)
+        let sample = String(repeating: "8", count: digits) as NSString
+        let width = ceil(sample.size(withAttributes: [.font: font]).width) + 24
+        guard width != thickness else { return }
+        thickness = width
+        onWidthChange?(width)
     }
 
     private func lineNumber(forCharacter index: Int) -> Int {
@@ -645,9 +674,11 @@ final class LineNumberRuler: NSRulerView {
         return low + 1
     }
 
-    override func drawHashMarksAndLabels(in rect: NSRect) {
+    override func draw(_ dirtyRect: NSRect) {
+        let area = dirtyRect.intersection(bounds)
+        guard !area.isEmpty else { return }
         backgroundColor.setFill()
-        rect.fill()
+        area.fill()
 
         guard let textView, let layoutManager = textView.layoutManager, let container = textView.textContainer else { return }
         let visible = textView.visibleRect
@@ -666,12 +697,10 @@ final class LineNumberRuler: NSRulerView {
             let label = "\(line)" as NSString
             let size = label.size(withAttributes: attributes)
             let y = lineTop + (usedRect.height - size.height) / 2
-            guard y + size.height >= rect.minY - 2, y <= rect.maxY + 2 else { return }
-            label.draw(at: NSPoint(x: self.bounds.maxX - size.width - 10, y: y), withAttributes: attributes)
+            guard y + size.height >= area.minY - 2, y <= area.maxY + 2 else { return }
+            label.draw(at: NSPoint(x: self.bounds.maxX - size.width - 12, y: y), withAttributes: attributes)
         }
     }
-
-    override var isFlipped: Bool { true }
 }
 
 /// Opens links from rendered documents outside the viewer.
