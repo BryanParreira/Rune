@@ -7,6 +7,8 @@ struct PaletteItem: Identifiable {
     enum Kind: String {
         case action = "Action"
         case workflow = "Workflow"
+        /// From the repository's .rune/workflows.json.
+        case projectWorkflow = "Project"
         case tab = "Tab"
         case folder = "Folder"
         case history = "History"
@@ -36,7 +38,7 @@ final class PaletteModel: ObservableObject {
     private let onClose: () -> Void
 
     /// Shown before anything is typed, in this order.
-    private static let browseKinds: [PaletteItem.Kind] = [.workflow, .action, .tab, .folder]
+    private static let browseKinds: [PaletteItem.Kind] = [.projectWorkflow, .workflow, .action, .tab, .folder]
     private static let limit = 60
 
     init(items: [PaletteItem], palette: ChromePalette, onClose: @escaping () -> Void) {
@@ -74,7 +76,7 @@ final class PaletteModel: ObservableObject {
     /// Actions and workflows rank above the (much longer) history list on equal matches.
     private static func kindBoost(_ kind: PaletteItem.Kind) -> Int {
         switch kind {
-        case .action, .workflow: return 30
+        case .action, .workflow, .projectWorkflow: return 30
         case .tab, .theme: return 20
         case .folder: return 10
         case .history: return 0
@@ -223,7 +225,7 @@ private struct PaletteRow: View {
                     .truncationMode(.middle)
                 if let subtitle = item.subtitle {
                     Text(subtitle)
-                        .font(.system(size: 11.5, design: item.kind == .workflow || item.kind == .history ? .monospaced : .default))
+                        .font(.system(size: 11.5, design: [.workflow, .projectWorkflow, .history].contains(item.kind) ? .monospaced : .default))
                         .foregroundColor(Color(nsColor: p.hint))
                         .lineLimit(1)
                         .truncationMode(.middle)

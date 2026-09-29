@@ -1102,7 +1102,7 @@ struct WorkflowsPage: View {
         let p = model.palette
         VStack(alignment: .leading, spacing: 0) {
             PageTitle(text: "Workflows", palette: p)
-            Text("Saved commands you can run from the command palette (⌘P). Write {{name}} for a value to fill in: Rune selects each one in turn and Tab moves to the next. Workflows live in config.json, so they sync along with your settings.")
+            Text("Saved commands you can run from the command palette (⌘P). Write {{name}} for a value to fill in: Rune selects each one in turn and Tab moves to the next. Workflows live in config.json, so they sync along with your settings.\n\nShare workflows with your team by committing a .rune/workflows.json file to a repository (same format: a list of {\"name\", \"command\", \"description\"}). They appear in the palette, marked Project, whenever you're inside that repository.")
                 .font(.system(size: 12))
                 .foregroundColor(Color(nsColor: p.secondary))
                 .fixedSize(horizontal: false, vertical: true)

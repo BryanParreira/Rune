@@ -832,6 +832,18 @@ extension MainWindowController {
             })
         }
 
+        // Workflows shared by the project (.rune/workflows.json), for the focused pane's folder.
+        if let directory = selectedSession?.currentDirectory, let project = ProjectWorkflows.load(for: directory) {
+            let projectName = (project.root as NSString).lastPathComponent
+            for workflow in project.workflows {
+                items.append(PaletteItem(id: "project:" + workflow.id, kind: .projectWorkflow, title: workflow.name,
+                                         subtitle: workflow.command, symbol: "bolt.horizontal",
+                                         keywords: "project \(projectName) " + (workflow.description ?? "")) { [weak self] in
+                    self?.insertCommand(workflow.command, asWorkflow: true)
+                })
+            }
+        }
+
         // Tabs
         for tab in tabSummaries where !tab.isSelected {
             items.append(PaletteItem(id: "tab:\(tab.id)", kind: .tab, title: tab.title, subtitle: "Switch to tab", symbol: "square.on.square") { [weak self] in
