@@ -287,6 +287,15 @@ extension InputAreaView: CommandTextViewDelegate {
     func commandTextViewComplete(_ view: CommandTextView) {
         guard let session = sessionView?.session else { return }
         let cursor = editor.selectedRange().location
+        // Subcommands, flags and project values for known tools first, then files and folders.
+        if let smart = CommandCompletion.complete(text: editor.string, cursor: cursor, cwd: session.currentDirectory) {
+            let current = (editor.string as NSString).substring(with: smart.range)
+            if smart.replacement != current {
+                editor.insertText(smart.replacement, replacementRange: smart.range)
+            }
+            chipsModel.completions = smart.isUnique ? [] : smart.suggestions.map { CompletionItem(name: $0.name, detail: $0.description) }
+            return
+        }
         guard let result = session.complete(text: editor.string, cursor: cursor) else {
             NSSound.beep()
             return
@@ -295,7 +304,7 @@ extension InputAreaView: CommandTextViewDelegate {
         if result.replacement != current {
             editor.insertText(result.replacement, replacementRange: result.range)
         }
-        chipsModel.completions = result.isUnique ? [] : result.candidates
+        chipsModel.completions = result.isUnique ? [] : result.candidates.map { CompletionItem(name: $0, detail: nil) }
     }
 
     func commandTextViewAskAI(_ view: CommandTextView) {
@@ -373,7 +382,12 @@ final class InputChromeModel: ObservableObject {
     @Published var palette = ChromePalette(theme: .runeDark)
     @Published var monoFontSize: CGFloat = 13
     @Published var hint: Hint = .idle
-    @Published var completions: [String] = []
+    @Published var completions: [CompletionItem] = []
+}
+
+struct CompletionItem: Equatable {
+    let name: String
+    let detail: String?
 }
 
 struct ContextChipsRow: View {
@@ -456,8 +470,25 @@ struct InputHintLine: View {
 
     var body: some View {
         Group {
-            if !model.completions.isEmpty {
-                Text(model.completions.prefix(40).joined(separator: "   "))
+            if model.completions.contains(where: { $0.detail != nil }) {
+                // Subcommands and flags: one per line with what they do.
+                VStack(alignment: .leading, spacing: 3) {
+                    let width = min(24, model.completions.prefix(8).map(\.name.count).max() ?? 0)
+                    ForEach(Array(model.completions.prefix(8).enumerated()), id: \.offset) { _, item in
+                        HStack(spacing: 0) {
+                            Text(item.name.padding(toLength: max(width, item.name.count) + 3, withPad: " ", startingAt: 0))
+                                .foregroundColor(Color(nsColor: model.palette.text))
+                            Text(item.detail ?? "")
+                                .foregroundColor(Color(nsColor: model.palette.hint))
+                        }
+                    }
+                    if model.completions.count > 8 {
+                        Text("+\(model.completions.count - 8) more · keep typing to narrow")
+                            .foregroundColor(Color(nsColor: model.palette.hint))
+                    }
+                }
+            } else if !model.completions.isEmpty {
+                Text(model.completions.prefix(40).map(\.name).joined(separator: "   "))
                     .foregroundColor(Color(nsColor: model.palette.secondary))
             } else {
                 switch model.hint {

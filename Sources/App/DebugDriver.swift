@@ -95,7 +95,7 @@ enum DebugDriver {
                 (session.view.window?.windowController as? MainWindowController)?.debugDumpTabs()
             case let key where key.hasPrefix("@key:"):
                 let editor = session.view.inputArea.editor
-                let codes: [String: (UInt16, String)] = ["right": (124, "\u{F703}"), "up": (126, "\u{F700}"), "down": (125, "\u{F701}"), "end": (119, "\u{F72B}")]
+                let codes: [String: (UInt16, String)] = ["right": (124, "\u{F703}"), "up": (126, "\u{F700}"), "down": (125, "\u{F701}"), "end": (119, "\u{F72B}"), "tab": (48, "\t")]
                 if let (code, chars) = codes[String(key.dropFirst(5))],
                    let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.numericPad, .function], timestamp: 0,
                                                 windowNumber: editor.window?.windowNumber ?? 0, context: nil, characters: chars,
