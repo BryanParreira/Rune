@@ -204,6 +204,13 @@ public final class CommandCatalog: @unchecked Sendable {
         return executables.contains(name) || shellNames.contains(name)
     }
 
+    /// Every known command name (for suggesting corrections).
+    public var allNames: Set<String> {
+        lock.lock()
+        defer { lock.unlock() }
+        return executables.union(shellNames).union(Self.builtins)
+    }
+
     public var isLoaded: Bool {
         lock.lock()
         defer { lock.unlock() }

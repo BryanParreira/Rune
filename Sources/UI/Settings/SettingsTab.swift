@@ -203,6 +203,7 @@ struct KeyboardShortcut: Identifiable {
         .init(action: "New window", keys: ["⌘", "N"]),
         .init(action: "Show / hide Rune from any app (default)", keys: ["⌃", "`"]),
         .init(action: "Command palette", keys: ["⌘", "P"]),
+        .init(action: "Reopen closed tab or pane", keys: ["⌘", "⇧", "T"]),
         .init(action: "Open a link or file path in the output", keys: ["⌘", "click"]),
         .init(action: "Split pane right", keys: ["⌘", "D"]),
         .init(action: "Split pane down", keys: ["⌘", "⇧", "D"]),

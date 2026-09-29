@@ -136,28 +136,39 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         if let frame = saved.frame.map(NSRectFromString), frame.width >= 420, frame.height >= 240 {
             window?.setFrame(frame, display: false)
         }
-        let palette = ChromePalette(theme: configStore.snapshot.theme)
-        for tab in saved.tabs {
-            switch tab {
-            case .terminal(let layout):
-                let terminal = TerminalTab(layout: layout, palette: palette) { directory in
-                    self.makeSession(directory: directory)
-                }
-                insert(terminal)
-                terminal.sessions.forEach {
-                    $0.view.dismissWelcomeForSession()
-                    start($0, prefill: nil)
-                }
-                if let first = terminal.sessions.first { terminal.focus(first) }
-            case .file(let path):
-                insert(makeFileTab(path: path, pinned: true))
-            }
-        }
+        for tab in saved.tabs { openSavedTab(tab) }
         if tabs.isEmpty { addTab(directory: NSHomeDirectory()) }
         select(index: min(saved.selectedTab, tabs.count - 1))
         #if DEBUG
         if let first = terminalTabs.first?.sessions.first { DebugDriver.runIfRequested(session: first) }
         #endif
+    }
+
+    /// Opens a tab from saved state (session restore, launch configurations, reopen closed).
+    func openSavedTab(_ tab: SavedSession.Tab) {
+        switch tab {
+        case .terminal(let layout):
+            let terminal = TerminalTab(layout: layout, palette: ChromePalette(theme: configStore.snapshot.theme)) { directory in
+                self.makeSession(directory: directory)
+            }
+            insert(terminal)
+            terminal.sessions.forEach {
+                $0.view.dismissWelcomeForSession()
+                start($0, prefill: nil)
+            }
+            if let first = terminal.sessions.first { terminal.focus(first) }
+        case .file(let path):
+            guard FileManager.default.fileExists(atPath: path) else { return }
+            insert(makeFileTab(path: path, pinned: true))
+        }
+    }
+
+    // MARK: - Reopen closed tab
+
+    /// ⇧⌘T: the most recently closed tab or pane comes back, in its folders.
+    @objc func reopenClosedTab(_ sender: Any?) {
+        guard let tab = ClosedTabs.shared.pop() else { NSSound.beep(); return }
+        openSavedTab(tab)
     }
 
     @available(*, unavailable)
@@ -334,6 +345,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     /// Closes one pane (the whole tab when it's the last one).
     private func closePane(_ session: TerminalSession) {
         guard let tab = terminalTabs.first(where: { $0.contains(session) }) else { return }
+        if tab.paneCount > 1 { ClosedTabs.shared.push(.terminal(.pane(directory: session.currentDirectory))) }
         if !tab.remove(session) {
             closeTab(id: tab.id)
         } else {
@@ -465,6 +477,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     private func closeTab(id: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let tab = tabs.remove(at: index)
+        if let terminal = tab as? TerminalTab {
+            ClosedTabs.shared.push(.terminal(terminal.layout))
+        } else if let file = tab as? FilePreviewTab {
+            ClosedTabs.shared.push(.file(path: file.path))
+        }
         tab.closeContent()
         tab.contentView.removeFromSuperview()
 
@@ -554,6 +571,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
                                       #selector(selectPaneRight(_:)), #selector(selectPaneAbove(_:)), #selector(selectPaneBelow(_:))]
         guard let action = item.action else { return true }
         if paneActions.contains(action) { return selectedTab is TerminalTab }
+        if action == #selector(reopenClosedTab(_:)) { return !ClosedTabs.shared.isEmpty }
         if navigation.contains(action) { return ((selectedTab as? TerminalTab)?.paneCount ?? 0) > 1 }
         return true
     }

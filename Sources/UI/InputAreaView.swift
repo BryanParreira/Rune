@@ -257,6 +257,7 @@ final class InputAreaView: NSView, NSTextViewDelegate {
 
     fileprivate func submit() {
         guard let session = sessionView?.session else { return }
+        chipsModel.correction = nil
         let command = editor.string
         guard !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         session.submit(command)
@@ -292,8 +293,18 @@ extension InputAreaView: CommandTextViewDelegate {
         updateEditorHeight()
     }
 
+    /// Offers a fixed version of a command that failed because of a typo.
+    func showCorrection(_ command: String?) {
+        chipsModel.correction = command
+    }
+
     func commandTextViewComplete(_ view: CommandTextView) {
         guard let session = sessionView?.session else { return }
+        if editor.string.isEmpty, let correction = chipsModel.correction {
+            chipsModel.correction = nil
+            setText(correction)
+            return
+        }
         let cursor = editor.selectedRange().location
         // Subcommands, flags and project values for known tools first, then files and folders.
         if let smart = CommandCompletion.complete(text: editor.string, cursor: cursor, cwd: session.currentDirectory) {
@@ -391,6 +402,8 @@ final class InputChromeModel: ObservableObject {
     @Published var monoFontSize: CGFloat = 13
     @Published var hint: Hint = .idle
     @Published var completions: [CompletionItem] = []
+    /// A fix for the command that just failed (Tab on an empty input fills it in).
+    @Published var correction: String?
 }
 
 struct CompletionItem: Equatable {
@@ -500,6 +513,16 @@ struct InputHintLine: View {
                     .foregroundColor(Color(nsColor: model.palette.secondary))
             } else {
                 switch model.hint {
+                case .idle where model.correction != nil:
+                    HStack(spacing: 6) {
+                        Text("Did you mean")
+                            .foregroundColor(Color(nsColor: model.palette.hint))
+                        Text(model.correction ?? "")
+                            .foregroundColor(Color(nsColor: model.palette.text))
+                            .highlighterMark(model.palette.highlight)
+                        Text("?   ⇥ to use it")
+                            .foregroundColor(Color(nsColor: model.palette.hint))
+                    }
                 case .idle:
                     hint(ai.isEnabled ? "↑ history   ⌘↵ ask AI   ⇧↵ new line   ⇥ complete   ⌘↑ blocks"
                                       : "↑ history   ⇧↵ new line   ⇥ complete   ⌘↑ blocks")

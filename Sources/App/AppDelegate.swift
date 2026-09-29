@@ -217,6 +217,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         makeWindow(directory: directory)
     }
 
+    /// ⇧⌘T with no window open: reopen the last closed tab in a new window.
+    @objc func reopenClosedTab(_ sender: Any?) {
+        guard let tab = ClosedTabs.shared.pop() else { NSSound.beep(); return }
+        makeWindow(directory: NSHomeDirectory(), restoring: SavedSession.Window(frame: nil, selectedTab: 0, tabs: [tab]))
+        NSApp.activate()
+    }
+
     @objc func newTab(_ sender: Any?) {
         makeWindow(directory: NSHomeDirectory())
     }

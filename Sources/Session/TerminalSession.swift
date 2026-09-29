@@ -675,6 +675,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         if case .commandFinished = mark, wasRunning, let block = tracker.blocks.last, block.state == .finished {
             notifyIfUnattended(block)
             recordInRecall(block)
+            suggestCorrection(for: block)
         }
 
         switch mark {
@@ -738,6 +739,16 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         RecallService.shared.record(command: command, output: outputText(of: block, maxRows: RecallService.maxOutputLines),
                                     directory: block.cwd.isEmpty ? currentDirectory : block.cwd,
                                     exitCode: block.exitCode, duration: block.duration())
+    }
+
+    /// A command failed because of a typo: offer the fixed command (Tab puts it in the input).
+    private func suggestCorrection(for block: Block) {
+        guard block.isFailed || block.exitCode == 127 else { view.inputArea.showCorrection(nil); return }
+        let directories = isRemote ? [] : FileListing.entries(at: currentDirectory, showHidden: true).filter(\.isDirectory).map(\.name)
+        let fix = CommandCorrection.suggest(command: commandText(of: block), exitCode: block.exitCode,
+                                            output: outputText(of: block, maxRows: 40),
+                                            knownCommands: CommandCatalog.shared.allNames, directories: directories)
+        view.inputArea.showCorrection(fix)
     }
 
     /// A long command finished while this pane wasn't in view: post a notification.
