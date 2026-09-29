@@ -5,7 +5,8 @@ import SwiftTerm
 /// SwiftTerm view with the hooks Rune needs.
 final class RuneTerminalView: LocalProcessTerminalView {
     var onDataReceived: (() -> Void)?
-    var onScrolled: (() -> Void)?
+    /// Viewport moved; the argument is 0 (top of scrollback) … 1 (following the output).
+    var onScrolled: ((Double) -> Void)?
     var onBufferSwitched: (() -> Void)?
     /// When set, keyboard input is offered here instead of the PTY. Return true to consume it.
     var inputInterceptor: ((ArraySlice<UInt8>) -> Bool)?
@@ -35,7 +36,7 @@ final class RuneTerminalView: LocalProcessTerminalView {
 
     override func scrolled(source: TerminalView, position: Double) {
         super.scrolled(source: source, position: position)
-        onScrolled?()
+        onScrolled?(position)
     }
 
     override func bufferActivated(source: Terminal) {
@@ -81,6 +82,13 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
 
     private var snapshot: ConfigSnapshot
     private var startedAt = Date()
+    /// Where a folder change for an idle shell is written before signalling it (see rune.zsh).
+    private lazy var cdRequestFile = FileManager.default.temporaryDirectory
+        .appendingPathComponent("rune-cd-\(id.uuidString)")
+    /// The shell has drawn its first prompt (its startup files have finished).
+    private(set) var hasPrompted = false
+    /// A folder to move to once the shell is ready.
+    private var pendingDirectory: String?
     private var sawOSC7 = false
     private var cwdPollScheduled = false
     private var integrationTimeout: DispatchWorkItem?
@@ -120,10 +128,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         terminalView.processDelegate = self
         terminalView.getTerminal().semanticPromptClickBehavior = .disabled
         terminalView.onDataReceived = { [weak self] in self?.handleDataReceived() }
-        terminalView.onScrolled = { [weak self] in
-            self?.view.blocksDidChange()
-            self?.view.overlay.flashScrollIndicator()
-        }
+        terminalView.onScrolled = { [weak self] position in self?.viewportDidScroll(to: position) }
         terminalView.onBufferSwitched = { [weak self] in self?.updateMode() }
         terminalView.inputInterceptor = { [weak self] data in self?.intercept(data) ?? false }
         terminalView.contextMenuProvider = { [weak self] point in self?.contextMenu(atTerminalPoint: point) }
@@ -163,6 +168,10 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         tv.installColors(theme.ansi.map(\.terminalColor))
         tv.optionAsMetaKey = config.optionAsMeta
         tv.getTerminal().setCursorStyle(config.cursorStyle.terminalStyle(blink: config.cursorBlink))
+        if tv.isUsingMetalRenderer != config.gpuRendering {
+            // Without a usable Metal device this throws and the terminal keeps CPU drawing.
+            try? tv.setUseMetal(config.gpuRendering)
+        }
         view.apply(snapshot)
     }
 
@@ -185,6 +194,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         if ShellResolver.isZsh(shell), let integrationDir = Self.zshIntegrationDirectory() {
             ShellEnvironment.addZshIntegration(to: &env, integrationDirectory: integrationDir,
                                                honorPrompt: config.honorPrompt, typeInShell: typeInShell)
+            env["RUNE_CD_FILE"] = cdRequestFile.path
             integration = .pending
             // Keep the caret hidden while zsh loads; the integration shows it when it's
             // actually needed (at the real prompt, or when a command runs). Without this the
@@ -216,6 +226,24 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         )
         updateMode()
         onChange?()
+    }
+
+    /// Moves a shell that's sitting at its prompt to `directory` without running a visible
+    /// command: used when a pre-started shell is handed to a tab for another folder.
+    func moveIdleShell(to directory: String) {
+        guard directory != currentDirectory, FileManager.default.fileExists(atPath: directory) else { return }
+        guard hasPrompted, integration == .active, mode == .editor || mode == .shellPrompt,
+              let pid = terminalView.process?.shellPid
+        else {
+            pendingDirectory = directory
+            return
+        }
+        do {
+            try directory.write(to: cdRequestFile, atomically: true, encoding: .utf8)
+            kill(pid, SIGUSR1)
+        } catch {
+            // Can't hand it over quietly; the tab stays where the shell started.
+        }
     }
 
     /// Moves the cursor to the last row by adding blank lines above it.
@@ -276,6 +304,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             commandActivity = nil
         }
         integrationTimeout?.cancel()
+        try? FileManager.default.removeItem(at: cdRequestFile)
         view.conversation.dismiss()
         liveTimer?.invalidate()
         guard state == .running else { return }
@@ -527,6 +556,13 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         if case .promptStart = mark, let last = tracker.blocks.last, position.row < last.headerRow {
             anchorLines.removeAll()
         }
+        if case .commandStart = mark, !hasPrompted {
+            hasPrompted = true
+            if let directory = pendingDirectory {
+                pendingDirectory = nil
+                DispatchQueue.main.async { [weak self] in self?.moveIdleShell(to: directory) }
+            }
+        }
         let wasRunning = tracker.isCommandRunning
         let changed = tracker.handle(mark, at: position)
         if case .commandFinished = mark, wasRunning, let block = tracker.blocks.last, block.state == .finished {
@@ -701,6 +737,23 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     }
 
     // MARK: - Output
+
+    private var scrollUpdatePending = false
+    private var lastScrollPosition = 1.0
+
+    /// Called for every line that scrolls by, so the work is coalesced to once per frame. The
+    /// scroll indicator only appears when the view isn't simply following new output.
+    private func viewportDidScroll(to position: Double) {
+        lastScrollPosition = position
+        guard !scrollUpdatePending else { return }
+        scrollUpdatePending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { [weak self] in
+            guard let self else { return }
+            self.scrollUpdatePending = false
+            self.view.blocksDidChange()
+            if self.lastScrollPosition < 0.999 { self.view.overlay.flashScrollIndicator() }
+        }
+    }
 
     private func handleDataReceived() {
         view.blocksDidChange()

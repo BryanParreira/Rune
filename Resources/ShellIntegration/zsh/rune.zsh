@@ -74,6 +74,21 @@ __rune_preexec() {
   __rune_running=1
 }
 
+# Rune keeps a spare shell started in the background so new tabs open instantly. When it
+# hands one to a tab in another folder, it writes the folder to $RUNE_CD_FILE and sends
+# SIGUSR1: move there quietly (no chpwd hooks, no history, no block) and report it.
+TRAPUSR1() {
+  [[ -n "$RUNE_CD_FILE" && -r "$RUNE_CD_FILE" ]] || return 0
+  local dir
+  dir=$(<"$RUNE_CD_FILE")
+  command rm -f -- "$RUNE_CD_FILE"
+  builtin cd -q -- "$dir" 2>/dev/null || return 0
+  __rune_encode "$PWD"
+  builtin printf '\e]6973;cwd=%s\a' "$REPLY"
+  zle && zle reset-prompt 2>/dev/null
+  return 0
+}
+
 add-zsh-hook precmd __rune_precmd_first
 add-zsh-hook precmd __rune_precmd_last
 add-zsh-hook preexec __rune_preexec

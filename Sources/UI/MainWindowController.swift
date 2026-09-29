@@ -236,7 +236,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     }
 
     private func makeSession(directory: String) -> TerminalSession {
-        let session = TerminalSession(snapshot: configStore.snapshot, directory: directory)
+        let snapshot = configStore.snapshot
+        let session = SessionPool.shared.take(snapshot: snapshot, directory: directory)
+            ?? TerminalSession(snapshot: snapshot, directory: directory)
         session.onChange = { [weak self] in self?.refreshTabs() }
         session.onRequestNewTab = { [weak self, weak session] text in
             self?.addTab(directory: session?.currentDirectory ?? NSHomeDirectory(), prefill: text)
@@ -251,7 +253,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     private func start(_ session: TerminalSession, prefill: String?) {
         // Size the view before the shell starts so it gets the right winsize immediately.
         contentArea.layoutSubtreeIfNeeded()
-        session.start()
+        SessionPool.shared.preferredSize = contentArea.bounds.size
+        if session.state == .notStarted { session.start() }
         session.focus()
         if let prefill { session.view.inputArea.setText(prefill) }
     }
@@ -754,7 +757,7 @@ extension MainWindowController {
         for session in tab.sessions {
             let frame = session.view.convert(session.view.bounds, to: nil)
             let focus = session === tab.focusedSession ? "*" : " "
-            print("PANES \(focus) \(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height)) cols=\(session.terminalView.getTerminal().cols) rows=\(session.terminalView.getTerminal().rows) alpha=\(session.view.alphaValue) cwd=\(session.currentDirectory)")
+            print("PANES \(focus) \(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height)) cols=\(session.terminalView.getTerminal().cols) rows=\(session.terminalView.getTerminal().rows) alpha=\(session.view.alphaValue) cwd=\(session.currentDirectory) blocks=\(session.tracker.blocks.count) mode=\(session.mode)")
         }
         print("PANES count=\(tab.paneCount) tabs=\(tabs.count)")
         fflush(stdout)

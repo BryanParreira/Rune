@@ -28,6 +28,9 @@ public struct RuneConfig: Equatable, Sendable {
     public var cursorBlink: Bool = false
     public var scrollback: Int = 10_000
     public var optionAsMeta: Bool = true
+    /// Experimental: draw the terminal with the GPU (Metal) via SwiftTerm. Off by default: in
+    /// testing it was slower than CPU drawing for heavy output. Falls back if Metal fails.
+    public var gpuRendering: Bool = false
     /// Show the "New session" panel above the input editor.
     public var showWelcome: Bool = true
     /// Show the shell's own prompt (PS1) in each block instead of Rune's context chips.
@@ -64,7 +67,7 @@ public struct RuneConfig: Equatable, Sendable {
         "fontFamily", "fontSize", "lineHeight", "theme", "paddingX", "paddingY", "cursorStyle",
         "cursorBlink", "scrollback", "optionAsMeta", "showWelcome", "honorPrompt", "inputMode", "shell",
         "aiEnabled", "ollamaEndpoint", "aiModel", "aiIncludeBlockContext",
-        "syncPath", "hosts", "workflows", "notifyWhenDone", "notifyAfterSeconds",
+        "syncPath", "hosts", "workflows", "notifyWhenDone", "notifyAfterSeconds", "gpuRendering",
     ]
 
     /// Written to ~/.config/rune/config.json on first launch.
@@ -118,6 +121,7 @@ extension RuneConfig {
         if let v = reader.bool("cursorBlink") { cursorBlink = v }
         if let v = reader.number("scrollback", range: 0...1_000_000) { scrollback = Int(v) }
         if let v = reader.bool("optionAsMeta") { optionAsMeta = v }
+        if let v = reader.bool("gpuRendering") { gpuRendering = v }
         if let v = reader.bool("showWelcome") { showWelcome = v }
         if let v = reader.bool("honorPrompt") { honorPrompt = v }
         if let v = reader.string("inputMode") {
