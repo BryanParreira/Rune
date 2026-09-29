@@ -147,6 +147,10 @@ enum DebugDriver {
                     try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: String(shot.dropFirst(16))))
                     (window.contentView as? NSHostingView<OnboardingView>)?.rootView.model.next()
                 }
+            case let scroll where scroll.hasPrefix("@scrollPreview:"):
+                if let controller = session.view.window?.windowController as? MainWindowController, let points = Double(scroll.dropFirst(15)) {
+                    controller.debugSelectedPreview()?.debugScroll(by: CGFloat(points))
+                }
             case "@settingsTest":
                 runSettingsSelfTest(session: session)
             case "@tree":

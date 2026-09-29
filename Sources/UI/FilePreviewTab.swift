@@ -116,6 +116,10 @@ final class FilePreviewView: NSView {
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
         scrollView.drawsBackground = true
+        // The window uses a full-size content view; automatic insets would offset the text
+        // under a titlebar that isn't there.
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.contentInsets = NSEdgeInsetsZero
         scrollView.verticalRulerView = ruler
         scrollView.hasVerticalRuler = true
         scrollView.rulersVisible = true
@@ -131,6 +135,14 @@ final class FilePreviewView: NSView {
         messageHost.translatesAutoresizingMaskIntoConstraints = false
         messageHost.isHidden = true
         addSubview(messageHost)
+
+        // The header always draws above the scrolling content.
+        header.removeFromSuperview()
+        addSubview(header, positioned: .above, relativeTo: nil)
+        // Redraw line numbers on every scroll step (AppKit otherwise reuses stale pixels).
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scrollView.contentView,
+                                               queue: .main) { [weak self] _ in self?.ruler.needsDisplay = true }
 
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: topAnchor),
@@ -387,6 +399,21 @@ final class FilePreviewView: NSView {
     }
 
     #if DEBUG
+    func debugScroll(by points: CGFloat) {
+        let clip = scrollView.contentView
+        clip.scroll(to: NSPoint(x: 0, y: clip.bounds.origin.y + points))
+        scrollView.reflectScrolledClipView(clip)
+        let used = textView.layoutManager.flatMap { lm in textView.textContainer.map { lm.usedRect(for: $0) } } ?? .zero
+        // Capture the scroll view itself (window-level offscreen capture ignores clip offsets).
+        if let out = ProcessInfo.processInfo.environment["RUNE_DEBUG_SCROLLSHOT"],
+           let rep = textView.bitmapImageRepForCachingDisplay(in: textView.visibleRect) {
+            textView.cacheDisplay(in: textView.visibleRect, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out))
+        }
+        print("SCROLL textFrame=\(textView.frame) visible=\(textView.visibleRect) used=\(used) clip=\(clip.bounds) container=\(textView.textContainer?.containerSize ?? .zero)")
+        fflush(stdout)
+    }
+
     func debugWebSnapshot(to path: String) {
         webView.takeSnapshot(with: nil) { image, error in
             guard let image, let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
@@ -590,25 +617,26 @@ final class LineNumberRuler: NSRulerView {
 
     override func drawHashMarksAndLabels(in rect: NSRect) {
         backgroundColor.setFill()
-        bounds.fill()
-        separatorColor.setFill()
-        NSRect(x: bounds.maxX - 1, y: rect.minY, width: 1, height: rect.height).fill()
+        rect.fill()
 
         guard let textView, let layoutManager = textView.layoutManager, let container = textView.textContainer else { return }
         let visible = textView.visibleRect
         let glyphs = layoutManager.glyphRange(forBoundingRect: visible, in: container)
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: textColor]
-        let inset = textView.textContainerInset.height
+        let origin = textView.textContainerOrigin
         var lastLine = -1
 
-        layoutManager.enumerateLineFragments(forGlyphRange: glyphs) { fragmentRect, _, _, glyphRange, _ in
+        layoutManager.enumerateLineFragments(forGlyphRange: glyphs) { fragmentRect, usedRect, _, glyphRange, _ in
             let charIndex = layoutManager.characterIndexForGlyph(at: glyphRange.location)
             let line = self.lineNumber(forCharacter: charIndex)
             guard line != lastLine else { return } // wrapped continuation
             lastLine = line
+            // Convert from the text view's coordinates so numbers track the text exactly.
+            let lineTop = self.convert(NSPoint(x: 0, y: fragmentRect.minY + origin.y), from: textView).y
             let label = "\(line)" as NSString
             let size = label.size(withAttributes: attributes)
-            let y = fragmentRect.minY + inset - visible.minY + (fragmentRect.height - size.height) / 2
+            let y = lineTop + (usedRect.height - size.height) / 2
+            guard y + size.height >= rect.minY - 2, y <= rect.maxY + 2 else { return }
             label.draw(at: NSPoint(x: self.bounds.maxX - size.width - 10, y: y), withAttributes: attributes)
         }
     }

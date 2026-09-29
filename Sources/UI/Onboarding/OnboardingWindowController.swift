@@ -19,7 +19,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     init(store: ConfigStore) {
         model = OnboardingModel(store: store)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 540),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -61,18 +61,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
 final class OnboardingModel: ObservableObject {
     enum Step: Int, CaseIterable {
-        case welcome, folders, fullDisk, ai, preferences, done
-
-        var title: String {
-            switch self {
-            case .welcome: return "Welcome"
-            case .folders: return "Folders"
-            case .fullDisk: return "Full Disk Access"
-            case .ai: return "Local AI"
-            case .preferences: return "Preferences"
-            case .done: return "Ready"
-            }
-        }
+        case welcome, permissions, setup
     }
 
     enum Access: Equatable { case unknown, granted, denied, missing }
@@ -82,8 +71,6 @@ final class OnboardingModel: ObservableObject {
     @Published private(set) var folderAccess: [String: Access] = [:]
     @Published private(set) var isRequestingFolders = false
     @Published private(set) var fullDiskAccess = false
-    @Published var cliInstalled = false
-    @Published var cliMessage: String?
     private var pollTimer: Timer?
     private var cancellables: Set<AnyCancellable> = []
 
@@ -93,10 +80,9 @@ final class OnboardingModel: ObservableObject {
         self.store = store
         refreshFolderAccess(requesting: false)
         fullDiskAccess = Self.hasFullDiskAccess()
-        cliInstalled = FileManager.default.fileExists(atPath: Self.cliDestination.path)
         $step.sink { [weak self] step in
-            if step == .fullDisk { self?.startPolling() } else { self?.stopPolling() }
-            if step == .ai { AIService.shared.refresh() }
+            if step == .permissions { self?.startPolling() } else { self?.stopPolling() }
+            if step == .setup { AIService.shared.refresh() }
         }.store(in: &cancellables)
     }
 
@@ -197,31 +183,6 @@ final class OnboardingModel: ObservableObject {
         objectWillChange.send()
     }
 
-    static var cliDestination: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/rune")
-    }
-
-    /// Copies the bundled `rune` launcher to ~/.local/bin (no admin rights needed).
-    func installCLI() {
-        guard let source = Bundle.main.url(forResource: "rune-cli", withExtension: "sh") else {
-            cliMessage = "The launcher script is missing from this build."
-            return
-        }
-        let destination = Self.cliDestination
-        do {
-            try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-            if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
-            try FileManager.default.copyItem(at: source, to: destination)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destination.path)
-            cliInstalled = true
-            let path = CommandCatalog.shared.shellPath ?? ProcessInfo.processInfo.environment["PATH"] ?? ""
-            cliMessage = path.split(separator: ":").contains(where: { $0.hasSuffix(".local/bin") })
-                ? "Installed. Type rune in any terminal to open a tab there."
-                : "Installed to ~/.local/bin. Add it to your PATH: echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.zshrc"
-        } catch {
-            cliMessage = error.localizedDescription
-        }
-    }
 }
 
 // MARK: - Views
@@ -232,165 +193,197 @@ struct OnboardingView: View {
 
     var body: some View {
         let p = model.palette
-        HStack(spacing: 0) {
-            // Progress rail.
-            VStack(alignment: .leading, spacing: 4) {
-                Image(nsImage: NSApp.applicationIconImage)
-                    .resizable()
-                    .frame(width: 44, height: 44)
-                    .padding(.bottom, 18)
-                ForEach(OnboardingModel.Step.allCases, id: \.rawValue) { step in
-                    HStack(spacing: 10) {
-                        ZStack {
-                            Circle().fill(Color(nsColor: step.rawValue < model.step.rawValue ? p.accent : (step == model.step ? p.accent.withAlphaComponent(0.25) : p.surface2)))
-                                .frame(width: 18, height: 18)
-                            if step.rawValue < model.step.rawValue {
-                                Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundColor(.white)
-                            } else {
-                                Text("\(step.rawValue + 1)").font(.system(size: 9, weight: .semibold))
-                                    .foregroundColor(Color(nsColor: step == model.step ? p.text : p.hint))
-                            }
-                        }
-                        Text(step.title)
-                            .font(.system(size: 12.5, weight: step == model.step ? .semibold : .regular))
-                            .foregroundColor(Color(nsColor: step == model.step ? p.text : p.secondary))
-                    }
-                    .padding(.vertical, 5)
-                }
-                Spacer()
-            }
-            .padding(.top, 44)
-            .padding(.horizontal, 24)
-            .frame(width: 200, alignment: .leading)
-            .frame(maxHeight: .infinity, alignment: .top)
-            .background(Color(nsColor: p.surface1))
+        ZStack {
+            // Obsidian backdrop with a soft light, echoing the app icon.
+            LinearGradient(colors: [Color(nsColor: p.surface2), Color(nsColor: p.background)], startPoint: .top, endPoint: .bottom)
+            RadialGradient(colors: [Color(nsColor: p.accent).opacity(0.10), .clear], center: .top, startRadius: 0, endRadius: 360)
 
-            Rectangle().fill(Color(nsColor: p.outline)).frame(width: 1)
-
-            VStack(alignment: .leading, spacing: 0) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        content
+            VStack(spacing: 0) {
+                Group {
+                    switch model.step {
+                    case .welcome: WelcomeStep(model: model)
+                    case .permissions: PermissionsStep(model: model)
+                    case .setup: SetupStep(model: model)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 36)
-                    .padding(.top, 48)
                 }
+                .id(model.step)
+                .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 8)), removal: .opacity))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
                 footer
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, 56)
+            .padding(.top, 52)
+            .padding(.bottom, 32)
         }
-        .frame(width: 720, height: 520)
-        .background(Color(nsColor: p.background))
+        .frame(width: 600, height: 540)
+        .animation(.easeOut(duration: 0.22), value: model.step)
         .tint(Color(nsColor: p.accent))
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        switch model.step {
-        case .welcome: WelcomeStep(model: model)
-        case .folders: FoldersStep(model: model)
-        case .fullDisk: FullDiskStep(model: model)
-        case .ai: AIStep(model: model)
-        case .preferences: PreferencesStep(model: model)
-        case .done: DoneStep(model: model)
-        }
     }
 
     private var footer: some View {
         let p = model.palette
-        return HStack {
-            if model.step != .welcome && model.step != .done {
-                Button("Back") { model.back() }
-                    .buttonStyle(OnboardingButtonStyle(prominent: false, palette: p))
+        return VStack(spacing: 14) {
+            Button {
+                model.step == .setup ? onFinish() : model.next()
+            } label: {
+                Text(primaryTitle)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 42)
+                    .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Color(nsColor: p.accent)))
+                    .contentShape(Rectangle())
             }
-            Spacer()
-            if model.step == .fullDisk && !model.fullDiskAccess || model.step == .folders && !model.allFoldersGranted || model.step == .ai {
-                Button("Skip") { model.next() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 13))
-                    .foregroundColor(Color(nsColor: p.secondary))
-                    .padding(.trailing, 12)
-            }
-            Button(model.step == .done ? "Start using Rune" : (model.step == .welcome ? "Get Started" : "Continue")) {
-                model.step == .done ? onFinish() : model.next()
-            }
-            .buttonStyle(OnboardingButtonStyle(prominent: true, palette: p))
+            .buttonStyle(PressableStyle())
             .keyboardShortcut(.defaultAction)
+
+            // Back · progress dots · Skip, with the dots always centered.
+            HStack(spacing: 0) {
+                Group {
+                    if model.step != .welcome {
+                        Button("Back") { model.back() }
+                            .buttonStyle(.plain)
+                    }
+                }
+                .frame(width: 80, alignment: .leading)
+                Spacer(minLength: 0)
+                HStack(spacing: 7) {
+                    ForEach(OnboardingModel.Step.allCases, id: \.rawValue) { step in
+                        Capsule()
+                            .fill(Color(nsColor: step == model.step ? p.text : p.foreground.withAlphaComponent(0.18)))
+                            .frame(width: step == model.step ? 18 : 6, height: 6)
+                    }
+                }
+                Spacer(minLength: 0)
+                Group {
+                    if model.step != .setup {
+                        Button("Skip") { onFinish() }
+                            .buttonStyle(.plain)
+                            .help("You can reopen this from Rune → Welcome Guide")
+                    }
+                }
+                .frame(width: 80, alignment: .trailing)
+            }
+            .font(.system(size: 12.5, weight: .medium))
+            .foregroundColor(Color(nsColor: p.secondary))
+            .frame(height: 20)
         }
-        .padding(.horizontal, 36)
-        .padding(.vertical, 20)
-        .overlay(alignment: .top) { Rectangle().fill(Color(nsColor: p.outline)).frame(height: 1) }
+    }
+
+    private var primaryTitle: String {
+        switch model.step {
+        case .welcome: return "Get Started"
+        case .permissions: return "Continue"
+        case .setup: return "Start Using Rune"
+        }
     }
 }
 
-private struct OnboardingButtonStyle: ButtonStyle {
-    let prominent: Bool
-    let palette: ChromePalette
-
+private struct PressableStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundColor(prominent ? .white : Color(nsColor: palette.text))
-            .padding(.horizontal, 18)
-            .frame(height: 32)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color(nsColor: prominent ? palette.accent : palette.surface2))
-                    .opacity(configuration.isPressed ? 0.8 : 1)
-            )
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .opacity(configuration.isPressed ? 0.9 : 1)
     }
 }
 
-private struct StepHeader: View {
-    let symbol: String
+/// Title block shared by every step.
+private struct Heading: View {
     let title: String
     let subtitle: String
     let palette: ChromePalette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Image(systemName: symbol)
-                .font(.system(size: 26, weight: .regular))
-                .foregroundColor(Color(nsColor: palette.accent))
+        VStack(spacing: 10) {
             Text(title)
-                .font(.system(size: 24, weight: .bold))
+                .font(.system(size: 28, weight: .bold))
+                .tracking(-0.4)
                 .foregroundColor(Color(nsColor: palette.text))
             Text(subtitle)
-                .font(.system(size: 13.5))
+                .font(.system(size: 14))
                 .foregroundColor(Color(nsColor: palette.secondary))
-                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.center)
                 .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.bottom, 26)
+        .frame(maxWidth: 440)
     }
 }
 
-private struct Card<Content: View>: View {
+/// A grouped list of rows, like System Settings.
+private struct Group_<Content: View>: View {
     let palette: ChromePalette
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) { content() }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(nsColor: palette.surface1)))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color(nsColor: palette.outline), lineWidth: 1))
+        VStack(spacing: 0) { content() }
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(nsColor: palette.foreground.withAlphaComponent(0.045))))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(nsColor: palette.foreground.withAlphaComponent(0.08)), lineWidth: 1))
     }
 }
 
-private struct StatusPill: View {
-    let text: String
-    let ok: Bool?
+private struct Row<Trailing: View>: View {
+    let symbol: String
+    let tint: NSColor
+    let title: String
+    let detail: String
     let palette: ChromePalette
+    var divider = true
+    @ViewBuilder let trailing: () -> Trailing
 
     var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: ok == true ? "checkmark.circle.fill" : (ok == false ? "xmark.circle.fill" : "circle.dashed"))
-            Text(text)
+        VStack(spacing: 0) {
+            HStack(spacing: 14) {
+                Image(systemName: symbol)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(Color(nsColor: tint))
+                    .frame(width: 32, height: 32)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: tint.withAlphaComponent(0.14))))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 13.5, weight: .semibold)).foregroundColor(Color(nsColor: palette.text))
+                    Text(detail).font(.system(size: 12)).foregroundColor(Color(nsColor: palette.secondary))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                trailing()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
+            if divider {
+                Rectangle().fill(Color(nsColor: palette.foreground.withAlphaComponent(0.07))).frame(height: 1).padding(.leading, 62)
+            }
         }
-        .font(.system(size: 11.5, weight: .medium))
-        .foregroundColor(Color(nsColor: ok == true ? palette.success : (ok == false ? palette.error : palette.hint)))
+    }
+}
+
+private struct SmallButton: View {
+    let title: String
+    let palette: ChromePalette
+    var prominent = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(prominent ? .white : Color(nsColor: palette.text))
+                .padding(.horizontal, 12)
+                .frame(height: 26)
+                .background(Capsule().fill(Color(nsColor: prominent ? palette.accent : palette.foreground.withAlphaComponent(0.1))))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(PressableStyle())
+    }
+}
+
+private struct Done: View {
+    let text: String
+    let palette: ChromePalette
+    var body: some View {
+        Label(text, systemImage: "checkmark.circle.fill")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundColor(Color(nsColor: palette.success))
     }
 }
 
@@ -399,266 +392,128 @@ private struct WelcomeStep: View {
 
     var body: some View {
         let p = model.palette
-        VStack(alignment: .leading, spacing: 0) {
-            StepHeader(symbol: "sparkles", title: "Welcome to Rune",
-                       subtitle: "A fast, private terminal for your Mac. This takes about a minute: Rune will ask for the access a terminal needs, and you can set up local AI.",
-                       palette: p)
-            VStack(alignment: .leading, spacing: 14) {
-                feature("square.stack.3d.up", "Command blocks", "Every command and its output grouped, timed, and easy to copy or re-run.")
-                feature("keyboard", "A modern input", "History suggestions, syntax highlighting and completion as you type.")
-                feature("lock.shield", "Private by design", "No account, no telemetry. AI runs on your Mac with Ollama.")
-            }
-        }
-    }
-
-    private func feature(_ symbol: String, _ title: String, _ text: String) -> some View {
-        let p = model.palette
-        return HStack(alignment: .top, spacing: 14) {
-            Image(systemName: symbol)
-                .font(.system(size: 16))
-                .foregroundColor(Color(nsColor: p.accent))
-                .frame(width: 34, height: 34)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: p.surface2)))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.system(size: 13.5, weight: .semibold)).foregroundColor(Color(nsColor: p.text))
-                Text(text).font(.system(size: 12.5)).foregroundColor(Color(nsColor: p.secondary)).fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-}
-
-private struct FoldersStep: View {
-    @ObservedObject var model: OnboardingModel
-
-    var body: some View {
-        let p = model.palette
-        VStack(alignment: .leading, spacing: 0) {
-            StepHeader(symbol: "folder.badge.person.crop", title: "Access to your folders",
-                       subtitle: "macOS protects Desktop, Documents and Downloads. Commands you run in Rune use Rune's permission, so allowing access now means commands like ls ~/Desktop just work later. macOS will ask once for each folder.",
-                       palette: p)
-            Card(palette: p) {
-                ForEach(OnboardingModel.folders, id: \.self) { name in
-                    HStack {
-                        Image(systemName: "folder").foregroundColor(Color(nsColor: p.ansiBlue))
-                        Text(name).font(.system(size: 13)).foregroundColor(Color(nsColor: p.text))
-                        Spacer()
-                        switch model.folderAccess[name] ?? .unknown {
-                        case .granted: StatusPill(text: "Allowed", ok: true, palette: p)
-                        case .denied: StatusPill(text: "Not allowed", ok: false, palette: p)
-                        case .missing: StatusPill(text: "Not present", ok: nil, palette: p)
-                        case .unknown: StatusPill(text: "Not asked yet", ok: nil, palette: p)
-                        }
-                    }
-                }
-            }
+        VStack(spacing: 28) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 112, height: 112)
+                .shadow(color: .black.opacity(0.5), radius: 18, y: 10)
+            Heading(title: "Welcome to Rune",
+                    subtitle: "A fast, private terminal for your Mac. Two quick steps and you're ready.",
+                    palette: p)
             HStack(spacing: 12) {
-                Button(model.isRequestingFolders ? "Waiting for macOS…" : "Allow Access") { model.requestFolderAccess() }
-                    .buttonStyle(OnboardingButtonStyle(prominent: !model.allFoldersGranted, palette: p))
-                    .disabled(model.isRequestingFolders)
-                if model.folderAccess.values.contains(.denied) {
-                    Button("Open Privacy Settings") { model.openFilesAndFoldersSettings() }
-                        .buttonStyle(OnboardingButtonStyle(prominent: false, palette: p))
-                }
+                pill("square.stack.3d.up", "Command blocks")
+                pill("keyboard", "Smart input")
+                pill("lock.shield", "Private AI")
             }
-            .padding(.top, 18)
         }
+    }
+
+    private func pill(_ symbol: String, _ text: String) -> some View {
+        let p = model.palette
+        return HStack(spacing: 7) {
+            Image(systemName: symbol).font(.system(size: 12)).foregroundColor(Color(nsColor: p.accent))
+            Text(text).font(.system(size: 12.5, weight: .medium)).foregroundColor(Color(nsColor: p.text))
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 30)
+        .background(Capsule().fill(Color(nsColor: p.foreground.withAlphaComponent(0.06))))
+        .overlay(Capsule().stroke(Color(nsColor: p.foreground.withAlphaComponent(0.08)), lineWidth: 1))
     }
 }
 
-private struct FullDiskStep: View {
+private struct PermissionsStep: View {
     @ObservedObject var model: OnboardingModel
 
     var body: some View {
         let p = model.palette
-        VStack(alignment: .leading, spacing: 0) {
-            StepHeader(symbol: "externaldrive.badge.checkmark", title: "Full Disk Access (optional)",
-                       subtitle: "Some commands read data macOS locks down, such as Mail, Safari, Time Machine and other apps' containers. Terminals need Full Disk Access for those. You can skip this and turn it on later.",
-                       palette: p)
-            Card(palette: p) {
-                HStack {
-                    Text("Status").font(.system(size: 13)).foregroundColor(Color(nsColor: p.text))
-                    Spacer()
-                    StatusPill(text: model.fullDiskAccess ? "Granted" : "Not granted", ok: model.fullDiskAccess, palette: p)
+        VStack(spacing: 28) {
+            Heading(title: "Give Rune access",
+                    subtitle: "Commands you run use Rune's permissions. Allow access now and macOS won't interrupt you later.",
+                    palette: p)
+            Group_(palette: p) {
+                Row(symbol: "folder.fill", tint: p.ansiBlue, title: "Desktop, Documents & Downloads",
+                    detail: "macOS asks once for each folder.", palette: p) {
+                    if model.allFoldersGranted {
+                        Done(text: "Allowed", palette: p)
+                    } else if model.isRequestingFolders {
+                        ProgressView().controlSize(.small)
+                    } else if model.folderAccess.values.contains(.denied) {
+                        SmallButton(title: "Open Settings", palette: p) { model.openFilesAndFoldersSettings() }
+                    } else {
+                        SmallButton(title: "Allow", palette: p, prominent: true) { model.requestFolderAccess() }
+                    }
                 }
-                if !model.fullDiskAccess {
-                    VStack(alignment: .leading, spacing: 6) {
-                        instruction("1", "Open Privacy & Security → Full Disk Access.")
-                        instruction("2", "Turn on Rune (click + and choose Rune if it isn't listed).")
-                        instruction("3", "Come back here. This screen updates by itself.")
+                Row(symbol: "externaldrive.fill", tint: p.ansiMagenta, title: "Full Disk Access",
+                    detail: "Optional. For commands that read Mail, Safari or backups. Turn on Rune in the list.",
+                    palette: p, divider: false) {
+                    if model.fullDiskAccess {
+                        Done(text: "Granted", palette: p)
+                    } else {
+                        SmallButton(title: "Open Settings", palette: p) { model.openFullDiskAccessSettings() }
                     }
                 }
             }
-            if !model.fullDiskAccess {
-                HStack(spacing: 12) {
-                    Button("Open Settings") { model.openFullDiskAccessSettings() }
-                        .buttonStyle(OnboardingButtonStyle(prominent: true, palette: p))
-                    Button("Show Rune in Finder") { model.revealApp() }
-                        .buttonStyle(OnboardingButtonStyle(prominent: false, palette: p))
-                }
-                .padding(.top, 18)
-            }
-        }
-    }
-
-    private func instruction(_ number: String, _ text: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text(number).font(.system(size: 11, weight: .bold)).foregroundColor(Color(nsColor: model.palette.accent)).frame(width: 14)
-            Text(text).font(.system(size: 12.5)).foregroundColor(Color(nsColor: model.palette.secondary))
         }
     }
 }
 
-private struct AIStep: View {
+private struct SetupStep: View {
     @ObservedObject var model: OnboardingModel
     @ObservedObject var ai = AIService.shared
 
     var body: some View {
         let p = model.palette
-        VStack(alignment: .leading, spacing: 0) {
-            StepHeader(symbol: "sparkle", title: "Private AI, on your Mac",
-                       subtitle: "Press ⌘↵ to ask a question instead of running it. Rune talks only to Ollama on this Mac, and never runs a suggested command without you.",
-                       palette: p)
-            Card(palette: p) {
-                HStack {
-                    Text("Ollama").font(.system(size: 13)).foregroundColor(Color(nsColor: p.text))
-                    Spacer()
-                    if ai.isChecking { ProgressView().controlSize(.small) }
-                    StatusPill(text: statusText, ok: statusOK, palette: p)
-                }
-                if !ai.status.models.isEmpty {
-                    HStack {
-                        Text("Model").font(.system(size: 13)).foregroundColor(Color(nsColor: p.text))
-                        Spacer()
-                        Picker("", selection: Binding(get: { ai.activeModel ?? "" }, set: { ai.select(model: $0) })) {
-                            ForEach(ai.status.models) { Text($0.name).tag($0.name) }
-                        }
-                        .labelsHidden()
-                        .frame(width: 220)
-                    }
-                }
-                Toggle(isOn: Binding(get: { model.config.aiEnabled }, set: { model.set("aiEnabled", $0) })) {
-                    Text("Enable AI features").font(.system(size: 13)).foregroundColor(Color(nsColor: p.text))
-                }
-                .toggleStyle(.switch)
-            }
-            HStack(spacing: 12) {
-                switch ai.status {
-                case .notInstalled:
-                    Button("Download Ollama") { ai.openDownloadPage() }.buttonStyle(OnboardingButtonStyle(prominent: true, palette: p))
-                case .installedNotRunning:
-                    Button("Start Ollama") { ai.startOllama() }.buttonStyle(OnboardingButtonStyle(prominent: true, palette: p))
-                case .noModels:
-                    Text("Then run ollama pull \(ModelSelection.suggestedModel) in Rune.")
-                        .font(.system(size: 12)).foregroundColor(Color(nsColor: p.secondary))
-                default:
-                    EmptyView()
-                }
-                Button("Check Again") { ai.refresh() }.buttonStyle(OnboardingButtonStyle(prominent: false, palette: p))
-            }
-            .padding(.top, 18)
-        }
-    }
-
-    private var statusText: String {
-        switch ai.status {
-        case .ready(let models): return "Running · \(models.count) model\(models.count == 1 ? "" : "s")"
-        case .noModels: return "Running, no models yet"
-        case .installedNotRunning: return "Installed, not running"
-        case .notInstalled: return "Not installed"
-        case .unreachable: return "Unreachable"
-        }
-    }
-
-    private var statusOK: Bool? {
-        switch ai.status {
-        case .ready: return true
-        case .notInstalled, .unreachable: return false
-        default: return nil
-        }
-    }
-}
-
-private struct PreferencesStep: View {
-    @ObservedObject var model: OnboardingModel
-    @ObservedObject var updates = UpdateController.shared
-
-    var body: some View {
-        let p = model.palette
-        VStack(alignment: .leading, spacing: 0) {
-            StepHeader(symbol: "slider.horizontal.3", title: "Make it yours",
-                       subtitle: "A few choices to start with. Everything is in Settings (⌘,) later.",
-                       palette: p)
-            Card(palette: p) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Type commands in").font(.system(size: 13)).foregroundColor(Color(nsColor: p.text))
-                        Text("zsh prompt keeps every zsh plugin working exactly as usual.")
-                            .font(.system(size: 11.5)).foregroundColor(Color(nsColor: p.hint))
-                    }
-                    Spacer()
+        VStack(spacing: 28) {
+            Heading(title: "Make it yours",
+                    subtitle: "Pick how you type and set up private AI. You can change this anytime in Settings.",
+                    palette: p)
+            Group_(palette: p) {
+                Row(symbol: "keyboard", tint: p.accent, title: "Type commands in",
+                    detail: model.config.inputMode == .editor ? "Rune's editor: suggestions, highlighting, completion." : "Your zsh prompt: every zsh plugin works as usual.",
+                    palette: p) {
                     Picker("", selection: Binding(get: { model.config.inputMode }, set: { model.set("inputMode", $0.rawValue) })) {
-                        Text("Rune editor").tag(InputStyle.editor)
-                        Text("zsh prompt").tag(InputStyle.shell)
+                        Text("Rune").tag(InputStyle.editor)
+                        Text("zsh").tag(InputStyle.shell)
                     }
                     .labelsHidden()
                     .pickerStyle(.segmented)
-                    .frame(width: 200)
+                    .frame(width: 120)
                 }
-                if updates.isAvailable {
-                    Divider()
-                    Toggle(isOn: $updates.automaticallyChecks) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Check for updates automatically").font(.system(size: 13)).foregroundColor(Color(nsColor: p.text))
-                            Text("Once a day; asks before installing.").font(.system(size: 11.5)).foregroundColor(Color(nsColor: p.hint))
-                        }
-                    }
-                    .toggleStyle(.switch)
-                }
-                Divider()
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("The rune command").font(.system(size: 13)).foregroundColor(Color(nsColor: p.text))
-                        Text("Open a Rune tab in any folder from another terminal.")
-                            .font(.system(size: 11.5)).foregroundColor(Color(nsColor: p.hint))
-                    }
-                    Spacer()
-                    if model.cliInstalled {
-                        StatusPill(text: "Installed", ok: true, palette: p)
-                    } else {
-                        Button("Install") { model.installCLI() }.buttonStyle(OnboardingButtonStyle(prominent: false, palette: p))
-                    }
-                }
-                if let message = model.cliMessage {
-                    Text(message).font(.system(size: 11.5)).foregroundColor(Color(nsColor: p.secondary)).textSelection(.enabled)
+                Row(symbol: "sparkle", tint: p.ansiYellow, title: "Private AI",
+                    detail: aiDetail, palette: p, divider: false) {
+                    aiAction
                 }
             }
         }
     }
-}
 
-private struct DoneStep: View {
-    @ObservedObject var model: OnboardingModel
+    private var aiDetail: String {
+        switch ai.status {
+        case .ready: return "Runs on this Mac with Ollama. Press ⌘↵ to ask."
+        case .noModels: return "Ollama is running. Pull a model to start: ollama pull \(ModelSelection.suggestedModel)"
+        case .installedNotRunning: return "Ollama is installed but not running."
+        case .notInstalled: return "Optional. Install Ollama to ask questions with ⌘↵."
+        case .unreachable: return "Can't reach the configured Ollama server."
+        }
+    }
 
-    var body: some View {
+    @ViewBuilder
+    private var aiAction: some View {
         let p = model.palette
-        VStack(alignment: .leading, spacing: 0) {
-            StepHeader(symbol: "checkmark.seal", title: "You're all set",
-                       subtitle: "A few shortcuts to remember:", palette: p)
-            Card(palette: p) {
-                shortcut(["↵"], "Run a command")
-                shortcut(["⌘", "↵"], "Ask AI")
-                shortcut(["⌘", "B"], "Show files")
-                shortcut(["⌘", "↑"], "Jump between blocks")
-                shortcut(["⌘", ","], "Settings")
+        switch ai.status {
+        case .ready(let models):
+            Picker("", selection: Binding(get: { ai.activeModel ?? "" }, set: { ai.select(model: $0) })) {
+                ForEach(models) { Text($0.name).tag($0.name) }
             }
-        }
-    }
-
-    private func shortcut(_ keys: [String], _ text: String) -> some View {
-        HStack {
-            Text(text).font(.system(size: 13)).foregroundColor(Color(nsColor: model.palette.text))
-            Spacer()
-            HStack(spacing: 4) { ForEach(keys, id: \.self) { Keycap(key: $0, size: 12, palette: model.palette) } }
+            .labelsHidden()
+            .frame(width: 150)
+        case .installedNotRunning:
+            SmallButton(title: "Start", palette: p, prominent: true) { ai.startOllama() }
+        case .notInstalled:
+            SmallButton(title: "Get Ollama", palette: p) { ai.openDownloadPage() }
+        default:
+            SmallButton(title: "Check Again", palette: p) { ai.refresh() }
         }
     }
 }
