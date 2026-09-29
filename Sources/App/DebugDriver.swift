@@ -192,6 +192,14 @@ enum DebugDriver {
                         fflush(stdout)
                     }
                 }
+            case let text where text.hasPrefix("@send:"):
+                session.terminalView.sendToShell(Array((String(text.dropFirst(6)) + "\r").utf8))
+            case "@remoteAccept":
+                session.acceptRemoteOffer(always: false)
+            case "@remote":
+                let blocks = session.tracker.blocks.suffix(3).map { "[\($0.command) exit=\($0.exitCode.map(String.init) ?? "-") cwd=\($0.cwd)]" }.joined(separator: " ")
+                print("REMOTE state=\(session.remote) mode=\(session.mode) editorText=<\(session.view.inputArea.editor.string)> blocks=\(blocks)")
+                fflush(stdout)
             case "@gap":
                 // Distance between the last non-blank row on screen and the terminal area's bottom.
                 let terminal = session.terminalView.getTerminal()

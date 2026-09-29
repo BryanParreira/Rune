@@ -710,6 +710,17 @@ struct TerminalPage: View {
             SettingRow(model: model, title: "Option key acts as Meta", key: "optionAsMeta", detail: "Turn off to type special characters with Option.") {
                 SwitchControl(isOn: model.binding("optionAsMeta", { $0.optionAsMeta }))
             }
+            SettingRow(model: model, title: "Rune's input over SSH", key: "remoteInput",
+                       detail: "When ssh, mosh, docker/kubectl exec, su or sudo -i reaches a shell (bash or zsh), Rune can keep its input box there: blocks, suggestions and ⌘↵ AI. It asks first; logins and passwords always go straight to the session.") {
+                HStack(spacing: 12) {
+                    Button("Forget “Always” hosts") { TerminalSession.forgetRemoteHosts() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 12))
+                        .foregroundColor(Color(nsColor: p.accent))
+                    DropdownField(selection: model.binding("remoteInput", { $0.remoteInput }), options: ["ask", "off"],
+                                  label: { $0 == "off" ? "Never offer" : "Ask" }, palette: p, width: 140)
+                }
+            }
             SettingRow(model: model, title: "Open ⌘-clicked files in", key: "openFilesIn",
                        detail: "⌘-click a path in the output (like src/app.ts:42:7) to open it. Your editor opens it at that line when it's VS Code, Cursor, Windsurf or Zed.") {
                 DropdownField(selection: model.binding("openFilesIn", { $0.openFilesIn }), options: ["editor", "rune"],

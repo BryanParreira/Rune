@@ -17,8 +17,13 @@ final class RuneTerminalView: LocalProcessTerminalView {
 
     private var bypassInterceptor = false
 
+    /// Sees output before it's drawn; returns the part to draw (Rune hides the remote setup
+    /// script this way).
+    var outputFilter: ((ArraySlice<UInt8>) -> ArraySlice<UInt8>)?
+
     override func dataReceived(slice: ArraySlice<UInt8>) {
-        super.dataReceived(slice: slice)
+        let shown = outputFilter?(slice) ?? slice
+        if !shown.isEmpty { super.dataReceived(slice: shown) }
         onDataReceived?()
     }
 
@@ -98,6 +103,29 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     private(set) var hasPrompted = false
     /// A folder to move to once the shell is ready.
     private var pendingDirectory: String?
+
+    // MARK: Remote shells
+
+    enum RemoteState: Equatable {
+        case none
+        /// A login command runs; waiting for a shell prompt on the other side.
+        case watching(host: String)
+        /// The user is being asked whether to use Rune's input there.
+        case offered(host: String)
+        /// The setup script was typed; its output is hidden until it reports back.
+        case settingUp(host: String)
+        /// The remote shell reports prompts and commands; the editor owns input.
+        case active(host: String)
+    }
+    private(set) var remote: RemoteState = .none
+    var isRemote: Bool { if case .active = remote { return true } else { return false } }
+    /// The remote shell's working directory (a path on the other machine).
+    private(set) var remoteDirectory: String?
+    private var promptCheck: DispatchWorkItem?
+    /// Output held back while the setup script runs (shown again if it fails).
+    private var heldOutput: [UInt8]?
+    private var setupTimeout: DispatchWorkItem?
+    private static let alwaysHostsKey = "RuneRemoteInputHosts"
     /// Commands submitted with a leading space, not to be recorded in Recall.
     private var privateCommands: Set<String> = []
     private var sawOSC7 = false
@@ -144,6 +172,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         terminalView.inputInterceptor = { [weak self] data in self?.intercept(data) ?? false }
         terminalView.contextMenuProvider = { [weak self] point in self?.contextMenu(atTerminalPoint: point) }
         terminalView.onOpenLink = { [weak self] link in self?.openLink(link) ?? false }
+        terminalView.outputFilter = { [weak self] slice in self?.filterOutput(slice) ?? slice }
         installOSCHandlers()
         apply(snapshot)
         HistoryStore.shared.loadIfNeeded()
@@ -333,6 +362,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         guard !trimmed.isEmpty, state == .running else { return }
         // A leading space means "don't remember this" (zsh's HIST_IGNORE_SPACE): keep it out
         // of Rune's history and Recall, and pass the space on so zsh skips it too.
+        // A remote shell set up by Rune doesn't report the command text; the block gets it here.
+        if isRemote { _ = tracker.handle(.commandText(trimmed), at: MarkPosition(row: geometry.cursorPosition.row, column: 0)) }
         if command.hasPrefix(" ") {
             privateCommands.insert(trimmed)
             trimmed = " " + trimmed
@@ -369,7 +400,9 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     }
 
     func complete(text: String, cursor: Int) -> PathCompletion.Result? {
-        PathCompletion.complete(text: text, cursor: cursor, cwd: currentDirectory, home: NSHomeDirectory())
+        // Files on the other machine aren't visible from here.
+        guard !isRemote else { return nil }
+        return PathCompletion.complete(text: text, cursor: cursor, cwd: currentDirectory, home: NSHomeDirectory())
     }
 
     /// Ctrl-D on an empty editor.
@@ -635,6 +668,10 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         }
         let wasRunning = tracker.isCommandRunning
         let changed = tracker.handle(mark, at: position)
+        if case .outputStart = mark, config.remoteInput != "off", let block = tracker.blocks.last, block.state == .running,
+           RemoteShell.isLoginCommand(block.command) {
+            remote = .watching(host: RemoteShell.hostLabel(for: block.command))
+        }
         if case .commandFinished = mark, wasRunning, let block = tracker.blocks.last, block.state == .finished {
             notifyIfUnattended(block)
             recordInRecall(block)
@@ -650,7 +687,24 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
                 anchorLines[position.row - 1] = line
             }
             pruneAnchors()
+        case .remoteHost(let host):
+            remote = .active(host: host)
+            view.hideRemoteOffer()
+            view.contextDidChange()
+        case .remoteDirectory(let path):
+            remoteDirectory = path
+            if case .active(let host) = remote {
+                _ = tracker.handle(.currentDirectory(host + ":" + path), at: position)
+            }
+            view.contextDidChange()
+        case .remoteReady:
+            break
         case .currentDirectory(let path):
+            // Back in the local shell (ssh ended).
+            if remote != .none {
+                remote = .none
+                view.hideRemoteOffer()
+            }
             sawOSC7 = true
             if path != currentDirectory {
                 currentDirectory = path
@@ -844,7 +898,115 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         }
     }
 
+    // MARK: - Remote shells
+
+    static func forgetRemoteHosts() {
+        UserDefaults.standard.removeObject(forKey: alwaysHostsKey)
+    }
+
+    private static var alwaysHosts: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: alwaysHostsKey) ?? [])
+    }
+
+    /// Output arrived while a login command runs: once it settles on a shell prompt (not a
+    /// password or yes/no question), ask whether to use Rune's input there, or set it up
+    /// right away for hosts the user chose "Always" for.
+    private func checkForRemotePrompt() {
+        guard case .watching = remote else { return }
+        promptCheck?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, case .watching(let host) = self.remote, self.mode == .runningCommand else { return }
+            let terminal = self.terminalView.getTerminal()
+            guard !terminal.isCurrentBufferAlternate,
+                  let line = terminal.getScrollInvariantLine(row: self.geometry.cursorPosition.row) else { return }
+            let cursor = terminal.getCursorLocation()
+            let text = line.translateToString(trimRight: false, startCol: 0, endCol: cursor.x)
+            guard RemoteShell.looksLikeShellPrompt(text) else { return }
+            if Self.alwaysHosts.contains(host) {
+                self.setUpRemote(host: host)
+            } else {
+                self.remote = .offered(host: host)
+                self.view.showRemoteOffer(host: host)
+            }
+        }
+        promptCheck = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+    }
+
+    /// "Enable" / "Always for this host" on the offer.
+    func acceptRemoteOffer(always: Bool) {
+        guard case .offered(let host) = remote else { return }
+        if always {
+            var hosts = Self.alwaysHosts
+            hosts.insert(host)
+            UserDefaults.standard.set(Array(hosts).sorted(), forKey: Self.alwaysHostsKey)
+        }
+        view.hideRemoteOffer()
+        setUpRemote(host: host)
+    }
+
+    /// "Not now": this connection stays a plain terminal.
+    func declineRemoteOffer() {
+        remote = .none
+        view.hideRemoteOffer()
+        view.focusPreferredResponder()
+    }
+
+    /// Types the setup script into the remote shell and hides its echo until it reports
+    /// back. If it doesn't within a few seconds (another kind of shell), everything held
+    /// back is shown and the session stays a plain terminal.
+    private func setUpRemote(host: String) {
+        guard state == .running else { return }
+        remote = .settingUp(host: host)
+        heldOutput = []
+        // A line at a time, like typing: one big write overflows the terminal's input buffer
+        // (about 1 KB), and the shell then sees a mangled script.
+        let lines = RemoteShell.bootstrapScript.split(separator: "\n", omittingEmptySubsequences: false)
+        for (index, line) in lines.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(index) * 0.03) { [weak self] in
+                guard let self, case .settingUp = self.remote else { return }
+                self.terminalView.sendToShell(Array((line + "\r").utf8))
+            }
+        }
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self, case .settingUp(let host) = self.remote else { return }
+            self.releaseHeldOutput()
+            self.remote = .none
+            self.view.showRemoteFailure(host: host)
+        }
+        setupTimeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: timeout)
+    }
+
+    private static let readyMarker = Array(RemoteShell.readyMarker.utf8)
+
+    private func filterOutput(_ slice: ArraySlice<UInt8>) -> ArraySlice<UInt8> {
+        guard var held = heldOutput else { return slice }
+        held.append(contentsOf: slice)
+        if let range = held.firstRange(of: Self.readyMarker) {
+            heldOutput = nil
+            setupTimeout?.cancel()
+            // What follows the marker (the remote host report and the new prompt) is shown.
+            return held[range.upperBound...]
+        }
+        heldOutput = held
+        return []
+    }
+
+    private func releaseHeldOutput() {
+        guard let held = heldOutput else { return }
+        heldOutput = nil
+        if !held.isEmpty { terminalView.feed(byteArray: held[...]) }
+    }
+
+    /// Folder shown in the chips and block headers: `user@host:path` while remote.
+    var displayDirectory: String {
+        if case .active(let host) = remote { return host + ":" + (remoteDirectory ?? "~") }
+        return currentDirectory
+    }
+
     private func handleDataReceived() {
+        if case .watching = remote { checkForRemotePrompt() }
         view.blocksDidChange()
         let columns = terminalView.getTerminal().cols
         if columns != lastColumns {

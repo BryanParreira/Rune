@@ -29,6 +29,9 @@ Output is grouped with the command that produced it, its folder and how long it 
 **An input that feels like an editor.**
 Type at the bottom, like a chat. Edit multi-line commands, accept suggestions from your history with →, and see typos in red before you press Enter. Tab completes subcommands and flags for git, docker, npm, brew, kubectl and more, with a short note on what each does, plus your npm scripts, Makefile targets and git branches.
 
+**Your input box, even over SSH.**
+When `ssh` (or `docker exec`, `kubectl exec`, `su`…) lands you in a shell on another machine, Rune offers to keep its input box there: blocks, history suggestions and ⌘↵ AI work like they do locally. Passwords and logins always go straight to the session, and nothing is saved on the server.
+
 **Output you can click.**
 ⌘-click a URL or a file path in any output, like `src/app.ts:42:7` in a compiler error, and it opens right at that line in VS Code, Cursor or Zed. Filter a long output down to the lines you care about from the block's menu.
 

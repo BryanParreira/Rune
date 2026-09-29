@@ -54,6 +54,8 @@ public struct RuneConfig: Equatable, Sendable {
     /// Where ⌘-clicked file paths in output open: "editor" (the file's default app, at the
     /// line when it's VS Code, Cursor, Windsurf or Zed) or "rune" (Rune's file preview).
     public var openFilesIn: String = "editor"
+    /// Offer Rune's input inside ssh and similar sessions once they reach a shell: "ask" or "off".
+    public var remoteInput: String = "ask"
     /// Rune Recall: keep a searchable history of commands and their output on this Mac.
     public var recallEnabled: Bool = true
     /// Days of Recall history to keep.
@@ -80,7 +82,7 @@ public struct RuneConfig: Equatable, Sendable {
         "fontFamily", "fontSize", "lineHeight", "theme", "paddingX", "paddingY", "cursorStyle",
         "cursorBlink", "scrollback", "optionAsMeta", "showWelcome", "honorPrompt", "inputMode", "shell",
         "aiEnabled", "ollamaEndpoint", "aiModel", "aiIncludeBlockContext",
-        "syncPath", "hosts", "workflows", "notifyWhenDone", "notifyAfterSeconds", "gpuRendering", "restoreSession", "hideSecrets", "recallEnabled", "recallDays", "globalHotkey", "openFilesIn",
+        "syncPath", "hosts", "workflows", "notifyWhenDone", "notifyAfterSeconds", "gpuRendering", "restoreSession", "hideSecrets", "recallEnabled", "recallDays", "globalHotkey", "openFilesIn", "remoteInput",
     ]
 
     /// Written to ~/.config/rune/config.json on first launch.
@@ -157,6 +159,9 @@ extension RuneConfig {
         if let v = reader.bool("restoreSession") { restoreSession = v }
         if let v = reader.bool("hideSecrets") { hideSecrets = v }
         if let v = reader.bool("recallEnabled") { recallEnabled = v }
+        if let v = reader.string("remoteInput") {
+            if ["ask", "off"].contains(v) { remoteInput = v } else { reader.warnings.append("remoteInput \"\(v)\" is not one of ask, off; using ask") }
+        }
         if let v = reader.string("openFilesIn") {
             if ["editor", "rune"].contains(v) { openFilesIn = v } else { reader.warnings.append("openFilesIn \"\(v)\" is not one of editor, rune; using editor") }
         }

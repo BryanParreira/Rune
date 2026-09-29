@@ -19,6 +19,13 @@ final class SessionView: NSView {
     let conversation = AIConversation()
     private let aiHost = NSHostingView(rootView: AnyView(EmptyView()))
     private let aiLayout = AIPanelLayout()
+    private let remoteModel = RemoteOfferModel()
+    private lazy var remoteHost: NSHostingView<RemoteOfferBar> = {
+        let host = NSHostingView(rootView: RemoteOfferBar(model: remoteModel))
+        host.sizingOptions = [.intrinsicContentSize]
+        host.safeAreaRegions = []
+        return host
+    }()
     private var filterHost: NSHostingView<BlockFilterView>?
     private var cancellables: Set<AnyCancellable> = []
     private var snapshot: ConfigSnapshot?
@@ -56,7 +63,12 @@ final class SessionView: NSView {
             .sink { [weak self] _ in DispatchQueue.main.async { self?.updateVisibility() } }
             .store(in: &cancellables)
 
-        for view in [terminalContainer, welcomeHost, aiHost, inputArea] as [NSView] {
+        remoteModel.onEnable = { [weak self] always in self?.session?.acceptRemoteOffer(always: always) }
+        remoteModel.onDecline = { [weak self] in
+            self?.remoteModel.kind = nil
+            self?.session?.declineRemoteOffer()
+        }
+        for view in [terminalContainer, welcomeHost, aiHost, remoteHost, inputArea] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             stack.addArrangedSubview(view)
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
@@ -67,6 +79,7 @@ final class SessionView: NSView {
         aiHost.setContentHuggingPriority(.required, for: .vertical)
         aiHost.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         inputArea.setContentHuggingPriority(.required, for: .vertical)
+        remoteHost.setContentHuggingPriority(.required, for: .vertical)
         inputArea.setContentCompressionResistancePriority(.required, for: .vertical)
 
         addSubview(stack)
@@ -116,6 +129,8 @@ final class SessionView: NSView {
         terminalContainer.background = palette.background
         terminalContainer.padding = NSEdgeInsets(top: config.paddingY, left: config.paddingX, bottom: 10, right: config.paddingX)
         welcomeModel.palette = palette
+        remoteModel.palette = palette
+        remoteModel.horizontalPadding = CGFloat(config.paddingX)
         welcomeModel.fontSize = CGFloat(config.fontSize)
         welcomeModel.horizontalPadding = CGFloat(config.paddingX)
         inputArea.apply(snapshot: snapshot, palette: palette)
@@ -144,7 +159,7 @@ final class SessionView: NSView {
 
     func contextDidChange() {
         guard let session else { return }
-        inputArea.updateContext(directory: session.currentDirectory, branch: session.gitBranch)
+        inputArea.updateContext(directory: session.displayDirectory, branch: session.isRemote ? nil : session.gitBranch)
         overlay.needsDisplay = true
     }
 
@@ -206,6 +221,18 @@ final class SessionView: NSView {
                 NSApp.sendAction(#selector(AppDelegate.openSettings(_:)), to: nil, from: nil)
             }
         ))
+    }
+
+    func showRemoteOffer(host: String) {
+        remoteModel.kind = .offer(host)
+    }
+
+    func showRemoteFailure(host: String) {
+        remoteModel.kind = .failed(host)
+    }
+
+    func hideRemoteOffer() {
+        remoteModel.kind = nil
     }
 
     /// "Filter Output…": the block's lines matching a query, over the output area.

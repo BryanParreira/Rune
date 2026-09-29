@@ -19,6 +19,12 @@ public enum ShellMark: Equatable, Sendable {
     case shellNames([String])
     /// The shell's PATH after the user's config ran (GUI apps start with a minimal PATH).
     case shellPath(String)
+    /// A remote/nested shell set up by Rune reports who and where it is (`user@host`).
+    case remoteHost(String)
+    /// The remote shell's working directory (a path on the other machine).
+    case remoteDirectory(String)
+    /// The remote setup script finished.
+    case remoteReady
 }
 
 public enum ShellMarkParser {
@@ -52,6 +58,9 @@ public enum ShellMarkParser {
         case "cmd": return .commandText(value)
         case "names": return .shellNames(value.split(separator: " ").map(String.init))
         case "path": return value.isEmpty ? nil : .shellPath(value)
+        case "remote": return value.isEmpty ? nil : .remoteHost(value)
+        case "rcwd": return value.isEmpty ? nil : .remoteDirectory(value)
+        case "remote-ready": return .remoteReady
         default: return nil
         }
     }
