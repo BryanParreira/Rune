@@ -62,7 +62,7 @@ Rune's Paper theme is a soft, warm beige with ink-colored text and a highlighter
 Press ⌘B for a sidebar of the folder you're in, with git status colors and a project-wide filter. Click a file to read it right inside Rune, with syntax colors and line numbers.
 
 **Thoughtful everywhere.**
-Full-screen apps like vim and htop take over cleanly. Closing a tab that's still running something asks first. Settings are searchable, and Rune updates itself quietly with verified releases.
+Press ⌃\` in any app to bring Rune forward, and again to tuck it away. Full-screen apps like vim and htop take over cleanly. Closing a tab that's still running something asks first. Settings are searchable, and Rune updates itself quietly with verified releases.
 
 <br>
 
@@ -106,6 +106,7 @@ Rune finds your installed models automatically. You can choose one in Settings �
 | Jump between blocks | ⌘↑ ⌘↓ |
 | Search output · next · previous | ⌘F · ⌘G · ⇧⌘G |
 | Clear screen | ⌘K |
+| Show or hide Rune from any app | ⌃\` |
 | Command palette | ⌘P |
 | Files sidebar | ⌘B |
 | Split right · split down | ⌘D · ⇧⌘D |
