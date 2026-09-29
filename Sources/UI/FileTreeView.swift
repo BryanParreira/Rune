@@ -38,8 +38,61 @@ final class FileTreeModel: ObservableObject {
     var onOpenFile: (String, Bool) -> Void = { _, _ in }
     @Published private(set) var branch: String?
 
+    /// What the sidebar lists: the folder's files, or the repository's changed files.
+    enum Section: String { case files, changes }
+    @Published var section: Section = .files {
+        didSet { updateChangesTimer() }
+    }
+    /// While the Changes list shows, git status is re-read every few seconds: edits deep in
+    /// the repository aren't seen by the folder watcher.
+    private var changesTimer: Timer?
+
+    private func updateChangesTimer() {
+        let wanted = isActive && section == .changes
+        if wanted, changesTimer == nil {
+            refreshGitStatus()
+            changesTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.refreshGitStatus() }
+        } else if !wanted {
+            changesTimer?.invalidate()
+            changesTimer = nil
+        }
+    }
+    /// Top level of the repository the root is in.
+    @Published private(set) var repoRoot: String?
+    /// Added/removed lines per changed file (since the last commit).
+    @Published private(set) var lineCounts: [String: LineCounts] = [:]
+    /// Opens the changes of a file in a diff tab: (path, repository, untracked).
+    var onOpenDiff: (String, String, Bool) -> Void = { _, _, _ in }
+
+    struct Change: Identifiable, Equatable {
+        let path: String
+        let state: GitFileState
+        /// Path inside the repository.
+        let relativePath: String
+        var id: String { path }
+        var name: String { (path as NSString).lastPathComponent }
+        var isFolder: Bool { relativePath.hasSuffix("/") }
+    }
+
+    /// Changed files, by path; filtered like the file list.
+    var changes: [Change] {
+        guard let repoRoot else { return [] }
+        let query = filter.trimmingCharacters(in: .whitespaces)
+        var isDirectory: ObjCBool = false
+        return git.files.map { path, state in
+            var relative = String(path.dropFirst(repoRoot.count).drop(while: { $0 == "/" }))
+            if state == .untracked, FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue { relative += "/" }
+            return Change(path: path, state: state, relativePath: relative)
+        }
+        .filter { query.isEmpty || $0.relativePath.localizedCaseInsensitiveContains(query) }
+        .sorted { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }
+    }
+
     var isActive = false {
-        didSet { isActive ? reloadAll() : watcher?.stop() }
+        didSet {
+            isActive ? reloadAll() : watcher?.stop()
+            updateChangesTimer()
+        }
     }
 
     func setRoot(_ path: String) {
@@ -133,6 +186,9 @@ final class FileTreeModel: ObservableObject {
         guard let root, let repo = GitInfo.repositoryRoot(for: root) else {
             git = GitStatusSnapshot()
             branch = nil
+            repoRoot = nil
+            lineCounts = [:]
+            section = .files
             return
         }
         if gitRunning { gitRequestedAgain = true; return }
@@ -149,19 +205,15 @@ final class FileTreeModel: ObservableObject {
         lastGitRun = Date()
         let path = [ProcessInfo.processInfo.environment["PATH"] ?? "", CommandCatalog.shared.shellPath ?? ""].joined(separator: ":")
         DispatchQueue.global(qos: .utility).async {
-            let fm = FileManager.default
-            let git = path.split(separator: ":").map { String($0) + "/git" }.first { fm.isExecutableFile(atPath: $0) } ?? "/usr/bin/git"
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: git)
-            process.arguments = ["-C", repo, "status", "--porcelain=v1", "-z"]
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = FileHandle.nullDevice
             var snapshot: GitStatusSnapshot?
-            if (try? process.run()) != nil {
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-                if process.terminationStatus == 0 { snapshot = GitStatusSnapshot.parse(porcelain: data, repoRoot: repo) }
+            if let status = GitCommand.run(["status", "--porcelain=v1", "-z"], in: repo, searchPath: path), status.status == 0 {
+                snapshot = GitStatusSnapshot.parse(porcelain: status.output, repoRoot: repo)
+            }
+            var counts: [String: LineCounts] = [:]
+            if snapshot?.changedFileCount ?? 0 > 0,
+               let numstat = GitCommand.run(["diff", "HEAD", "--numstat", "--no-color", "--no-ext-diff", "--no-textconv"], in: repo, searchPath: path),
+               numstat.status == 0 {
+                counts = GitDiff.parseNumstat(String(decoding: numstat.output, as: UTF8.self), repoRoot: repo)
             }
             let branch = GitInfo.branch(at: repo)
             DispatchQueue.main.async {
@@ -169,6 +221,8 @@ final class FileTreeModel: ObservableObject {
                 if let snapshot, self.root.flatMap({ GitInfo.repositoryRoot(for: $0) }) == repo {
                     self.git = snapshot
                     self.branch = branch
+                    self.repoRoot = repo
+                    self.lineCounts = counts
                 }
                 if self.gitRequestedAgain {
                     self.gitRequestedAgain = false
@@ -255,10 +309,19 @@ struct FileTreeView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            FilterField(text: $model.filter, palette: palette)
+            if model.repoRoot != nil {
+                SectionSwitch(model: model, palette: palette)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 8)
+            }
+            FilterField(text: $model.filter, placeholder: model.section == .changes ? "Filter changes" : "Filter files", palette: palette)
                 .padding(.horizontal, 10)
                 .padding(.bottom, 8)
-            content
+            if model.section == .changes {
+                changesContent
+            } else {
+                content
+            }
             footer
         }
         .background(Color(nsColor: palette.background))
@@ -322,6 +385,34 @@ struct FileTreeView: View {
     }
 
     @ViewBuilder
+    private var changesContent: some View {
+        let changes = model.changes
+        if changes.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(model.filter.trimmingCharacters(in: .whitespaces).isEmpty ? "nothing changed" : "no changes match")
+                    .font(.hand(19))
+                    .foregroundColor(Color(nsColor: palette.secondary))
+                Text("Edited, new and deleted files show up here, compared with the last commit.")
+                    .font(.system(size: 11.5))
+                    .foregroundColor(Color(nsColor: palette.hint))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            Spacer()
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(changes) { change in
+                        ChangeRow(change: change, counts: model.lineCounts[change.path], model: model, palette: palette)
+                    }
+                }
+                .padding(.bottom, 10)
+            }
+        }
+    }
+
+    @ViewBuilder
     private var content: some View {
         let filtering = !model.filter.trimmingCharacters(in: .whitespaces).isEmpty
         let rows = filtering ? model.filterResults : model.rows
@@ -351,8 +442,138 @@ struct FileTreeView: View {
     }
 }
 
+/// Files | Changes, above the filter (only inside a git repository).
+private struct SectionSwitch: View {
+    @ObservedObject var model: FileTreeModel
+    let palette: ChromePalette
+
+    var body: some View {
+        HStack(spacing: 2) {
+            segment(.files, "Files", count: nil)
+            segment(.changes, "Changes", count: model.git.changedFileCount)
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color(nsColor: palette.surface1)))
+    }
+
+    private func segment(_ section: FileTreeModel.Section, _ title: String, count: Int?) -> some View {
+        let selected = model.section == section
+        return Button {
+            model.section = section
+        } label: {
+            HStack(spacing: 5) {
+                Text(title)
+                if let count, count > 0 {
+                    Text("\(count)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color(nsColor: palette.ansiYellow.withAlphaComponent(0.25))))
+                }
+            }
+            .font(.system(size: 12, weight: selected ? .semibold : .regular))
+            .foregroundColor(Color(nsColor: selected ? palette.text : palette.secondary))
+            .frame(maxWidth: .infinity)
+            .frame(height: 22)
+            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color(nsColor: selected ? palette.background : .clear)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// A changed file: name, folder, +/− line counts and its git badge. Click shows the diff.
+private struct ChangeRow: View {
+    let change: FileTreeModel.Change
+    let counts: LineCounts?
+    @ObservedObject var model: FileTreeModel
+    let palette: ChromePalette
+    @State private var hovering = false
+
+    var body: some View {
+        let selected = model.selection == change.path
+        HStack(spacing: 8) {
+            Text(change.state.badge)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(Color(nsColor: GitColors.color(change.state, palette: palette)))
+                .frame(width: 12)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(change.isFolder ? change.name + "/" : change.name)
+                    .font(.system(size: 13))
+                    .strikethrough(change.state == .deleted)
+                    .foregroundColor(Color(nsColor: palette.text))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                let folder = (change.relativePath as NSString).deletingLastPathComponent
+                if !folder.isEmpty {
+                    Text(folder)
+                        .font(.system(size: 10))
+                        .foregroundColor(Color(nsColor: palette.hint))
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
+            }
+            Spacer(minLength: 4)
+            if let counts {
+                HStack(spacing: 4) {
+                    if counts.added > 0 { Text("+\(counts.added)").foregroundColor(Color(nsColor: palette.success)) }
+                    if counts.removed > 0 { Text("−\(counts.removed)").foregroundColor(Color(nsColor: palette.error)) }
+                }
+                .font(.system(size: 10.5, design: .monospaced))
+            }
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 12)
+        .frame(height: 34)
+        .background(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(Color(nsColor: selected ? palette.accent.withAlphaComponent(0.2) : (hovering ? palette.surface1 : .clear)))
+                .padding(.horizontal, 6)
+        )
+        .onHover { hovering = $0 }
+        .overlay(ClickCatcher(onClick: { _ in
+            model.selection = change.path
+            openDiff()
+        }, menu: { contextMenu() }))
+        .help(change.relativePath)
+    }
+
+    private func openDiff() {
+        guard let repo = model.repoRoot else { return }
+        model.onOpenDiff(change.path, repo, change.state == .untracked)
+    }
+
+    private func contextMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(ClosureMenuItem(title: "Show Changes") { openDiff() })
+        if change.state != .deleted, !change.isFolder {
+            menu.addItem(ClosureMenuItem(title: "Open in Rune") { model.onOpenFile(change.path, true) })
+        }
+        menu.addItem(ClosureMenuItem(title: "Insert Path in Input") { model.onInsertPath(change.path) })
+        menu.addItem(.separator())
+        let entry = FileListing.Entry(name: change.name, path: change.path, isDirectory: change.isFolder, isHidden: change.name.hasPrefix("."))
+        menu.addItem(ClosureMenuItem(title: "Copy Path") { model.copyPath(entry) })
+        if change.state != .deleted {
+            menu.addItem(ClosureMenuItem(title: "Reveal in Finder") { model.reveal(entry) })
+        }
+        return menu
+    }
+}
+
+enum GitColors {
+    static func color(_ state: GitFileState, palette: ChromePalette) -> NSColor {
+        switch state {
+        case .modified, .renamed: return palette.ansiYellow
+        case .added, .untracked: return palette.success
+        case .deleted, .conflicted: return palette.error
+        case .ignored: return palette.hint
+        }
+    }
+}
+
 private struct FilterField: View {
     @Binding var text: String
+    var placeholder = "Filter files"
     let palette: ChromePalette
     @FocusState private var focused: Bool
 
@@ -361,7 +582,7 @@ private struct FilterField: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
                 .foregroundColor(Color(nsColor: palette.hint))
-            TextField("Filter files", text: $text)
+            TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
                 .foregroundColor(Color(nsColor: palette.text))
@@ -575,12 +796,7 @@ private struct FileRow: View {
     }
 
     private func gitColor(_ state: GitFileState) -> NSColor {
-        switch state {
-        case .modified, .renamed: return palette.ansiYellow
-        case .added, .untracked: return palette.success
-        case .deleted, .conflicted: return palette.error
-        case .ignored: return palette.hint
-        }
+        GitColors.color(state, palette: palette)
     }
 
     private func nameColor(_ state: GitFileState?, hidden: Bool) -> NSColor {

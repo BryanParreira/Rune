@@ -364,6 +364,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         }
         fileTree.onNewTab = { [weak self] path in self?.addTab(directory: path) }
         fileTree.onOpenFile = { [weak self] path, pinned in self?.openFile(path: path, pinned: pinned) }
+        fileTree.onOpenDiff = { [weak self] path, repo, untracked in self?.openDiff(path: path, repo: repo, untracked: untracked) }
         warningModel.onOpenConfig = { [weak self] in self?.openSettingsTab() }
     }
 
@@ -505,6 +506,18 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         if parts.count > 1 { tabsModel.onSetColor(id, TabColor(rawValue: parts[1])) }
     }
 
+    /// Shows the sidebar's Changes list, prints it, and opens the diff of change `index` (if any).
+    func debugChanges(open index: Int?) {
+        if !tabsModel.sidebarVisible { toggleFileTree(nil) }
+        fileTree.section = .changes
+        let changes = fileTree.changes
+        print("CHANGES repo=\(fileTree.repoRoot ?? "-") " + changes.map { "\($0.relativePath)[\($0.state.badge)\(fileTree.lineCounts[$0.path].map { " +\($0.added)-\($0.removed)" } ?? "")]" }.joined(separator: " "))
+        fflush(stdout)
+        if let index, changes.indices.contains(index), let repo = fileTree.repoRoot {
+            openDiff(path: changes[index].path, repo: repo, untracked: changes[index].state == .untracked)
+        }
+    }
+
     func debugDumpTabs() {
         for (i, tab) in tabs.enumerated() {
             let kind = tab is FilePreviewTab ? ((tab as? FilePreviewTab)?.isPinned == true ? "file(pinned)" : "file(preview)") : String(describing: type(of: tab))
@@ -534,6 +547,23 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             return
         }
         insert(makeFileTab(path: path, pinned: pinned))
+    }
+
+    /// Opens the sidebar on its Changes list.
+    @objc func showGitChanges(_ sender: Any?) {
+        if !tabsModel.sidebarVisible { toggleFileTree(nil) }
+        fileTree.section = .changes
+    }
+
+    /// A changed file's diff; one tab per file (clicking it again selects that tab).
+    func openDiff(path: String, repo: String, untracked: Bool) {
+        if let index = tabs.firstIndex(where: { ($0 as? DiffTab)?.path == path }) {
+            select(index: index)
+            return
+        }
+        insert(DiffTab(path: path, repo: repo, untracked: untracked, snapshot: configStore.snapshot) { [weak self] file in
+            self?.openFile(path: file, pinned: true)
+        })
     }
 
     private func makeFileTab(path: String, pinned: Bool) -> FilePreviewTab {
@@ -949,6 +979,9 @@ extension MainWindowController {
             action("Close Tab", "xmark.square", "⌘W") { [weak self] in self?.closeTab(nil) }
         }
         action("Toggle File Tree", "sidebar.left", "⌘B", keywords: "files sidebar explorer") { [weak self] in self?.toggleFileTree(nil) }
+        if let directory = selectedSession?.currentDirectory, GitInfo.repositoryRoot(for: directory) != nil {
+            action("Show Git Changes", "plusminus", keywords: "git diff status modified sidebar") { [weak self] in self?.showGitChanges(nil) }
+        }
         if configStore.snapshot.config.recallEnabled {
             action("Recall: Search History", "clock.arrow.circlepath", "⌃R", keywords: "history output search find past") { [weak self] in
                 self?.showRecall(nil)

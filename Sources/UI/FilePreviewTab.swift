@@ -597,7 +597,7 @@ struct FilePreviewHeader: View {
     }
 }
 
-private struct MetaChip: View {
+struct MetaChip: View {
     let text: String
     let palette: ChromePalette
     let color: NSColor?
@@ -637,7 +637,7 @@ private struct ModeSwitch: View {
     }
 }
 
-private struct IconAction: View {
+struct IconAction: View {
     let symbol: String
     let help: String
     let palette: ChromePalette

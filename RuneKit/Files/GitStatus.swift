@@ -40,12 +40,14 @@ public enum GitFileState: Equatable, Sendable {
 public struct GitStatusSnapshot: Equatable, Sendable {
     /// Absolute path → state, for files and (aggregated) their parent folders.
     public var states: [String: GitFileState] = [:]
+    /// Absolute path → state, for changed files only.
+    public var files: [String: GitFileState] = [:]
     /// Number of changed files (not counting the folders they roll up into).
-    public var changedFileCount = 0
+    public var changedFileCount: Int { files.count }
 
-    public init(states: [String: GitFileState] = [:], changedFileCount: Int = 0) {
+    public init(states: [String: GitFileState] = [:], files: [String: GitFileState] = [:]) {
         self.states = states
-        self.changedFileCount = changedFileCount
+        self.files = files
     }
 
     public func state(for path: String) -> GitFileState? { states[path] }
@@ -90,6 +92,6 @@ public struct GitStatusSnapshot: Equatable, Sendable {
                 parent = (parent as NSString).deletingLastPathComponent
             }
         }
-        return GitStatusSnapshot(states: states, changedFileCount: files.count)
+        return GitStatusSnapshot(states: states, files: files)
     }
 }

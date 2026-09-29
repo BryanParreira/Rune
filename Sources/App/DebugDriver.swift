@@ -233,6 +233,8 @@ enum DebugDriver {
                 for controller in NSApp.windows.compactMap({ $0.windowController as? MainWindowController }) {
                     controller.debugDumpTabs()
                 }
+            case let changes where changes.hasPrefix("@changes"):
+                (session.view.window?.windowController as? MainWindowController)?.debugChanges(open: Int(changes.dropFirst(9)))
             case "@newTab":
                 (session.view.window?.windowController as? MainWindowController)?.newTab(nil)
             case "@closeTab":
