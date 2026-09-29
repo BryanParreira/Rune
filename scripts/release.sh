@@ -57,3 +57,18 @@ gh release create "$TAG" --repo "$RELEASES_REPO" --verify-tag --title "Rune $VER
   "$STAGE/Rune-$VERSION.dmg" "$STAGE/appcast.xml"
 
 echo "Published https://github.com/$RELEASES_REPO/releases/tag/$TAG"
+
+# Point the Homebrew cask at the new release (brew install --cask bryanparreira/tap/rune).
+# Set TAP_REPO= (empty) to skip.
+TAP_REPO="${TAP_REPO-BryanParreira/homebrew-tap}"
+if [ -n "$TAP_REPO" ]; then
+  SHA=$(shasum -a 256 "$STAGE/Rune-$VERSION.dmg" | cut -d' ' -f1)
+  TAP_DIR=$(mktemp -d)
+  if gh repo clone "$TAP_REPO" "$TAP_DIR" -- -q; then
+    sed -i '' -E "s/^  version \".*\"/  version \"$VERSION\"/; s/^  sha256 \".*\"/  sha256 \"$SHA\"/" "$TAP_DIR/Casks/rune.rb"
+    git -C "$TAP_DIR" commit -qam "Rune $VERSION" && git -C "$TAP_DIR" push -q && echo "Updated Homebrew cask to $VERSION"
+  else
+    echo "Couldn't update the Homebrew cask; update $TAP_REPO by hand." >&2
+  fi
+  rm -rf "$TAP_DIR"
+fi

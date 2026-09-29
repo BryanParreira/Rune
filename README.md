@@ -72,6 +72,14 @@ Full-screen apps like vim and htop take over cleanly. Closing a tab that's still
 
 ## Install
 
+With [Homebrew](https://brew.sh):
+
+```sh
+brew install --cask bryanparreira/tap/rune
+```
+
+Or download it:
+
 1. Download **Rune.dmg** from the [latest release](https://github.com/BryanParreira/Rune/releases/latest).
 2. Open it and drag **Rune** into **Applications**.
 3. Launch Rune. That's it: no account, no setup.
