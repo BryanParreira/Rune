@@ -31,6 +31,11 @@ final class FilePreviewTab: TabContent {
 
     func focus() { view.focus() }
     func find(_ request: NSMenuItem) { view.find(request) }
+    /// A "Run…" button on a shell snippet was clicked: (command, the file's folder).
+    var onRunSnippet: ((String, String) -> Void)? {
+        get { view.onRunSnippet }
+        set { view.onRunSnippet = newValue }
+    }
     func apply(_ snapshot: ConfigSnapshot) { view.apply(snapshot) }
     func closeContent() { view.stopWatching() }
 }
@@ -85,6 +90,9 @@ final class FilePreviewView: NSView {
         return view
     }()
     private let linkHandler = PreviewLinkHandler()
+    /// Commands behind the rendered document's "Run…" buttons.
+    private var snippets: [String] = []
+    var onRunSnippet: ((String, String) -> Void)?
     private var currentText = ""
     private var wrapLines = false
     private let messageHost = NSHostingView(rootView: AnyView(EmptyView()))
@@ -188,6 +196,10 @@ final class FilePreviewView: NSView {
         headerModel.onModeChange = { [weak self] mode in
             self?.headerModel.mode = mode
             self?.showCurrentTextMode()
+        }
+        linkHandler.onRun = { [weak self] index in
+            guard let self, self.snippets.indices.contains(index) else { return }
+            self.onRunSnippet?(self.snippets[index], (self.currentPath as NSString).deletingLastPathComponent)
         }
         headerModel.onToggleWrap = { [weak self] in
             guard let self else { return }
@@ -351,7 +363,9 @@ final class FilePreviewView: NSView {
     }
 
     private func renderMarkdown() {
-        let body = Self.inlineLocalImages(MarkdownRenderer.html(from: currentText), relativeTo: (currentPath as NSString).deletingLastPathComponent)
+        let rendered = MarkdownRenderer.renderRunnable(currentText)
+        snippets = rendered.snippets
+        let body = Self.inlineLocalImages(rendered.html, relativeTo: (currentPath as NSString).deletingLastPathComponent)
         let page = MarkdownPage.document(body: body, palette: palette, font: snapshot.font)
         #if DEBUG
         if let out = ProcessInfo.processInfo.environment["RUNE_DEBUG_HTML"] { try? page.write(toFile: out, atomically: true, encoding: .utf8) }
@@ -476,6 +490,8 @@ final class FilePreviewView: NSView {
             fflush(stdout)
         }
     }
+
+    func debugRunSnippet(_ index: Int) { linkHandler.onRun?(index) }
 
     var debugSummary: String {
         "language=\(language.displayName) chars=\((textView.string as NSString).length) detail=\(headerModel.detail) textVisible=\(!scrollView.isHidden) colored=\(CodeHighlighter.tokens(in: textView.string, language: language).count)"
@@ -713,7 +729,16 @@ final class LineNumberGutter: NSView {
 
 /// Opens links from rendered documents outside the viewer.
 final class PreviewLinkHandler: NSObject, WKNavigationDelegate {
+    /// A snippet's "Run…" link (`rune-run:<index>`).
+    var onRun: ((Int) -> Void)?
+
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if let url = action.request.url, url.scheme == "rune-run" {
+            let index = Int(url.absoluteString.dropFirst("rune-run:".count)) ?? -1
+            DispatchQueue.main.async { self.onRun?(index) }
+            decisionHandler(.cancel)
+            return
+        }
         if action.navigationType == .linkActivated, let url = action.request.url {
             if url.fragment != nil, url.scheme == nil || url.absoluteString.hasPrefix("about:") {
                 decisionHandler(.allow) // in-page anchor
@@ -767,6 +792,12 @@ enum MarkdownPage {
         img { max-width: 100%; border-radius: 6px; }
         del { color: \(css(p.hint)); }
         sub, sup { color: \(css(p.secondary)); }
+        .snippet { position: relative; }
+        .snippet .run { position: absolute; top: 8px; right: 8px; font: 600 11.5px -apple-system, sans-serif; color: \(css(p.text));
+                        background: \(css(p.accent.withAlphaComponent(0.22))); border: 1px solid \(css(p.accent.withAlphaComponent(0.45)));
+                        padding: 3px 10px; border-radius: 6px; text-decoration: none; }
+        .snippet .run:hover { background: \(css(p.accent.withAlphaComponent(0.35))); text-decoration: none; }
+        .snippet pre { padding-right: 96px; }
         .remote-image { display: inline-block; font-size: 11px; line-height: 18px; padding: 0 7px; margin: 2px 2px;
                         border-radius: 4px; background: \(css(p.surface2)); color: \(css(p.secondary)); }
         </style></head><body><main>

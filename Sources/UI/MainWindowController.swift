@@ -148,7 +148,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
                 }
                 if let first = terminal.sessions.first { terminal.focus(first) }
             case .file(let path):
-                insert(FilePreviewTab(path: path, pinned: true, snapshot: configStore.snapshot))
+                insert(makeFileTab(path: path, pinned: true))
             }
         }
         if tabs.isEmpty { addTab(directory: NSHomeDirectory()) }
@@ -394,7 +394,33 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             select(index: index)
             return
         }
-        insert(FilePreviewTab(path: path, pinned: pinned, snapshot: configStore.snapshot))
+        insert(makeFileTab(path: path, pinned: pinned))
+    }
+
+    private func makeFileTab(path: String, pinned: Bool) -> FilePreviewTab {
+        let tab = FilePreviewTab(path: path, pinned: pinned, snapshot: configStore.snapshot)
+        tab.onRunSnippet = { [weak self] command, folder in self?.runSnippet(command, from: folder) }
+        return tab
+    }
+
+    /// A "Run…" button in a Markdown preview: put the command in the terminal's input (the
+    /// user presses Return), from the project the document belongs to.
+    private func runSnippet(_ command: String, from folder: String) {
+        guard let session = directorySource,
+              let index = tabs.firstIndex(where: { ($0 as? TerminalTab)?.contains(session) == true }),
+              let tab = tabs[index] as? TerminalTab else {
+            addTab(directory: GitInfo.repositoryRoot(for: folder) ?? folder, prefill: command)
+            return
+        }
+        let target = GitInfo.repositoryRoot(for: folder) ?? folder
+        let text = session.currentDirectory == target ? command : "cd \(FileListing.shellQuoted(target)) && " + command
+        select(index: index)
+        tab.focus(session)
+        switch session.mode {
+        case .editor: session.view.inputArea.setText(text)
+        case .shellPrompt: session.terminalView.sendToShell(Array(text.utf8))
+        default: addTab(directory: target, prefill: command)
+        }
     }
 
     private func insert(_ tab: TabContent) {

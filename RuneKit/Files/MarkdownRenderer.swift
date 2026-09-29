@@ -5,6 +5,19 @@ import Foundation
 /// Raw HTML blocks (lines starting with a tag) pass through; everything else is escaped.
 public enum MarkdownRenderer {
     public static func html(from markdown: String) -> String {
+        var ignored: [String]?
+        return render(markdown, snippets: &ignored)
+    }
+
+    /// Renders and collects runnable shell snippets: each gets a `rune-run:<index>` link, and
+    /// `snippets[index]` is the command it stands for.
+    public static func renderRunnable(_ markdown: String) -> (html: String, snippets: [String]) {
+        var snippets: [String]? = []
+        let html = render(markdown, snippets: &snippets)
+        return (html, snippets ?? [])
+    }
+
+    private static func render(_ markdown: String, snippets: inout [String]?) -> String {
         var out: [String] = []
         let lines = markdown.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
         var i = 0
@@ -38,7 +51,14 @@ public enum MarkdownRenderer {
                     i += 1
                 }
                 let cls = language.isEmpty ? "" : " class=\"language-\(escape(language))\""
-                out.append("<pre><code\(cls)>\(escape(code.joined(separator: "\n")))</code></pre>")
+                let block = "<pre><code\(cls)>\(escape(code.joined(separator: "\n")))</code></pre>"
+                if snippets != nil, let command = RunnableSnippet.command(from: code.joined(separator: "\n"), language: language) {
+                    let index = snippets?.count ?? 0
+                    snippets?.append(command)
+                    out.append("<div class=\"snippet\"><a class=\"run\" href=\"rune-run:\(index)\" title=\"Put this in your terminal; press Return to run it\">▶ Run…</a>\(block)</div>")
+                } else {
+                    out.append(block)
+                }
                 i += 1
                 continue
             }
@@ -89,7 +109,7 @@ public enum MarkdownRenderer {
                     quoted.append(q.hasPrefix(" ") ? String(q.dropFirst()) : String(q))
                     i += 1
                 }
-                out.append("<blockquote>\(html(from: quoted.joined(separator: "\n")))</blockquote>")
+                out.append("<blockquote>\(render(quoted.joined(separator: "\n"), snippets: &snippets))</blockquote>")
                 continue
             }
 

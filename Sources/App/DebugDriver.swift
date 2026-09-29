@@ -152,6 +152,10 @@ enum DebugDriver {
                     item.tag = NSTextFinder.Action.showFindInterface.rawValue
                     controller.findInTab(item)
                 }
+            case let run where run.hasPrefix("@runSnippet:"):
+                if let controller = session.view.window?.windowController as? MainWindowController, let index = Int(run.dropFirst(12)) {
+                    controller.debugSelectedPreview()?.debugRunSnippet(index)
+                }
             case "@gap":
                 // Distance between the last non-blank row on screen and the terminal area's bottom.
                 let terminal = session.terminalView.getTerminal()
