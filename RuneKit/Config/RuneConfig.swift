@@ -51,9 +51,6 @@ public struct RuneConfig: Equatable, Sendable {
     public var syncPath: String?
     /// System-wide shortcut that shows or hides Rune ("ctrl+`", "option+space"…, or "off").
     public var globalHotkey: String = "ctrl+`"
-    /// What the hotkey opens: "window" (bring Rune forward) or "quick" (Quick Terminal
-    /// sliding down from the top of the screen).
-    public var hotkeyOpens: String = "window"
     /// Rune Recall: keep a searchable history of commands and their output on this Mac.
     public var recallEnabled: Bool = true
     /// Days of Recall history to keep.
@@ -80,7 +77,7 @@ public struct RuneConfig: Equatable, Sendable {
         "fontFamily", "fontSize", "lineHeight", "theme", "paddingX", "paddingY", "cursorStyle",
         "cursorBlink", "scrollback", "optionAsMeta", "showWelcome", "honorPrompt", "inputMode", "shell",
         "aiEnabled", "ollamaEndpoint", "aiModel", "aiIncludeBlockContext",
-        "syncPath", "hosts", "workflows", "notifyWhenDone", "notifyAfterSeconds", "gpuRendering", "restoreSession", "hideSecrets", "recallEnabled", "recallDays", "globalHotkey", "hotkeyOpens",
+        "syncPath", "hosts", "workflows", "notifyWhenDone", "notifyAfterSeconds", "gpuRendering", "restoreSession", "hideSecrets", "recallEnabled", "recallDays", "globalHotkey",
     ]
 
     /// Written to ~/.config/rune/config.json on first launch.
@@ -158,9 +155,6 @@ extension RuneConfig {
         if let v = reader.bool("hideSecrets") { hideSecrets = v }
         if let v = reader.bool("recallEnabled") { recallEnabled = v }
         if let v = reader.string("globalHotkey") { globalHotkey = v.isEmpty ? "off" : v }
-        if let v = reader.string("hotkeyOpens") {
-            if ["window", "quick"].contains(v) { hotkeyOpens = v } else { reader.warnings.append("hotkeyOpens \"\(v)\" is not one of window, quick; using window") }
-        }
         if let v = reader.number("recallDays", range: 1...3650) { recallDays = v }
         if let v = reader.number("notifyAfterSeconds", range: 1...3600) { notifyAfterSeconds = v }
 
