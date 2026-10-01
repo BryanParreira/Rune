@@ -24,10 +24,19 @@ a private AI that runs entirely on your Mac, and a warm paper look that's easy o
 ## Built around how you actually work
 
 **Every command is a block.**
-Output is grouped with the command that produced it, its folder and how long it took. Failed commands stand out in red with their exit code. Hover to copy the command or its output, or run it again. Jump between blocks with ⌘↑ and ⌘↓.
+Output is grouped with the command that produced it, its folder and how long it took. Failed commands stand out in red with their exit code. Hover to copy the command or its output, or run it again. Click a block to select it, ⇧-click to select several, and jump between blocks with ⌘↑ and ⌘↓.
 
 **Copy exactly what you need.**
 Copy a block's command, its output, both, Markdown for an issue, or a picture of it in your theme (⌥⌘C) to drop into a chat, made on your Mac, not shared through a link. ⇧⌘C copies the last output; ⌘C copies a block you selected with ⌘↑. Copies match what you see on screen: hidden secrets stay hidden and padding spaces are trimmed.
+
+**See what changed between two runs.**
+Ran the tests before and after a fix? Compare with Previous Run (⌥⌘D) opens a diff of the two outputs, with a switch to ignore lines that only differ in numbers like timings. Or select any two blocks and compare them.
+
+**Watch a command.**
+Watch… on any block re-runs it in the background every few seconds, or whenever files in its folder change, and marks the lines that changed with a highlighter. Pause it, run it now, or get a notification when the output changes while you're in another app. Your scrollback stays clean.
+
+**Find the error in a wall of output.**
+⌘' jumps to the last line that looks like an error and marks it; press it again for the one before. Bookmark blocks you want to come back to with ⌥⌘B and jump between them with ⌃⌘↑ ⌃⌘↓. Failed blocks and bookmarks show as ticks on the scroll bar.
 
 **An input that feels like an editor.**
 Type at the bottom, like a chat. Edit multi-line commands, accept suggestions from your history with →, and see typos in red before you press Enter. Mistype `gti status` or `cd Documetns` anyway, and Rune suggests the fix: press Tab to use it. Tab completes subcommands and flags for git, docker, npm, brew, kubectl and more, with a short note on what each does, plus your npm scripts, Makefile targets and git branches.
@@ -36,7 +45,7 @@ Type at the bottom, like a chat. Edit multi-line commands, accept suggestions fr
 When `ssh` (or `docker exec`, `kubectl exec`, `su`…) lands you in a shell on another machine, Rune offers to keep its input box there: blocks, history suggestions and ⌘↵ AI work like they do locally. Passwords and logins always go straight to the session, and nothing is saved on the server.
 
 **Output you can click.**
-⌘-click a URL or a file path in any output, like `src/app.ts:42:7` in a compiler error, and it opens right at that line in VS Code, Cursor or Zed. Filter a long output down to the lines you care about from the block's menu.
+⌘-click a URL or a file path in any output, like `src/app.ts:42:7` in a compiler error, and it opens right at that line in VS Code, Cursor or Zed. Point at a path and press ⌘Y to Quick Look it. Filter a long output down to the lines you care about from the block's menu.
 
 **Recall: everything you've run, searchable.**
 Press ⌃R to search every command *and its output* across all your sessions: "that docker command from last week", "the error that mentioned port 3000". It's stored only on your Mac, with secrets removed. Start a command with a space and it's never recorded.
@@ -68,6 +77,9 @@ Save a command once, with blanks like `git push {{remote}} {{branch}}`, then run
 
 **Fast, and right where you left off.**
 New tabs and splits open instantly, even with a heavy zsh setup, and huge outputs scroll by without slowing down. Quit or update, and your windows, tabs, splits and folders come back just as they were. Closed a tab by accident? ⇧⌘T brings it back. Press ⌘F to search any output.
+
+**Part of your Mac.**
+The Shortcuts app gets Rune actions: open a folder, type a command, get the last output, search Recall. Use them in your own shortcuts, from Spotlight, or from Raycast. Launchers can also open `rune://open?dir=~/project&command=npm%20test`, which types the command for you and never runs it on its own.
 
 **Know when it's done.**
 Start a long build, switch to something else, and Rune sends a notification when it finishes. Click it to jump straight back to that pane.
@@ -128,7 +140,12 @@ Rune finds your installed models automatically. You can choose one in Settings �
 | Command history | ↑ ↓ |
 | Complete commands, flags, files | ⇥ |
 | Recall: search past commands and output | ⌃R |
-| Jump between blocks | ⌘↑ ⌘↓ |
+| Jump between blocks · select several | ⌘↑ ⌘↓ · ⇧⌘↑ ⇧⌘↓ |
+| Copy last output · last block as image | ⇧⌘C · ⌥⌘C |
+| Compare with previous run | ⌥⌘D |
+| Jump to error · next error | ⌘' · ⇧⌘' |
+| Bookmark block · jump between bookmarks | ⌥⌘B · ⌃⌘↑ ⌃⌘↓ |
+| Quick Look the path under the pointer | ⌘Y |
 | Search output · next · previous | ⌘F · ⌘G · ⇧⌘G |
 | Clear screen | ⌘K |
 | Show or hide Rune from any app | ⌃\` |

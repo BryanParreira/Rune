@@ -55,6 +55,11 @@ Warp; its app code is AGPL-3.0, and Rune (proprietary) contains none of it.
 - Between command start and finish, keystrokes go to the program (passwords, REPLs, Ctrl-C).
 - Empty Enter in the editor does nothing (no empty blocks).
 
+- Trackpad scrolling is by the point: the viewport moves whole lines and the remainder shifts
+  the terminal down by less than a row, hidden under the covered top rows. Any other scroll
+  snaps back to the row grid.
+- A click that doesn't select text selects the block under it; ⇧ extends to a range.
+
 ## Features adopted now
 
 Bottom input editor, directory + git chips, welcome panel, blocks with separators, failed-block
