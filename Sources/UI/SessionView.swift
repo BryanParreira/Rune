@@ -27,6 +27,15 @@ final class SessionView: NSView {
         return host
     }()
     private var filterHost: NSHostingView<BlockFilterView>?
+    let finder = OutputFindModel()
+    private lazy var findHost: NSHostingView<OutputFindBar> = {
+        let host = NSHostingView(rootView: OutputFindBar(model: finder))
+        host.sizingOptions = []
+        host.safeAreaRegions = []
+        host.isHidden = true
+        addSubview(host, positioned: .above, relativeTo: nil)
+        return host
+    }()
     private lazy var completionHost: NSHostingView<CompletionMenuView> = {
         let host = NSHostingView(rootView: CompletionMenuView(model: inputArea.completionMenu) { [weak self] index in
             self?.inputArea.acceptCompletion(index)
@@ -123,12 +132,25 @@ final class SessionView: NSView {
 
     override var isFlipped: Bool { true }
 
+    /// The find bar floats at the top right of the output.
+    func layoutFindBar() {
+        guard finder.isOpen else {
+            if findHost.superview != nil { findHost.isHidden = true }
+            return
+        }
+        let output = convert(terminalContainer.bounds, from: terminalContainer)
+        let width = min(460, output.width - 24)
+        findHost.frame = NSRect(x: output.maxX - width - 12, y: output.minY + 8, width: width, height: 34)
+        findHost.isHidden = false
+    }
+
     override func layout() {
         // Before the stack resizes the container, so the terminal's size (and the PTY's) only
         // changes when the pane itself does.
         terminalContainer.paneHeight = bounds.height
         super.layout()
         updateAILayout()
+        if finder.isOpen { layoutFindBar() }
     }
 
     /// The AI card may take up to 45% of the pane, minus what the output and input need;
@@ -156,6 +178,7 @@ final class SessionView: NSView {
         welcomeModel.horizontalPadding = CGFloat(config.paddingX)
         inputArea.apply(snapshot: snapshot, palette: palette)
         overlay.palette = palette
+        finder.palette = palette
         overlay.font = snapshot.font
         rebuildAIPanel()
         updateVisibility()

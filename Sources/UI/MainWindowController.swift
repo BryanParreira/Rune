@@ -708,8 +708,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         let request = NSMenuItem()
         request.tag = sender.tag
         if let session = selectedSession {
-            session.terminalView.performTextFinderAction(request)
-            session.updateBottomTrim()
+            session.find(NSTextFinder.Action(rawValue: sender.tag) ?? .showFindInterface)
         } else if let preview = selectedTab as? FilePreviewTab {
             preview.find(request)
         }

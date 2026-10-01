@@ -117,6 +117,38 @@ final class BlockOverlayView: NSView {
         path.fill()
     }
 
+    /// ⌘F matches on screen: all of them lightly, the current one strongly.
+    private func drawFindMatches(palette: ChromePalette, session: TerminalSession) {
+        let finder = session.view.finder
+        guard finder.isOpen, !finder.matches.isEmpty else { return }
+        let geometry = session.geometry
+        let terminalView = session.terminalView
+        let top = geometry.topVisibleRow
+        let bottom = top + terminalView.getTerminal().rows
+        let font = terminalView.font
+        let cellWidth = font.advancement(forGlyph: font.glyph(withName: "W")).width
+        let current = finder.current.map { finder.matches[$0] }
+        // Matches are in row order: skip straight to the visible ones.
+        let first = finder.matches.partitionIndex { $0.row >= top }
+        for match in finder.matches[first...] {
+            guard match.row < bottom else { break }
+            let y = convert(NSPoint(x: 0, y: geometry.topY(ofRow: match.row)), from: terminalView).y
+            let rect = NSRect(x: terminalView.frame.minX + CGFloat(match.column) * cellWidth - 1, y: y,
+                              width: CGFloat(match.length) * cellWidth + 2, height: geometry.cellHeight)
+            if match == current {
+                palette.accent.withAlphaComponent(0.35).setFill()
+                NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2).fill()
+                palette.accent.setStroke()
+                let border = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 2, yRadius: 2)
+                border.lineWidth = 1
+                border.stroke()
+            } else {
+                palette.highlight.setFill()
+                NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2).fill()
+            }
+        }
+    }
+
     /// The line "Jump to Error" landed on, marked like a highlighter pen.
     private func drawMarkedRow(palette: ChromePalette, session: TerminalSession) {
         guard let row = session.markedRow else { return }
@@ -369,6 +401,7 @@ final class BlockOverlayView: NSView {
         }
         drawSecretMasks(palette: palette, session: session)
         drawMarkedRow(palette: palette, session: session)
+        drawFindMatches(palette: palette, session: session)
         NSGraphicsContext.restoreGraphicsState()
         // Outside the terminal clip: it sits flush with the top of the pane.
         stickyHeader = stickyHeaderFrame(frames: frames, terminalFrame: terminalFrame, session: session)
@@ -776,5 +809,19 @@ final class HoverIconButton: NSButton {
 
     override var isEnabled: Bool {
         didSet { updateColors() }
+    }
+}
+
+private extension Array {
+    /// Index of the first element for which `predicate` holds, in an array where it's false
+    /// then true (binary search).
+    func partitionIndex(where predicate: (Element) -> Bool) -> Int {
+        var low = 0
+        var high = count
+        while low < high {
+            let mid = (low + high) / 2
+            if predicate(self[mid]) { high = mid } else { low = mid + 1 }
+        }
+        return low
     }
 }

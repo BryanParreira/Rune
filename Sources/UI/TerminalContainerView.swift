@@ -34,12 +34,6 @@ final class TerminalContainerView: NSView {
         didSet { if paneHeight != oldValue { layoutTerminal() } }
     }
 
-    /// While set, the terminal is sized to the visible area instead (SwiftTerm's find bar hangs
-    /// from the terminal's top edge, which must then be on screen).
-    var keepsTopVisible = false {
-        didSet { if keepsTopVisible != oldValue { layoutTerminal() } }
-    }
-
     /// How far below its row grid the terminal is drawn, in points (less than a row): the
     /// part of a trackpad scroll that doesn't add up to a whole line yet, so scrolling glides
     /// instead of jumping a line at a time.
@@ -89,7 +83,7 @@ final class TerminalContainerView: NSView {
 
     private func layoutTerminal() {
         let visibleHeight = max(0, bounds.height - padding.top - padding.bottom)
-        let stableHeight = keepsTopVisible ? 0 : paneHeight - padding.top - padding.bottom
+        let stableHeight = paneHeight - padding.top - padding.bottom
         let size = NSSize(
             width: max(0, bounds.width - padding.left - padding.right),
             height: max(visibleHeight, stableHeight)

@@ -313,6 +313,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         terminalView.copyHandler = { [weak self] selected in self?.copySelection(selected) ?? false }
         terminalView.onPlainClick = { [weak self] point, extend in self?.clickedOutput(atTerminalPoint: point, extend: extend) }
         terminalView.smoothScroll = { [weak self] event in self?.smoothScroll(event) ?? false }
+        wireFinder()
         terminalView.canCopyWithoutSelection = { [weak self] in self?.canCopySelectedBlock ?? false }
         terminalView.outputFilter = { [weak self] slice in self?.filterOutput(slice) ?? slice }
         installOSCHandlers()
@@ -782,6 +783,49 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             selectBlock(nil)
         } else {
             selectBlock(id, extend: extend)
+        }
+    }
+
+    // MARK: - Find
+
+    private func wireFinder() {
+        let finder = view.finder
+        finder.rows = { [weak self] blockOnly in self?.searchableRows(selectedBlockOnly: blockOnly) ?? [] }
+        finder.selectedBlockExists = { [weak self] in self?.selectedBlockID.flatMap { self?.tracker.block(id: $0) } != nil }
+        finder.onReveal = { [weak self] match in
+            guard let self else { return }
+            self.scrollToTop(row: max(0, match.row - self.terminalView.getTerminal().rows / 3))
+        }
+        finder.onChange = { [weak self] in self?.view.overlay.needsDisplay = true }
+        finder.onClose = { [weak self] in
+            self?.view.layoutFindBar()
+            self?.view.focusPreferredResponder()
+        }
+    }
+
+    /// ⌘F, ⌘G, ⇧⌘G in this pane.
+    func find(_ action: NSTextFinder.Action) {
+        let finder = view.finder
+        switch action {
+        case .nextMatch where finder.isOpen: finder.step(older: true)
+        case .previousMatch where finder.isOpen: finder.step(older: false)
+        default:
+            finder.open()
+            view.layoutFindBar()
+        }
+    }
+
+    /// Every row of output (or just the selected block's), with its text.
+    private func searchableRows(selectedBlockOnly: Bool) -> [(row: Int, text: String)] {
+        let terminal = terminalView.getTerminal()
+        let geometry = geometry
+        var range = geometry.linesTrimmed..<(geometry.linesTrimmed + geometry.lineCount)
+        if selectedBlockOnly, let block = selectedBlockID.flatMap(tracker.block(id:)) {
+            let last = block.lastRow(currentRow: geometry.cursorPosition.row)
+            range = max(range.lowerBound, block.commandRow)..<min(range.upperBound, last + 1)
+        }
+        return range.compactMap { row in
+            terminal.getScrollInvariantLine(row: row).map { (row, $0.translateToString(trimRight: true)) }
         }
     }
 
@@ -1490,15 +1534,9 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         }
         // SwiftTerm's find bar hangs from the terminal's top edge: keep that edge near the top
         // of the pane while it's open.
-        let findBar = isFindBarVisible
-        if findBar { hidden = min(hidden, 2) }
-        view.terminalContainer.keepsTopVisible = findBar
         view.terminalContainer.hiddenBottomRows = hidden
     }
 
-    private var isFindBarVisible: Bool {
-        terminalView.subviews.contains { !$0.isHidden && String(describing: type(of: $0)) == "TerminalFindBarView" }
-    }
 
     /// Keystrokes that reach the terminal view while the editor owns input are redirected
     /// to the editor (e.g. the user clicked the output to select text, then kept typing).
@@ -1663,6 +1701,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
 
     private func handleDataReceived() {
         if case .watching = remote { checkForRemotePrompt() }
+        view.finder.outputChanged()
         view.blocksDidChange()
         let columns = terminalView.getTerminal().cols
         if columns != lastColumns {

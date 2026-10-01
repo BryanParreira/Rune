@@ -357,6 +357,16 @@ enum DebugDriver {
                 let menu = session.view.inputArea.completionMenu
                 print("MENU open=\(menu.isOpen) selected=\(menu.selected) items=\(menu.items.prefix(6).map(\.name)) count=\(menu.items.count) text=<\(session.view.inputArea.editor.string)>")
                 fflush(stdout)
+            case let query where query.hasPrefix("@findQuery:"):
+                session.view.finder.query = String(query.dropFirst(11))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    let f = session.view.finder
+                    print("FIND open=\(f.isOpen) matches=\(f.matches.count) current=\(f.current.map(String.init) ?? "nil") rows=\(f.matches.prefix(4).map(\.row))")
+                    fflush(stdout)
+                }
+            case "@findOlder":
+                session.find(.nextMatch)
+                print("FIND current=\(session.view.finder.current.map(String.init) ?? "nil")"); fflush(stdout)
             case "@frame":
                 if let window = session.view.window {
                     print("FRAME window=\(window.frame.size) content=\(window.contentView?.frame.size ?? .zero)")
