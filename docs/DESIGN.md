@@ -46,6 +46,12 @@ Warp; its app code is AGPL-3.0, and Rune (proprietary) contains none of it.
 - A block counts as failed for non-zero exit, **except 130 (Ctrl-C) and 141 (SIGPIPE)**.
 - Running commands show a live duration, repainted every 1s.
 - Alternate-screen apps (vim, htop, less) take the whole pane; the input area hides.
+- The PTY is sized from the whole pane, never from the space the input area leaves. The editor
+  growing, completion lists, the welcome panel and the AI card cover the terminal's top rows
+  (output is bottom-anchored) instead of resizing it: no SIGWINCH, reflow or prompt redraw while
+  typing, and opening vim needs no resize.
+- Block chrome (backgrounds, headers, sticky header) redraws in the same frame as scrolled text,
+  coalesced to the display's refresh rate; the scroll indicator fades with Core Animation.
 - Between command start and finish, keystrokes go to the program (passwords, REPLs, Ctrl-C).
 - Empty Enter in the editor does nothing (no empty blocks).
 

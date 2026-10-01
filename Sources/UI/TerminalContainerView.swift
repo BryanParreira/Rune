@@ -25,6 +25,24 @@ final class TerminalContainerView: NSView {
         didSet { if hiddenBottomRows != oldValue { layoutTerminal() } }
     }
 
+    /// Height of the whole pane. The terminal is sized from it, not from the space left over
+    /// by the input area, welcome panel or AI card, so those can grow and shrink (a completion
+    /// list, a second editor line) without resizing the PTY: no SIGWINCH, no reflow, no prompt
+    /// redraw. The terminal stays anchored to the bottom and the chrome covers its top rows,
+    /// which hold older output (or the blank padding a new session starts with).
+    var paneHeight: CGFloat = 0 {
+        didSet { if paneHeight != oldValue { layoutTerminal() } }
+    }
+
+    /// While set, the terminal is sized to the visible area instead (SwiftTerm's find bar hangs
+    /// from the terminal's top edge, which must then be on screen).
+    var keepsTopVisible = false {
+        didSet { if keepsTopVisible != oldValue { layoutTerminal() } }
+    }
+
+    /// Rows at the top of the terminal's viewport hidden above this view's edge.
+    private(set) var coveredTopRows = 0
+
     var background: NSColor = .black {
         didSet { layer?.backgroundColor = background.cgColor }
     }
@@ -63,23 +81,28 @@ final class TerminalContainerView: NSView {
     }
 
     private func layoutTerminal() {
+        let visibleHeight = max(0, bounds.height - padding.top - padding.bottom)
+        let stableHeight = keepsTopVisible ? 0 : paneHeight - padding.top - padding.bottom
         let size = NSSize(
             width: max(0, bounds.width - padding.left - padding.right),
-            height: max(0, bounds.height - padding.top - padding.bottom)
+            height: max(visibleHeight, stableHeight)
         )
         // Size first: the terminal recomputes its row count from it.
         if terminalView.frame.size != size {
             terminalView.setFrameSize(size)
         }
-        var origin = NSPoint(x: padding.left, y: padding.top)
+        // Bottom-anchored: when the terminal is taller than the visible area, its top rows
+        // slide up under the pane's top edge.
+        var origin = NSPoint(x: padding.left, y: padding.top + visibleHeight - size.height)
+        let rows = max(1, terminalView.getTerminal().rows)
+        let cellHeight = terminalView.getOptimalFrameSize().height / CGFloat(rows)
         if hiddenBottomRows > 0 {
             // Shift down by the hidden rows plus the unused sliver below the last row, keeping
             // the height (and so the row count) unchanged.
-            let rows = max(1, terminalView.getTerminal().rows)
-            let cellHeight = terminalView.getOptimalFrameSize().height / CGFloat(rows)
             let unused = max(0, size.height - cellHeight * CGFloat(rows))
             origin.y += CGFloat(min(hiddenBottomRows, rows - 1)) * cellHeight + unused
         }
+        coveredTopRows = origin.y < 0 && cellHeight > 0 ? min(rows - 1, Int(ceil(-origin.y / cellHeight - 0.01))) : 0
         if terminalView.frame.origin != origin {
             terminalView.setFrameOrigin(origin)
             // Block backgrounds and headers are drawn relative to the terminal's position.

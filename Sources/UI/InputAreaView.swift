@@ -123,7 +123,7 @@ final class InputAreaView: NSView, NSTextViewDelegate {
         editor.alphaValue = running ? 0.45 : 1
         editor.placeholder = running ? "Running \(command.map { "“\($0)”" } ?? "command")…"
             : (aiConversationOpen ? "Ask a follow-up (⌘↵) or type a command…" : CommandTextView.defaultPlaceholder)
-        chipsModel.hint = currentHint
+        setHint(currentHint)
         editor.needsDisplay = true
     }
 
@@ -168,11 +168,15 @@ final class InputAreaView: NSView, NSTextViewDelegate {
     var aiConversationOpen = false {
         didSet {
             guard oldValue != aiConversationOpen else { return }
-            chipsModel.hint = currentHint
+            setHint(currentHint)
             if !running {
                 editor.placeholder = aiConversationOpen ? "Ask a follow-up (⌘↵) or type a command…" : CommandTextView.defaultPlaceholder
             }
         }
+    }
+
+    private func setHint(_ hint: InputChromeModel.Hint) {
+        if chipsModel.hint != hint { chipsModel.hint = hint }
     }
 
     private var currentHint: InputChromeModel.Hint {
@@ -190,8 +194,9 @@ final class InputAreaView: NSView, NSTextViewDelegate {
     }
 
     func textDidChange(_ notification: Notification) {
-        chipsModel.completions = []
-        chipsModel.hint = currentHint
+        // Only publish real changes: each write re-renders the SwiftUI chrome and re-measures it.
+        if !chipsModel.completions.isEmpty { chipsModel.completions = [] }
+        setHint(currentHint)
         sessionView?.session?.resetHistoryNavigation()
         refreshHighlighting()
         updateSuggestion()
@@ -289,7 +294,7 @@ extension InputAreaView: CommandTextViewDelegate {
         refreshHighlighting()
         editor.suggestionSuffix = nil
         editor.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
-        chipsModel.hint = Self.hint(for: text)
+        setHint(Self.hint(for: text))
         updateEditorHeight()
     }
 

@@ -14,7 +14,9 @@ final class BlockOverlayView: NSView {
     private let actionBar = BlockActionBar()
 
     // Scroll indicator: thin thumb on the right that appears while scrolling and fades out.
-    private var indicatorAlpha: CGFloat = 0
+    // Its own layer, so Core Animation runs the fade instead of redrawing the overlay.
+    private let indicatorLayer = CALayer()
+    private var indicatorShown = false
     private var indicatorFade: Timer?
     private var draggingThumb = false
     private var dragOffset: CGFloat = 0
@@ -24,6 +26,10 @@ final class BlockOverlayView: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        wantsLayer = true
+        indicatorLayer.opacity = 0
+        indicatorLayer.zPosition = 1
+        layer?.addSublayer(indicatorLayer)
         actionBar.isHidden = true
         addSubview(actionBar)
         actionBar.onAction = { [weak self] action in self?.perform(action) }
@@ -75,30 +81,58 @@ final class BlockOverlayView: NSView {
 
     func flashScrollIndicator() {
         guard indicatorTrack() != nil else { return }
-        indicatorAlpha = 1
-        needsDisplay = true
+        showIndicator()
         scheduleIndicatorFade()
+    }
+
+    private func showIndicator() {
+        indicatorFade?.invalidate()
+        guard !indicatorShown else { return }
+        indicatorShown = true
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        indicatorLayer.removeAnimation(forKey: "fade")
+        indicatorLayer.opacity = 1
+        CATransaction.commit()
+        updateScrollIndicator()
     }
 
     private func scheduleIndicatorFade() {
         indicatorFade?.invalidate()
         guard !draggingThumb, !hoveringIndicator else { return }
         indicatorFade = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
-            self?.indicatorFade = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] timer in
-                guard let self else { timer.invalidate(); return }
-                self.indicatorAlpha -= 0.1
-                if self.indicatorAlpha <= 0 { self.indicatorAlpha = 0; timer.invalidate() }
-                self.needsDisplay = true
-            }
+            guard let self else { return }
+            self.indicatorShown = false
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = self.indicatorLayer.presentation()?.opacity ?? self.indicatorLayer.opacity
+            fade.toValue = 0
+            fade.duration = 0.3
+            fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            self.indicatorLayer.opacity = 0
+            CATransaction.commit()
+            self.indicatorLayer.add(fade, forKey: "fade")
         }
     }
 
-    private func drawScrollIndicator(palette: ChromePalette) {
-        guard indicatorAlpha > 0, let track = indicatorTrack(), let thumb = thumbRect(in: track) else { return }
+    /// Moves the thumb to the current scroll position (no implicit animation, so it tracks
+    /// the text exactly); widening on hover eases in.
+    private func updateScrollIndicator() {
+        guard let palette, indicatorShown || indicatorLayer.animation(forKey: "fade") != nil,
+              let track = indicatorTrack(), let thumb = thumbRect(in: track)
+        else { return }
         let wide = draggingThumb || hoveringIndicator
         let rect = wide ? thumb.insetBy(dx: -1.5, dy: 0) : thumb.insetBy(dx: 0.5, dy: 0)
-        palette.foreground.withAlphaComponent((wide ? 0.45 : 0.28) * indicatorAlpha).setFill()
-        NSBezierPath(roundedRect: rect, xRadius: rect.width / 2, yRadius: rect.width / 2).fill()
+        let color = palette.foreground.withAlphaComponent(wide ? 0.45 : 0.28).cgColor
+        let widthChanged = abs(indicatorLayer.frame.width - rect.width) > 0.1
+        CATransaction.begin()
+        CATransaction.setDisableActions(!widthChanged)
+        CATransaction.setAnimationDuration(0.12)
+        indicatorLayer.frame = rect
+        indicatorLayer.cornerRadius = rect.width / 2
+        indicatorLayer.backgroundColor = color
+        CATransaction.commit()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -111,14 +145,14 @@ final class BlockOverlayView: NSView {
         }
         if let sticky = stickyHeader, sticky.rect.contains(location), let session = sessionView?.session {
             // Jump back to where this command's output starts.
-            session.terminalView.scrollTo(row: max(0, sticky.block.headerRow - session.geometry.linesTrimmed))
+            session.scrollToTop(row: sticky.block.headerRow)
             session.view.blocksDidChange()
             return
         }
         guard let track = indicatorTrack(), let thumb = thumbRect(in: track), let session = sessionView?.session else { return }
         let point = convert(event.locationInWindow, from: nil)
         draggingThumb = true
-        indicatorAlpha = 1
+        showIndicator()
         if thumb.insetBy(dx: -6, dy: 0).contains(point) {
             dragOffset = point.y - thumb.minY
         } else {
@@ -187,8 +221,7 @@ final class BlockOverlayView: NSView {
         guard over != hoveringIndicator else { return }
         hoveringIndicator = over
         if over {
-            indicatorFade?.invalidate()
-            indicatorAlpha = 1
+            showIndicator()
         } else {
             scheduleIndicatorFade()
         }
@@ -238,7 +271,8 @@ final class BlockOverlayView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let palette, let session = sessionView?.session else { return }
-        let terminalFrame = session.terminalView.frame
+        // Only the part of the terminal on screen: its top rows may sit above this view.
+        let terminalFrame = session.terminalView.frame.intersection(bounds)
         let clip = NSRect(x: 0, y: terminalFrame.minY, width: bounds.width, height: terminalFrame.height)
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: clip).addClip()
@@ -287,7 +321,7 @@ final class BlockOverlayView: NSView {
         if let sticky = stickyHeader {
             drawStickyHeader(sticky, palette: palette, font: contextFont, session: session)
         }
-        drawScrollIndicator(palette: palette)
+        updateScrollIndicator()
     }
 
     // MARK: - Secrets
@@ -446,7 +480,7 @@ final class BlockOverlayView: NSView {
         actionBar.showsExplain = hovered.block.isFailed && AIService.shared.isEnabled
         let size = actionBar.fittingSize
         let right = bounds.width - session.terminalView.frame.minX + 6
-        let y = max(hovered.headerRect.minY, session.terminalView.frame.minY)
+        let y = max(hovered.headerRect.minY, session.terminalView.frame.minY, bounds.minY)
         actionBar.frame = NSRect(x: right - size.width, y: y + (hovered.headerRect.height - size.height) / 2,
                                  width: size.width, height: size.height)
         actionBar.isHidden = false

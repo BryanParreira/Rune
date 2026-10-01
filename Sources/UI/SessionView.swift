@@ -103,9 +103,16 @@ final class SessionView: NSView {
         fatalError("init(coder:) is not supported")
     }
 
+    deinit {
+        chromeLink?.invalidate()
+    }
+
     override var isFlipped: Bool { true }
 
     override func layout() {
+        // Before the stack resizes the container, so the terminal's size (and the PTY's) only
+        // changes when the pane itself does.
+        terminalContainer.paneHeight = bounds.height
         super.layout()
         updateAILayout()
     }
@@ -141,20 +148,33 @@ final class SessionView: NSView {
         blocksDidChange()
     }
 
-    private var blockRefreshPending = false
+    /// Fires on the display's refresh (60/120 Hz) while block chrome needs refreshing, then
+    /// pauses itself.
+    private var chromeLink: CADisplayLink?
 
-    /// Coalesces overlay updates: heavy output calls this for every chunk, but the overlay
-    /// only needs to be recomputed once per frame (~30 fps is plenty for chrome).
+    /// Coalesces overlay updates: heavy output calls this for every chunk, but block chrome is
+    /// recomputed at most once per display frame, in step with the text instead of trailing it.
     func blocksDidChange() {
-        guard !blockRefreshPending else { return }
-        blockRefreshPending = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 30) { [weak self] in
-            guard let self else { return }
-            self.blockRefreshPending = false
-            self.session?.updateBottomTrim()
-            self.overlay.needsDisplay = true
-            self.overlay.refreshHover()
+        if chromeLink == nil {
+            let link = displayLink(target: WeakDisplayTarget(self), selector: #selector(WeakDisplayTarget.tick(_:)))
+            link.add(to: .main, forMode: .common)
+            chromeLink = link
         }
+        chromeLink?.isPaused = false
+    }
+
+    fileprivate func refreshBlockChrome() {
+        chromeLink?.isPaused = true
+        session?.updateBottomTrim()
+        overlay.needsDisplay = true
+        overlay.refreshHover()
+    }
+
+    /// The viewport moved: redraw the chrome in the same pass as the scrolled text so block
+    /// backgrounds and headers never lag behind it.
+    func viewportDidScroll() {
+        overlay.needsDisplay = true
+        blocksDidChange()
     }
 
     func contextDidChange() {
@@ -264,5 +284,19 @@ final class SessionView: NSView {
     /// Bytes typed into the terminal view while the editor owns input.
     func redirectToEditor(_ data: ArraySlice<UInt8>) {
         inputArea.receiveRedirected(data)
+    }
+}
+
+/// A display link retains its target; this keeps it from retaining the session view.
+private final class WeakDisplayTarget: NSObject {
+    weak var view: SessionView?
+
+    init(_ view: SessionView) {
+        self.view = view
+    }
+
+    @objc func tick(_ link: CADisplayLink) {
+        guard let view else { return link.invalidate() }
+        view.refreshBlockChrome()
     }
 }

@@ -563,8 +563,14 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         }
         let block = blocks[index]
         selectedBlockID = block.id
-        terminalView.scrollTo(row: max(0, block.headerRow - geometry.linesTrimmed))
+        scrollToTop(row: block.headerRow)
         view.blocksDidChange()
+    }
+
+    /// Scrolls so a (scroll-invariant) row is the first one on screen, below any rows the
+    /// input area covers.
+    func scrollToTop(row: Int) {
+        terminalView.scrollTo(row: max(0, row - geometry.linesTrimmed - view.terminalContainer.coveredTopRows))
     }
 
     func clearBlockSelection() {
@@ -898,7 +904,9 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         }
         // SwiftTerm's find bar hangs from the terminal's top edge: keep that edge near the top
         // of the pane while it's open.
-        if isFindBarVisible { hidden = min(hidden, 2) }
+        let findBar = isFindBarVisible
+        if findBar { hidden = min(hidden, 2) }
+        view.terminalContainer.keepsTopVisible = findBar
         view.terminalContainer.hiddenBottomRows = hidden
     }
 
@@ -920,21 +928,11 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
 
     // MARK: - Output
 
-    private var scrollUpdatePending = false
-    private var lastScrollPosition = 1.0
-
-    /// Called for every line that scrolls by, so the work is coalesced to once per frame. The
-    /// scroll indicator only appears when the view isn't simply following new output.
+    /// Called for every line that scrolls by. Chrome is redrawn with the text (coalesced per
+    /// frame); the scroll indicator only appears when the view isn't simply following output.
     private func viewportDidScroll(to position: Double) {
-        lastScrollPosition = position
-        guard !scrollUpdatePending else { return }
-        scrollUpdatePending = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { [weak self] in
-            guard let self else { return }
-            self.scrollUpdatePending = false
-            self.view.blocksDidChange()
-            if self.lastScrollPosition < 0.999 { self.view.overlay.flashScrollIndicator() }
-        }
+        view.viewportDidScroll()
+        if position < 0.999 { view.overlay.flashScrollIndicator() }
     }
 
     // MARK: - Remote shells
