@@ -7,6 +7,7 @@ final class InputAreaView: NSView, NSTextViewDelegate {
     weak var sessionView: SessionView?
 
     private let chipsModel = InputChromeModel()
+    let completionMenu = CompletionMenuModel()
     private let chipsHost: NSHostingView<ContextChipsRow>
     private let hintHost: NSHostingView<InputHintLine>
     private let scrollView = NSScrollView()
@@ -106,6 +107,8 @@ final class InputAreaView: NSView, NSTextViewDelegate {
         chipsModel.palette = palette
         chipsModel.monoFontSize = CGFloat(config.fontSize)
         editor.configure(font: snapshot.font, palette: palette)
+        completionMenu.palette = palette
+        completionMenu.fontSize = CGFloat(config.fontSize)
         editor.optionAsMeta = config.optionAsMeta
         refreshHighlighting()
         updateEditorHeight()
@@ -182,6 +185,7 @@ final class InputAreaView: NSView, NSTextViewDelegate {
 
     private var currentHint: InputChromeModel.Hint {
         if running { return .running }
+        if completionMenu.isOpen { return .menu }
         if aiConversationOpen { return .aiOpen }
         return Self.hint(for: editor.string)
     }
@@ -196,8 +200,8 @@ final class InputAreaView: NSView, NSTextViewDelegate {
 
     func textDidChange(_ notification: Notification) {
         // Only publish real changes: each write re-renders the SwiftUI chrome and re-measures it.
-        if !chipsModel.completions.isEmpty { chipsModel.completions = [] }
         setHint(currentHint)
+        refreshCompletionMenu()
         sessionView?.session?.resetHistoryNavigation()
         refreshHighlighting()
         updateSuggestion()
@@ -239,7 +243,8 @@ final class InputAreaView: NSView, NSTextViewDelegate {
     private func updateSuggestion() {
         let text = editor.string
         let atEnd = editor.selectedRange().length == 0 && editor.selectedRange().location == (text as NSString).length
-        guard atEnd, !running, !text.contains("\n"),
+        // The menu shows the choices; a grey guess behind it would only compete.
+        guard atEnd, !running, !text.contains("\n"), !completionMenu.isOpen,
               let match = HistoryStore.shared.history.suggestion(for: text)
         else {
             editor.suggestionSuffix = nil
@@ -267,9 +272,73 @@ final class InputAreaView: NSView, NSTextViewDelegate {
         let command = editor.string
         guard !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         session.submit(command)
+        closeCompletionMenu()
         editor.string = ""
-        chipsModel.completions = []
         textDidChange(Notification(name: NSText.didChangeNotification))
+    }
+
+    // MARK: - Completion menu
+
+    /// Completions for the word at the caret: subcommands and flags of known tools first, then
+    /// files and folders.
+    private func completionCandidates() -> (range: NSRange, items: [CompletionMenuModel.Item])? {
+        guard let session = sessionView?.session else { return nil }
+        let text = editor.string
+        let cursor = editor.selectedRange().location
+        if let smart = CommandCompletion.complete(text: text, cursor: cursor, cwd: session.currentDirectory) {
+            let items = smart.suggestions.enumerated().map { index, suggestion in
+                CompletionMenuModel.Item(id: index, name: suggestion.name, detail: suggestion.description,
+                                         insertion: suggestion.name + (suggestion.name.hasSuffix("=") || suggestion.name.hasSuffix("/") ? "" : " "))
+            }
+            return (smart.range, items)
+        }
+        guard let result = session.complete(text: text, cursor: cursor) else { return nil }
+        let word = (text as NSString).substring(with: result.range)
+        let items = result.candidates.enumerated().map { index, name in
+            CompletionMenuModel.Item(id: index, name: name, detail: nil, insertion: PathCompletion.insertion(for: name, replacing: word))
+        }
+        return (result.range, items)
+    }
+
+    private func openCompletionMenu(range: NSRange, items: [CompletionMenuModel.Item]) {
+        completionMenu.range = range
+        completionMenu.selected = 0
+        completionMenu.items = items
+        editor.suggestionSuffix = nil
+        setHint(currentHint)
+        sessionView?.layoutCompletionMenu()
+    }
+
+    func closeCompletionMenu() {
+        guard completionMenu.isOpen else { return }
+        completionMenu.items = []
+        setHint(currentHint)
+        sessionView?.layoutCompletionMenu()
+    }
+
+    /// Typing while the menu is open narrows it; it closes when nothing matches any more.
+    private func refreshCompletionMenu() {
+        guard completionMenu.isOpen else { return }
+        guard let fresh = completionCandidates(), !fresh.items.isEmpty else { return closeCompletionMenu() }
+        let previous = completionMenu.items.indices.contains(completionMenu.selected) ? completionMenu.items[completionMenu.selected].name : nil
+        completionMenu.range = fresh.range
+        completionMenu.items = fresh.items
+        completionMenu.selected = fresh.items.firstIndex { $0.name == previous } ?? 0
+        sessionView?.layoutCompletionMenu()
+    }
+
+    /// Puts the item in place of the word; picking a folder carries on completing inside it.
+    func acceptCompletion(_ index: Int? = nil) {
+        let index = index ?? completionMenu.selected
+        guard completionMenu.items.indices.contains(index) else { return }
+        let item = completionMenu.items[index]
+        let range = completionMenu.range
+        closeCompletionMenu()
+        guard NSMaxRange(range) <= (editor.string as NSString).length else { return }
+        editor.insertText(item.insertion, replacementRange: range)
+        if item.insertion.hasSuffix("/"), let next = completionCandidates(), next.items.count > 1 {
+            openCompletionMenu(range: next.range, items: next.items)
+        }
     }
 }
 
@@ -305,31 +374,56 @@ extension InputAreaView: CommandTextViewDelegate {
     }
 
     func commandTextViewComplete(_ view: CommandTextView) {
-        guard let session = sessionView?.session else { return }
         if editor.string.isEmpty, let correction = chipsModel.correction {
             chipsModel.correction = nil
             setText(correction)
             return
         }
-        let cursor = editor.selectedRange().location
-        // Subcommands, flags and project values for known tools first, then files and folders.
-        if let smart = CommandCompletion.complete(text: editor.string, cursor: cursor, cwd: session.currentDirectory) {
-            let current = (editor.string as NSString).substring(with: smart.range)
-            if smart.replacement != current {
-                editor.insertText(smart.replacement, replacementRange: smart.range)
-            }
-            chipsModel.completions = smart.isUnique ? [] : smart.suggestions.map { CompletionItem(name: $0.name, detail: $0.description) }
-            return
-        }
-        guard let result = session.complete(text: editor.string, cursor: cursor) else {
+        guard let first = completionCandidates(), !first.items.isEmpty else {
             NSSound.beep()
             return
         }
-        let current = (editor.string as NSString).substring(with: result.range)
-        if result.replacement != current {
-            editor.insertText(result.replacement, replacementRange: result.range)
+        if first.items.count == 1 {
+            openCompletionMenu(range: first.range, items: first.items)
+            acceptCompletion(0)
+            return
         }
-        chipsModel.completions = result.isUnique ? [] : result.candidates.map { CompletionItem(name: $0, detail: nil) }
+        // Like a shell: fill in what all the matches share, then show them.
+        let current = (editor.string as NSString).substring(with: first.range)
+        let shared = Self.sharedInsertion(first.items.map(\.insertion))
+        if shared.count > current.count, shared.lowercased().hasPrefix(current.lowercased()) {
+            editor.insertText(shared, replacementRange: first.range)
+        }
+        if let after = completionCandidates(), after.items.count > 1 {
+            openCompletionMenu(range: after.range, items: after.items)
+        }
+    }
+
+    /// The longest common start of the insertions (case-insensitive), without a trailing space.
+    private static func sharedInsertion(_ values: [String]) -> String {
+        guard var prefix = values.first else { return "" }
+        for value in values.dropFirst() {
+            while !value.lowercased().hasPrefix(prefix.lowercased()) { prefix.removeLast() }
+        }
+        return prefix.hasSuffix(" ") ? String(prefix.dropLast()) : prefix
+    }
+
+    func commandTextView(_ view: CommandTextView, menuKey keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        guard completionMenu.isOpen else { return false }
+        let plain = modifiers.subtracting([.numericPad, .function, .capsLock]).isEmpty
+        switch keyCode {
+        case 126 where plain: completionMenu.move(-1)
+        case 125 where plain: completionMenu.move(1)
+        case 48 where plain, 36 where plain, 76 where plain: acceptCompletion()
+        case 48 where modifiers.contains(.shift): completionMenu.move(-1)
+        case 53: closeCompletionMenu()
+        case 123, 124:
+            closeCompletionMenu()
+            return false
+        default:
+            return false
+        }
+        return true
     }
 
     func commandTextViewCopyWithoutSelection(_ view: CommandTextView) -> Bool {
@@ -383,8 +477,8 @@ extension InputAreaView: CommandTextViewDelegate {
             conversation.isActive ? conversation.stop() : conversation.dismiss()
             return
         }
-        if !chipsModel.completions.isEmpty {
-            chipsModel.completions = []
+        if completionMenu.isOpen {
+            closeCompletionMenu()
         } else {
             sessionView?.session?.clearBlockSelection()
         }
@@ -408,21 +502,15 @@ extension InputAreaView: CommandTextViewDelegate {
 // MARK: - SwiftUI chrome
 
 final class InputChromeModel: ObservableObject {
-    enum Hint { case idle, typing, question, running, aiOpen }
+    enum Hint { case idle, typing, question, running, aiOpen, menu }
 
     @Published var directory = "~"
     @Published var branch: String?
     @Published var palette = ChromePalette(theme: .runeDark)
     @Published var monoFontSize: CGFloat = 13
     @Published var hint: Hint = .idle
-    @Published var completions: [CompletionItem] = []
     /// A fix for the command that just failed (Tab on an empty input fills it in).
     @Published var correction: String?
-}
-
-struct CompletionItem: Equatable {
-    let name: String
-    let detail: String?
 }
 
 struct ContextChipsRow: View {
@@ -505,52 +593,32 @@ struct InputHintLine: View {
 
     var body: some View {
         Group {
-            if model.completions.contains(where: { $0.detail != nil }) {
-                // Subcommands and flags: one per line with what they do.
-                VStack(alignment: .leading, spacing: 3) {
-                    let width = min(24, model.completions.prefix(8).map(\.name.count).max() ?? 0)
-                    ForEach(Array(model.completions.prefix(8).enumerated()), id: \.offset) { _, item in
-                        HStack(spacing: 0) {
-                            Text(item.name.padding(toLength: max(width, item.name.count) + 3, withPad: " ", startingAt: 0))
-                                .foregroundColor(Color(nsColor: model.palette.text))
-                            Text(item.detail ?? "")
-                                .foregroundColor(Color(nsColor: model.palette.hint))
-                        }
-                    }
-                    if model.completions.count > 8 {
-                        Text("+\(model.completions.count - 8) more · keep typing to narrow")
-                            .foregroundColor(Color(nsColor: model.palette.hint))
-                    }
+            switch model.hint {
+            case .idle where model.correction != nil:
+                HStack(spacing: 6) {
+                    Text("Did you mean")
+                        .foregroundColor(Color(nsColor: model.palette.hint))
+                    Text(model.correction ?? "")
+                        .foregroundColor(Color(nsColor: model.palette.text))
+                        .highlighterMark(model.palette.highlight)
+                    Text("?   ⇥ to use it")
+                        .foregroundColor(Color(nsColor: model.palette.hint))
                 }
-            } else if !model.completions.isEmpty {
-                Text(model.completions.prefix(40).map(\.name).joined(separator: "   "))
-                    .foregroundColor(Color(nsColor: model.palette.secondary))
-            } else {
-                switch model.hint {
-                case .idle where model.correction != nil:
-                    HStack(spacing: 6) {
-                        Text("Did you mean")
-                            .foregroundColor(Color(nsColor: model.palette.hint))
-                        Text(model.correction ?? "")
-                            .foregroundColor(Color(nsColor: model.palette.text))
-                            .highlighterMark(model.palette.highlight)
-                        Text("?   ⇥ to use it")
-                            .foregroundColor(Color(nsColor: model.palette.hint))
-                    }
-                case .idle:
-                    hint(ai.isEnabled ? "↑ history   ⌘↵ ask AI   ⇧↵ new line   ⇥ complete   ⌘↑ blocks"
-                                      : "↑ history   ⇧↵ new line   ⇥ complete   ⌘↑ blocks")
-                case .typing:
-                    hint(ai.isEnabled ? "↵ run   ⌘↵ ask AI   → accept suggestion   ⇧↵ new line"
-                                      : "↵ run   → accept suggestion   ⇧↵ new line   ⇥ complete")
-                case .question:
-                    Text("Looks like a question  ·  ⌘↵ ask AI  ·  ↵ runs it as a command")
-                        .foregroundColor(Color(nsColor: model.palette.accent))
-                case .running:
-                    hint("⌃C interrupt   keystrokes go to the running program")
-                case .aiOpen:
-                    hint("⌘↵ follow up   ↵ run as command   esc close")
-                }
+            case .idle:
+                hint(ai.isEnabled ? "↑ history   ⌘↵ ask AI   ⇧↵ new line   ⇥ complete   ⌘↑ blocks"
+                                  : "↑ history   ⇧↵ new line   ⇥ complete   ⌘↑ blocks")
+            case .typing:
+                hint(ai.isEnabled ? "↵ run   ⌘↵ ask AI   → accept suggestion   ⇧↵ new line"
+                                  : "↵ run   → accept suggestion   ⇧↵ new line   ⇥ complete")
+            case .question:
+                Text("Looks like a question  ·  ⌘↵ ask AI  ·  ↵ runs it as a command")
+                    .foregroundColor(Color(nsColor: model.palette.accent))
+            case .running:
+                hint("⌃C interrupt   keystrokes go to the running program")
+            case .aiOpen:
+                hint("⌘↵ follow up   ↵ run as command   esc close")
+            case .menu:
+                hint("↑↓ choose   ⇥ ↵ insert   esc close   keep typing to narrow")
             }
         }
         .font(.system(size: max(9, model.monoFontSize - 2), design: .monospaced))

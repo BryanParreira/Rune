@@ -27,6 +27,16 @@ final class SessionView: NSView {
         return host
     }()
     private var filterHost: NSHostingView<BlockFilterView>?
+    private lazy var completionHost: NSHostingView<CompletionMenuView> = {
+        let host = NSHostingView(rootView: CompletionMenuView(model: inputArea.completionMenu) { [weak self] index in
+            self?.inputArea.acceptCompletion(index)
+        })
+        host.sizingOptions = []
+        host.safeAreaRegions = []
+        host.isHidden = true
+        addSubview(host, positioned: .above, relativeTo: nil)
+        return host
+    }()
     private var cancellables: Set<AnyCancellable> = []
     private var snapshot: ConfigSnapshot?
 
@@ -283,6 +293,29 @@ final class SessionView: NSView {
         filterHost?.removeFromSuperview()
         filterHost = nil
         focusPreferredResponder()
+    }
+
+    /// Places the completion menu just above the input, under the caret, over the output
+    /// (nothing moves or resizes), or hides it.
+    func layoutCompletionMenu() {
+        let menu = inputArea.completionMenu
+        guard menu.isOpen, !inputArea.isHidden, let window else {
+            if completionHost.superview != nil { completionHost.isHidden = true }
+            return
+        }
+        let editor = inputArea.editor
+        // The input lives in the stack view, whose coordinates aren't flipped like ours.
+        let input = convert(inputArea.bounds, from: inputArea)
+        var caretX = input.minX + CGFloat(snapshot?.config.paddingX ?? 16)
+        let screenRect = editor.firstRect(forCharacterRange: NSRange(location: menu.range.location, length: 0), actualRange: nil)
+        if screenRect != .zero {
+            caretX = convert(window.convertFromScreen(screenRect), from: nil).minX
+        }
+        let size = NSSize(width: min(menu.width, bounds.width - 16), height: menu.height)
+        let x = min(max(8, caretX - 14), bounds.width - size.width - 8)
+        let y = max(4, input.minY - size.height - 4)
+        completionHost.frame = NSRect(x: x, y: y, width: size.width, height: size.height)
+        completionHost.isHidden = false
     }
 
     /// Bytes typed into the terminal view while the editor owns input.

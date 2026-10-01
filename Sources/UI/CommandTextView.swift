@@ -15,6 +15,8 @@ protocol CommandTextViewDelegate: AnyObject {
     /// ⌘C with no text selected; return false if there's nothing else to copy.
     func commandTextViewCopyWithoutSelection(_ view: CommandTextView) -> Bool
     func commandTextViewCanCopyWithoutSelection(_ view: CommandTextView) -> Bool
+    /// Offered navigation keys first while the completion menu is open; true if handled.
+    func commandTextView(_ view: CommandTextView, menuKey keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool
 }
 
 /// Native multi-line command editor: Enter runs, Shift-Enter inserts a newline,
@@ -124,6 +126,7 @@ final class CommandTextView: NSTextView {
     override func keyDown(with event: NSEvent) {
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let plain = mods.subtracting([.numericPad, .function, .capsLock]).isEmpty
+        if commandDelegate?.commandTextView(self, menuKey: event.keyCode, modifiers: mods) == true { return }
         let key = event.charactersIgnoringModifiers?.lowercased()
         let cyclingLastArgument = lastArgument
         lastArgument = nil

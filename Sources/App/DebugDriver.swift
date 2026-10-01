@@ -353,6 +353,10 @@ enum DebugDriver {
                 }
                 print("KEY \(spec) → <\(editor.string)> caret=\(editor.selectedRange().location)")
                 fflush(stdout)
+            case "@menu":
+                let menu = session.view.inputArea.completionMenu
+                print("MENU open=\(menu.isOpen) selected=\(menu.selected) items=\(menu.items.prefix(6).map(\.name)) count=\(menu.items.count) text=<\(session.view.inputArea.editor.string)>")
+                fflush(stdout)
             case "@frame":
                 if let window = session.view.window {
                     print("FRAME window=\(window.frame.size) content=\(window.contentView?.frame.size ?? .zero)")

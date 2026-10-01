@@ -91,6 +91,15 @@ public enum PathCompletion {
         }
     }
 
+    /// What picking `candidate` (a name from `Result.candidates`) puts in place of `word`, the
+    /// text the result's range covered: the folder part as typed, the escaped name, and a space
+    /// after a file (a folder keeps its "/" so completion can continue inside it).
+    public static func insertion(for candidate: String, replacing word: String) -> String {
+        var folder = ""
+        if let slash = word.lastIndex(of: "/") { folder = String(word[...slash]) }
+        return folder + escape(candidate) + (candidate.hasSuffix("/") ? "" : " ")
+    }
+
     static func escape(_ s: String) -> String {
         var out = ""
         for ch in s {
