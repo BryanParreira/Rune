@@ -408,6 +408,7 @@ enum DebugDriver {
                 print("DUMP screen cursorY=\(t.getCursorLocation().y) rows=\(t.rows) lines=\(g.lineCount) top=\(g.topVisibleRow) mode=\(session.mode)")
                 for b in session.tracker.blocks { print("DUMP block \(b.command) took=\(String(format: "%.2f", b.duration()))s header=\(b.headerRow) out=\(b.outputStartRow) end=\(b.endRow ?? -1) screenTop=\(g.linesTrimmed + g.screenTop)") }
                 print("DUMP running=\(session.runningProgram ?? "nil")")
+                print("DUMP chunks=\(RuneTerminalView.debugChunks) bytes=\(RuneTerminalView.debugBytes)")
                 print("DUMP state=\(c.state) model=\(c.model) context=\(c.contextLabel ?? "-")")
                 print("DUMP earlier=\(c.earlier.map(\.prompt)) prompt=\(c.prompt)")
                 print("DUMP reply<<\(c.reply)>>")

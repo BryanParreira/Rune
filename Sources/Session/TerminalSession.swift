@@ -21,10 +21,72 @@ final class RuneTerminalView: LocalProcessTerminalView {
     /// script this way).
     var outputFilter: ((ArraySlice<UInt8>) -> ArraySlice<UInt8>)?
 
+    /// Set while a chunk of output is parsed: the terminal reports a scroll for every line
+    /// feed, and updating the scroll position (and Rune's chrome) once per chunk is enough.
+    private var feeding = false
+    private var scrolledWhileFeeding = false
+
+    #if DEBUG
+    static var debugChunks = 0
+    static var debugBytes = 0
+    #endif
+
+    /// Output read from the shell but not parsed yet.
+    private var pendingOutput: [UInt8] = []
+    private var flushScheduled = false
+
+    /// A program writing line by line (`seq`, a build log) arrives a few bytes at a time:
+    /// hundreds of thousands of reads a second. Parsing each one separately costs more than
+    /// the parsing itself, so everything that arrives during one pass of the main queue is
+    /// parsed together.
     override func dataReceived(slice: ArraySlice<UInt8>) {
-        let shown = outputFilter?(slice) ?? slice
-        if !shown.isEmpty { super.dataReceived(slice: shown) }
+        #if DEBUG
+        Self.debugChunks += 1
+        Self.debugBytes += slice.count
+        #endif
+        pendingOutput.append(contentsOf: slice)
+        guard !flushScheduled else { return }
+        flushScheduled = true
+        DispatchQueue.main.async { [weak self] in self?.flushOutput() }
+    }
+
+    /// Parses the output waiting to be shown. Called before Rune writes into the terminal
+    /// itself, so nothing lands out of order.
+    func flushOutput() {
+        flushScheduled = false
+        guard !pendingOutput.isEmpty else { return }
+        let bytes = pendingOutput
+        pendingOutput.removeAll(keepingCapacity: true)
+        let shown = outputFilter?(bytes[...]) ?? bytes[...]
+        if !shown.isEmpty {
+            feeding = true
+            super.dataReceived(slice: shown)
+            feeding = false
+            if scrolledWhileFeeding {
+                scrolledWhileFeeding = false
+                super.scrolled(source: getTerminal(), yDisp: getTerminal().buffer.yDisp)
+            }
+        }
         onDataReceived?()
+    }
+
+    /// Writes into the terminal after any output still waiting to be parsed.
+    func feedNow(text: String) {
+        flushOutput()
+        feed(text: text)
+    }
+
+    func feedNow(bytes: ArraySlice<UInt8>) {
+        flushOutput()
+        feed(byteArray: bytes)
+    }
+
+    override func scrolled(source terminal: Terminal, yDisp: Int) {
+        if feeding {
+            scrolledWhileFeeding = true
+            return
+        }
+        super.scrolled(source: terminal, yDisp: yDisp)
     }
 
     override func send(source: TerminalView, data: ArraySlice<UInt8>) {
@@ -321,11 +383,11 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             // Keep the caret hidden while zsh loads; the integration shows it when it's
             // actually needed (at the real prompt, or when a command runs). Without this the
             // caret blinks at the top-left for the second or two a heavy .zshrc takes.
-            terminalView.feed(text: "\u{1b}[?25l")
+            terminalView.feedNow(text: "\u{1b}[?25l")
             let timeout = DispatchWorkItem { [weak self] in
                 guard let self, self.integration == .pending else { return }
                 self.integration = .unavailable
-                self.terminalView.feed(text: "\u{1b}[?25h")
+                self.terminalView.feedNow(text: "\u{1b}[?25h")
                 self.updateMode()
             }
             integrationTimeout = timeout
@@ -395,7 +457,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         let terminal = terminalView.getTerminal()
         let missing = terminal.rows - 1 - terminal.getCursorLocation().y
         if missing > 0 {
-            terminalView.feed(text: String(repeating: "\r\n", count: missing))
+            terminalView.feedNow(text: String(repeating: "\r\n", count: missing))
         }
     }
 
@@ -520,7 +582,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         bookmarkedBlockIDs.removeAll()
         markedRow = nil
         selectBlock(nil)
-        terminalView.feed(text: "\u{1b}[H\u{1b}[2J\u{1b}[3J")
+        terminalView.feedNow(text: "\u{1b}[H\u{1b}[2J\u{1b}[3J")
         if promptIsInvisible, integration == .active {
             reanchorPromptAtBottom()
         } else if mode == .editor || mode == .shellPrompt {
@@ -1590,7 +1652,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     private func releaseHeldOutput() {
         guard let held = heldOutput else { return }
         heldOutput = nil
-        if !held.isEmpty { terminalView.feed(byteArray: held[...]) }
+        if !held.isEmpty { terminalView.feedNow(bytes: held[...]) }
     }
 
     /// Folder shown in the chips and block headers: `user@host:path` while remote.
@@ -1656,6 +1718,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     func processTerminated(source: TerminalView, exitCode: Int32?) {
         // We asked for this (tab/window closed); nothing to show.
         if case .exited = state { return }
+        // The shell's last words come before the exit message.
+        terminalView.flushOutput()
         integrationTimeout?.cancel()
         liveTimer?.invalidate()
         liveTimer = nil
@@ -1676,7 +1740,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         integration = .unavailable
         mode = .plainTerminal
         view.modeDidChange()
-        terminalView.feed(text: "\r\n\u{1b}[2m[Process \(reason). Press Return to restart or ⌘W to close.]\u{1b}[0m\r\n")
+        terminalView.feedNow(text: "\r\n\u{1b}[2m[Process \(reason). Press Return to restart or ⌘W to close.]\u{1b}[0m\r\n")
     }
 
     private func restartAfterExit() {
