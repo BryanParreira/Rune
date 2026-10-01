@@ -124,6 +124,11 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     /// Every selected block (⇧-click or ⇧⌘↑ selects a range).
     private(set) var selectedBlockIDs: Set<Int> = []
     private var selectionAnchorID: Int?
+    /// Blocks the user bookmarked (⌥⌘B) to come back to.
+    private(set) var bookmarkedBlockIDs: Set<Int> = []
+    /// A row "Jump to Error" landed on, highlighted for a moment.
+    private(set) var markedRow: Int?
+    private var markedRowClear: DispatchWorkItem?
     /// Open two runs' outputs as a diff.
     var onCompare: ((OutputCompareModel.Run, OutputCompareModel.Run) -> Void)?
 
@@ -483,6 +488,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     func clearScreen() {
         tracker.removeAll()
         anchorLines.removeAll()
+        bookmarkedBlockIDs.removeAll()
+        markedRow = nil
         selectBlock(nil)
         terminalView.feed(text: "\u{1b}[H\u{1b}[2J\u{1b}[3J")
         if promptIsInvisible, integration == .active {
@@ -652,6 +659,93 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         }
     }
 
+    // MARK: - Bookmarks and errors
+
+    func toggleBookmark(_ block: Block) {
+        if bookmarkedBlockIDs.remove(block.id) == nil {
+            bookmarkedBlockIDs.insert(block.id)
+            view.overlay.showCopied("Bookmarked  ·  ⌃⌘↑ ⌃⌘↓ to jump back", for: block)
+        } else {
+            view.overlay.showInfo("Bookmark removed", for: block)
+        }
+        view.blocksDidChange()
+    }
+
+    /// ⌥⌘B: the selected block, or the last one.
+    func toggleBookmarkOnCurrentBlock() {
+        guard let block = selectedBlockID.flatMap(tracker.block(id:)) ?? tracker.blocks.last else { return NSSound.beep() }
+        toggleBookmark(block)
+    }
+
+    /// Selects and scrolls to the bookmark above (or below) the current one or the viewport.
+    func jumpToBookmark(previous: Bool) {
+        let marked = tracker.blocks.filter { bookmarkedBlockIDs.contains($0.id) }
+        guard !marked.isEmpty else {
+            view.overlay.showInfo("No bookmarks yet  ·  ⌥⌘B bookmarks a block")
+            return
+        }
+        let reference = selectedBlockID.flatMap(tracker.block(id:))?.headerRow
+            ?? (previous ? geometry.topVisibleRow + terminalView.getTerminal().rows : geometry.topVisibleRow)
+        let target = previous ? (marked.last { $0.headerRow < reference } ?? marked.last)
+                              : (marked.first { $0.headerRow > reference } ?? marked.first)
+        guard let target else { return }
+        selectBlock(target.id)
+        scrollToTop(row: target.headerRow)
+    }
+
+    /// Lines that look like an error: compiler and test failures, exceptions, panics.
+    private static let errorPattern = try? NSRegularExpression(
+        pattern: #"\b(error|errors|fatal|failed|failure|failures|panic|panicked|exception|traceback|segmentation fault|denied|not found)\b|✗|✘|❌"#,
+        options: [.caseInsensitive])
+    /// "0 errors", "no failures"… aren't errors.
+    private static let noErrorPattern = try? NSRegularExpression(
+        pattern: #"\b(0|no|zero)\s+(errors?|failures?|failed)\b"#, options: [.caseInsensitive])
+
+    private func isErrorLine(_ text: String) -> Bool {
+        let range = NSRange(location: 0, length: (text as NSString).length)
+        guard Self.errorPattern?.firstMatch(in: text, range: range) != nil else { return false }
+        return Self.noErrorPattern?.firstMatch(in: text, range: range) == nil
+    }
+
+    /// ⌘' / ⇧⌘': moves to the previous (or next) line of output that looks like an error,
+    /// starting from the newest, and marks it with a highlighter stroke.
+    func jumpToError(previous: Bool) {
+        let terminal = terminalView.getTerminal()
+        let current = geometry.cursorPosition.row
+        // Only output rows: command lines often contain "error" in a grep or a test name.
+        let outputRows = tracker.blocks.compactMap { $0.outputRows(currentRow: current) }
+        let reference = markedRow ?? (previous ? current + 1 : -1)
+        let ordered = previous ? outputRows.reversed().flatMap { $0.reversed() } : outputRows.flatMap { $0 }
+        for row in ordered where previous ? row < reference : row > reference {
+            guard let line = terminal.getScrollInvariantLine(row: row), !line.isWrapped else { continue }
+            var text = line.translateToString(trimRight: true)
+            // A long line continues on the rows below it.
+            var next = row + 1
+            while let more = terminal.getScrollInvariantLine(row: next), more.isWrapped, text.count < 400 {
+                text += more.translateToString(trimRight: true)
+                next += 1
+            }
+            guard isErrorLine(text) else { continue }
+            mark(row: row)
+            return
+        }
+        view.overlay.showInfo(markedRow == nil ? "No errors in the output" : "No more errors \(previous ? "above" : "below")")
+    }
+
+    private func mark(row: Int) {
+        markedRow = row
+        markedRowClear?.cancel()
+        // A third of the way down the screen, so the lines around it show too.
+        scrollToTop(row: max(0, row - terminalView.getTerminal().rows / 3))
+        view.blocksDidChange()
+        let clear = DispatchWorkItem { [weak self] in
+            self?.markedRow = nil
+            self?.view.blocksDidChange()
+        }
+        markedRowClear = clear
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: clear)
+    }
+
     // MARK: - Comparing runs
 
     /// The last earlier run of the same command, if any.
@@ -728,7 +822,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         case .output, .outputWithSecrets:
             let output = outputText(of: block)
             guard !output.isEmpty else {
-                view.overlay.showCopied("No output to copy", for: block)
+                view.overlay.showInfo("No output to copy", for: block)
                 return
             }
             copyToPasteboard(kind == .output ? shown(output, hidden: &hidden) : output)
@@ -944,6 +1038,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         if let previous = previousRun(of: block) {
             menu.addItem(BlockMenuItem(title: "Compare with Previous Run", block: block) { [weak self] in self?.compare(previous, $0) })
         }
+        let bookmarked = bookmarkedBlockIDs.contains(block.id)
+        menu.addItem(BlockMenuItem(title: bookmarked ? "Remove Bookmark" : "Bookmark", block: block) { [weak self] in self?.toggleBookmark($0) })
         menu.addItem(BlockMenuItem(title: "Filter Output…", block: block) { [weak self] b in
             guard let self else { return }
             self.view.showFilter(command: self.commandText(of: b), output: self.outputText(of: b, maxRows: BlockFilterModel.maxLines))

@@ -110,6 +110,12 @@ enum MainMenu {
         menu.addItem(item("Extend Selection Down", #selector(MainWindowController.extendSelectionDown(_:)), "\u{F701}", [.command, .shift]))
         menu.addItem(item("Compare with Previous Run", #selector(MainWindowController.compareRuns(_:)), "d", [.command, .option]))
         menu.addItem(.separator())
+        menu.addItem(item("Jump to Previous Error", #selector(MainWindowController.previousError(_:)), "'"))
+        menu.addItem(item("Jump to Next Error", #selector(MainWindowController.nextError(_:)), "'", [.command, .shift]))
+        menu.addItem(item("Bookmark Block", #selector(MainWindowController.toggleBookmark(_:)), "b", [.command, .option]))
+        menu.addItem(item("Previous Bookmark", #selector(MainWindowController.previousBookmark(_:)), "\u{F700}", [.command, .control]))
+        menu.addItem(item("Next Bookmark", #selector(MainWindowController.nextBookmark(_:)), "\u{F701}", [.command, .control]))
+        menu.addItem(.separator())
         menu.addItem(item("Clear Screen", #selector(MainWindowController.clearScreen(_:)), "k"))
         return menu
     }

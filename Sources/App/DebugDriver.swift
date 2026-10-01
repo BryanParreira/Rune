@@ -276,6 +276,14 @@ enum DebugDriver {
                 session.selectAdjacentBlock(previous: true)
             case "@extendPrev":
                 session.selectAdjacentBlock(previous: true, extend: true)
+            case "@bookmark":
+                session.toggleBookmarkOnCurrentBlock()
+            case "@prevBookmark":
+                session.jumpToBookmark(previous: true)
+            case "@prevError":
+                session.jumpToError(previous: true)
+                print("ERROR marked=\(session.markedRow.map(String.init) ?? "nil") text=<\(session.markedRow.flatMap { session.terminalView.getTerminal().getScrollInvariantLine(row: $0)?.translateToString(trimRight: true) } ?? "")>")
+                fflush(stdout)
             case "@compare":
                 session.compareLatestRuns()
             case "@gap":

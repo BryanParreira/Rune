@@ -100,6 +100,53 @@ final class BlockOverlayView: NSView {
         updateScrollIndicator()
     }
 
+    /// A small ribbon in the left margin of a bookmarked block's header row.
+    private func drawBookmark(in header: NSRect, palette: ChromePalette) {
+        let width: CGFloat = 7
+        let height = min(header.height - 4, 12)
+        let x = Self.flagPoleWidth + 3
+        let top = header.midY - height / 2
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: x, y: top))
+        path.line(to: NSPoint(x: x + width, y: top))
+        path.line(to: NSPoint(x: x + width, y: top + height))
+        path.line(to: NSPoint(x: x + width / 2, y: top + height - 3))
+        path.line(to: NSPoint(x: x, y: top + height))
+        path.close()
+        palette.accent.setFill()
+        path.fill()
+    }
+
+    /// The line "Jump to Error" landed on, marked like a highlighter pen.
+    private func drawMarkedRow(palette: ChromePalette, session: TerminalSession) {
+        guard let row = session.markedRow else { return }
+        let geometry = session.geometry
+        let terminalView = session.terminalView
+        let top = convert(NSPoint(x: 0, y: geometry.topY(ofRow: row)), from: terminalView).y
+        let rect = NSRect(x: terminalView.frame.minX - 4, y: top, width: bounds.width - terminalView.frame.minX * 2 + 8,
+                          height: geometry.cellHeight)
+        guard rect.intersects(bounds) else { return }
+        palette.highlight.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3).fill()
+    }
+
+    /// Ticks on the right edge for failed blocks and bookmarks anywhere in the scrollback,
+    /// like markers in an editor's scroll bar.
+    private func drawTrackMarks(palette: ChromePalette, session: TerminalSession) {
+        guard let track = indicatorTrack() else { return }
+        let geometry = session.geometry
+        let total = CGFloat(max(1, geometry.lineCount))
+        let base = geometry.linesTrimmed
+        for block in session.tracker.blocks {
+            let bookmarked = session.bookmarkedBlockIDs.contains(block.id)
+            guard block.isFailed || bookmarked else { continue }
+            let y = track.minY + track.height * CGFloat(block.headerRow - base) / total
+            (bookmarked ? palette.accent : palette.error).withAlphaComponent(0.8).setFill()
+            NSBezierPath(roundedRect: NSRect(x: track.maxX - 5, y: min(track.maxY - 3, max(track.minY, y)), width: 5, height: 3),
+                         xRadius: 1, yRadius: 1).fill()
+        }
+    }
+
     private func scheduleIndicatorFade() {
         indicatorFade?.invalidate()
         guard !draggingThumb, !hoveringIndicator else { return }
@@ -305,6 +352,9 @@ final class BlockOverlayView: NSView {
                 palette.error.setFill()
                 NSRect(x: 0, y: frame.rect.minY, width: Self.flagPoleWidth, height: frame.rect.height).fill()
             }
+            if session.bookmarkedBlockIDs.contains(block.id) {
+                drawBookmark(in: frame.headerRect, palette: palette)
+            }
 
             // Separator above every block except one that starts at the very top, in the
             // middle of the blank row between blocks when there is one.
@@ -318,12 +368,14 @@ final class BlockOverlayView: NSView {
                        reserveForActions: block.id == hoveredBlockID)
         }
         drawSecretMasks(palette: palette, session: session)
+        drawMarkedRow(palette: palette, session: session)
         NSGraphicsContext.restoreGraphicsState()
         // Outside the terminal clip: it sits flush with the top of the pane.
         stickyHeader = stickyHeaderFrame(frames: frames, terminalFrame: terminalFrame, session: session)
         if let sticky = stickyHeader {
             drawStickyHeader(sticky, palette: palette, font: contextFont, session: session)
         }
+        drawTrackMarks(palette: palette, session: session)
         updateScrollIndicator()
     }
 
@@ -507,6 +559,15 @@ final class BlockOverlayView: NSView {
     /// A short "Copied …" note beside the block (or at the bottom of the pane when the block
     /// is off screen), and a checkmark on the button that did it.
     func showCopied(_ message: String, for block: Block?, action: TerminalSession.CopyKind? = nil) {
+        showNote(message, for: block, action: action, done: true)
+    }
+
+    /// A short note that isn't a confirmation (nothing found, nothing to do).
+    func showInfo(_ message: String, for block: Block? = nil) {
+        showNote(message, for: block, action: nil, done: false)
+    }
+
+    private func showNote(_ message: String, for block: Block?, action: TerminalSession.CopyKind?, done: Bool) {
         guard let palette else { return }
         if let action, block?.id == hoveredBlockID {
             switch action {
@@ -515,7 +576,7 @@ final class BlockOverlayView: NSView {
             default: break
             }
         }
-        toast.configure(message: message, palette: palette, font: font)
+        toast.configure(message: message, palette: palette, font: font, done: done)
         let size = toast.fittingSize
         let right = bounds.width - (sessionView?.session?.terminalView.frame.minX ?? 16)
         var y = bounds.maxY - size.height - 10
@@ -553,11 +614,11 @@ final class CopyToast: NSView {
         fatalError("init(coder:) is not supported")
     }
 
-    func configure(message: String, palette: ChromePalette, font: NSFont) {
+    func configure(message: String, palette: ChromePalette, font: NSFont, done: Bool) {
         layer?.backgroundColor = palette.surface2.cgColor
         layer?.borderColor = palette.outline.cgColor
         let size = max(10, font.pointSize - 2)
-        let text = NSMutableAttributedString(string: "✓  ", attributes: [
+        let text = NSMutableAttributedString(string: done ? "✓  " : "", attributes: [
             .font: NSFont.systemFont(ofSize: size, weight: .bold), .foregroundColor: palette.success,
         ])
         text.append(NSAttributedString(string: message, attributes: [

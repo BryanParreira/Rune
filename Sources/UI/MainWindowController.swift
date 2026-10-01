@@ -856,6 +856,26 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         selectedSession?.selectAdjacentBlock(previous: false, extend: true)
     }
 
+    @objc func toggleBookmark(_ sender: Any?) {
+        selectedSession?.toggleBookmarkOnCurrentBlock()
+    }
+
+    @objc func previousBookmark(_ sender: Any?) {
+        selectedSession?.jumpToBookmark(previous: true)
+    }
+
+    @objc func nextBookmark(_ sender: Any?) {
+        selectedSession?.jumpToBookmark(previous: false)
+    }
+
+    @objc func previousError(_ sender: Any?) {
+        selectedSession?.jumpToError(previous: true)
+    }
+
+    @objc func nextError(_ sender: Any?) {
+        selectedSession?.jumpToError(previous: false)
+    }
+
     @objc func compareRuns(_ sender: Any?) {
         selectedSession?.compareLatestRuns()
     }
@@ -1015,6 +1035,11 @@ extension MainWindowController {
             action("Clear Screen", "eraser", "⌘K") { [weak self] in self?.clearScreen(nil) }
             action("Select Previous Block", "arrow.up.square", "⌘↑") { [weak self] in self?.selectPreviousBlock(nil) }
             action("Copy Last Output", "doc.on.doc", "⇧⌘C", keywords: "clipboard result") { [weak self] in self?.copyLatestOutput(nil) }
+            action("Jump to Error", "exclamationmark.triangle", "⌘'", keywords: "failed failure exception panic compiler next") { [weak self] in
+                self?.previousError(nil)
+            }
+            action("Bookmark Block", "bookmark", "⌥⌘B", keywords: "pin mark remember") { [weak self] in self?.toggleBookmark(nil) }
+            action("Previous Bookmark", "bookmark.fill", "⌃⌘↑", keywords: "jump pinned") { [weak self] in self?.previousBookmark(nil) }
             action("Compare with Previous Run", "arrow.left.arrow.right", "⌥⌘D", keywords: "diff changes output before after test") { [weak self] in
                 self?.compareRuns(nil)
             }
