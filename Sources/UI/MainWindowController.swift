@@ -844,6 +844,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         selectedSession?.selectAdjacentBlock(previous: false)
     }
 
+    @objc func copyLatestOutput(_ sender: Any?) {
+        selectedSession?.copyLatestOutput()
+    }
+
+    @objc func copyLatestBlockImage(_ sender: Any?) {
+        selectedSession?.copyLatestBlock(as: .image)
+    }
+
     @objc func clearScreen(_ sender: Any?) {
         selectedSession?.clearScreen()
     }
@@ -990,6 +998,11 @@ extension MainWindowController {
         if isTerminal {
             action("Clear Screen", "eraser", "⌘K") { [weak self] in self?.clearScreen(nil) }
             action("Select Previous Block", "arrow.up.square", "⌘↑") { [weak self] in self?.selectPreviousBlock(nil) }
+            action("Copy Last Output", "doc.on.doc", "⇧⌘C", keywords: "clipboard result") { [weak self] in self?.copyLatestOutput(nil) }
+            action("Copy Last Block as Image", "photo", "⌥⌘C", keywords: "screenshot picture png share") { [weak self] in self?.copyLatestBlockImage(nil) }
+            action("Copy Last Block as Markdown", "text.badge.checkmark", keywords: "clipboard code fence share issue") { [weak self] in
+                self?.selectedSession?.copyLatestBlock(as: .markdown)
+            }
         }
         action("Settings", "gearshape", "⌘,", keywords: "preferences") { [weak self] in self?.openSettingsTab() }
         action("Open config.json", "doc.text", keywords: "settings file edit") { NSApp.sendAction(#selector(AppDelegate.openConfig(_:)), to: nil, from: nil) }

@@ -41,6 +41,21 @@ final class RuneTerminalView: LocalProcessTerminalView {
         bypassInterceptor = false
     }
 
+    /// ⌘C, given the selected text (nil when nothing is selected). Return true if handled.
+    var copyHandler: ((String?) -> Bool)?
+    /// Whether ⌘C can do something with no text selected (a block is selected).
+    var canCopyWithoutSelection: (() -> Bool)?
+
+    override func copy(_ sender: Any) {
+        if copyHandler?(selection.active ? getSelection() : nil) == true { return }
+        super.copy(sender)
+    }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(copy(_:)), !selection.active, canCopyWithoutSelection?() == true { return true }
+        return super.validateUserInterfaceItem(item)
+    }
+
     override func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
         if onOpenLink?(link) == true { return }
         super.requestOpenLink(source: source, link: link, params: params)
@@ -174,6 +189,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         terminalView.inputInterceptor = { [weak self] data in self?.intercept(data) ?? false }
         terminalView.contextMenuProvider = { [weak self] point in self?.contextMenu(atTerminalPoint: point) }
         terminalView.onOpenLink = { [weak self] link in self?.openLink(link) ?? false }
+        terminalView.copyHandler = { [weak self] selected in self?.copySelection(selected) ?? false }
+        terminalView.canCopyWithoutSelection = { [weak self] in self?.canCopySelectedBlock ?? false }
         terminalView.outputFilter = { [weak self] slice in self?.filterOutput(slice) ?? slice }
         installOSCHandlers()
         apply(snapshot)
@@ -594,24 +611,158 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         return geometry.text(rows: rows)
     }
 
-    func copyCommand(_ block: Block) {
-        copyToPasteboard(commandText(of: block))
+    enum CopyKind {
+        case command, output, commandAndOutput, markdown, image
+        /// The output with masked secrets in it, as the program printed them.
+        case outputWithSecrets
     }
 
-    func copyOutput(_ block: Block) {
-        copyToPasteboard(outputText(of: block))
+    /// Copies part of a block and says so next to it. Copies what the screen shows: secrets
+    /// masked in the output stay masked unless they were clicked to reveal.
+    func copy(_ kind: CopyKind, of block: Block) {
+        var hidden = 0
+        let message: String
+        switch kind {
+        case .command:
+            copyToPasteboard(shown(commandText(of: block), hidden: &hidden))
+            message = "Copied command"
+        case .output, .outputWithSecrets:
+            let output = outputText(of: block)
+            guard !output.isEmpty else {
+                view.overlay.showCopied("No output to copy", for: block)
+                return
+            }
+            copyToPasteboard(kind == .output ? shown(output, hidden: &hidden) : output)
+            let lines = output.components(separatedBy: "\n").count
+            message = "Copied \(lines == 1 ? "1 line" : "\(lines.formatted()) lines") of output"
+        case .commandAndOutput:
+            copyToPasteboard(shown(transcript(of: block), hidden: &hidden))
+            message = "Copied command and output"
+        case .markdown:
+            // Always without secrets: Markdown is for pasting somewhere else.
+            let markdown = markdownText(of: block)
+            hidden = SecretRedactor.matches(in: markdown).count
+            copyToPasteboard(SecretRedactor.redact(markdown))
+            message = "Copied as Markdown"
+        case .image:
+            guard let png = blockImage(of: block) else {
+                NSSound.beep()
+                return
+            }
+            hidden = png.hidden
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setData(png.data, forType: .png)
+            message = "Copied as image"
+        }
+        let note = hidden == 0 ? "" : "  ·  \(hidden) secret\(hidden == 1 ? "" : "s") hidden"
+        view.overlay.showCopied(message + note, for: block, action: kind)
     }
 
-    /// The command and its output as a Markdown code block, with secrets removed, for
-    /// pasting into chats, issues and docs.
-    func copyAsMarkdown(_ block: Block) {
-        let command = commandText(of: block)
+    /// Whether the block's output has secrets that copying would mask.
+    func hasMaskedSecrets(_ block: Block) -> Bool {
+        guard config.hideSecrets else { return false }
+        let revealed = view.overlay.revealedSecrets
         let output = outputText(of: block)
-        var markdown = "```console\n$ " + command.replacingOccurrences(of: "\n", with: "\n> ")
-        if !output.isEmpty { markdown += "\n" + output }
-        markdown += "\n```"
+        return SecretRedactor.matches(in: output).contains { !revealed.contains((output as NSString).substring(with: $0.range)) }
+    }
+
+    /// ⌘C with nothing selected copies the selected block. Returns false if there is none.
+    @discardableResult
+    func copySelectedBlock() -> Bool {
+        guard let id = selectedBlockID, let block = tracker.block(id: id) else { return false }
+        copy(.commandAndOutput, of: block)
+        return true
+    }
+
+    var canCopySelectedBlock: Bool { selectedBlockID.flatMap(tracker.block(id:)) != nil }
+
+    /// ⇧⌘C: the output of the selected block, or of the last command that printed something.
+    func copyLatestOutput() {
+        copyLatestBlock(as: .output)
+    }
+
+    /// The selected block, or the last finished command with output.
+    func copyLatestBlock(as kind: CopyKind) {
+        let current = geometry.cursorPosition.row
+        let block = selectedBlockID.flatMap(tracker.block(id:))
+            ?? tracker.blocks.last { $0.state == .finished && $0.outputRows(currentRow: current) != nil }
+            ?? tracker.blocks.last
+        guard let block else {
+            NSSound.beep()
+            return
+        }
+        copy(kind, of: block)
+    }
+
+    /// Text selected with the mouse: trailing padding trimmed from each line, masked secrets
+    /// kept masked.
+    private func copySelection(_ selected: String?) -> Bool {
+        guard let selected, !selected.isEmpty else { return copySelectedBlock() }
+        let trimmed = selected.components(separatedBy: "\n").map { line in
+            String(line.reversed().drop { $0 == " " }.reversed())
+        }.joined(separator: "\n")
+        var hidden = 0
+        copyToPasteboard(shown(trimmed, hidden: &hidden))
+        if hidden > 0 {
+            view.overlay.showCopied("Copied  ·  \(hidden) secret\(hidden == 1 ? "" : "s") hidden (click one to reveal it)", for: nil)
+        }
+        return true
+    }
+
+    /// `text` as the screen shows it: with secret hiding on, secrets the user hasn't revealed
+    /// are replaced by a label.
+    private func shown(_ text: String, hidden: inout Int) -> String {
+        guard config.hideSecrets else { return text }
+        let revealed = view.overlay.revealedSecrets
+        var result = text as NSString
+        for match in SecretRedactor.matches(in: text).reversed() {
+            guard !revealed.contains((text as NSString).substring(with: match.range)) else { continue }
+            result = result.replacingCharacters(in: match.range, with: "[redacted \(match.kind)]") as NSString
+            hidden += 1
+        }
+        return result as String
+    }
+
+    /// `$ command` followed by its output, as it looked in the terminal.
+    private func transcript(of block: Block) -> String {
+        let output = outputText(of: block)
+        let command = "$ " + commandText(of: block).replacingOccurrences(of: "\n", with: "\n> ")
+        return output.isEmpty ? command : command + "\n" + output
+    }
+
+    /// The command and its output as a Markdown code block, for chats, issues and docs.
+    private func markdownText(of block: Block) -> String {
+        var markdown = "```console\n" + transcript(of: block) + "\n```"
         if block.isFailed, let code = block.exitCode { markdown += "\n_exit \(code)_" }
-        copyToPasteboard(SecretRedactor.redact(markdown))
+        return markdown
+    }
+
+    private func blockImage(of block: Block) -> (data: Data, hidden: Int)? {
+        let terminal = terminalView.getTerminal()
+        var rows: [BufferLine] = []
+        var omitted = 0
+        if let range = block.outputRows(currentRow: geometry.cursorPosition.row) {
+            let kept = max(range.lowerBound, range.upperBound - BlockImage.maxOutputLines + 1)...range.upperBound
+            omitted = range.count - kept.count
+            rows = kept.compactMap { terminal.getScrollInvariantLine(row: $0) }
+        }
+        var status = [TabTitle.abbreviate(path: block.cwd, home: NSHomeDirectory())]
+        if block.isFailed, let code = block.exitCode { status.append("exit \(code)") }
+        if block.state == .finished { status.append(BlockOverlayView.format(duration: block.duration())) }
+        return BlockImage.png(BlockImage.Content(
+            command: commandText(of: block),
+            rows: rows,
+            omittedLines: omitted,
+            status: status.joined(separator: "  ·  "),
+            failed: block.isFailed,
+            terminalColumns: terminal.cols,
+            theme: snapshot.theme,
+            palette: palette,
+            font: terminalView.font,
+            maskSecrets: config.hideSecrets,
+            revealed: view.overlay.revealedSecrets
+        ))
     }
 
     func rerun(_ block: Block) {
@@ -628,11 +779,24 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     private func contextMenu(atTerminalPoint point: NSPoint) -> NSMenu? {
         let row = geometry.row(atY: point.y)
         guard let index = tracker.blockIndex(containing: row, currentRow: geometry.cursorPosition.row) else { return nil }
-        let block = tracker.blocks[index]
+        let menu = blockMenu(for: tracker.blocks[index])
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: ""))
+        return menu
+    }
+
+    /// Everything you can do with a block: copying it in various forms, filtering, re-running.
+    func blockMenu(for block: Block) -> NSMenu {
         let menu = NSMenu()
-        menu.addItem(BlockMenuItem(title: "Copy Command", block: block) { [weak self] in self?.copyCommand($0) })
-        menu.addItem(BlockMenuItem(title: "Copy Output", block: block) { [weak self] in self?.copyOutput($0) })
-        menu.addItem(BlockMenuItem(title: "Copy as Markdown", block: block) { [weak self] in self?.copyAsMarkdown($0) })
+        menu.addItem(BlockMenuItem(title: "Copy Command", block: block) { [weak self] in self?.copy(.command, of: $0) })
+        menu.addItem(BlockMenuItem(title: "Copy Output", block: block) { [weak self] in self?.copy(.output, of: $0) })
+        menu.addItem(BlockMenuItem(title: "Copy Command and Output", block: block) { [weak self] in self?.copy(.commandAndOutput, of: $0) })
+        if hasMaskedSecrets(block) {
+            menu.addItem(BlockMenuItem(title: "Copy Output Including Secrets", block: block) { [weak self] in self?.copy(.outputWithSecrets, of: $0) })
+        }
+        menu.addItem(BlockMenuItem(title: "Copy as Markdown", block: block) { [weak self] in self?.copy(.markdown, of: $0) })
+        menu.addItem(BlockMenuItem(title: "Copy as Image", block: block) { [weak self] in self?.copy(.image, of: $0) })
+        menu.addItem(.separator())
         menu.addItem(BlockMenuItem(title: "Filter Output…", block: block) { [weak self] b in
             guard let self else { return }
             self.view.showFilter(command: self.commandText(of: b), output: self.outputText(of: b, maxRows: BlockFilterModel.maxLines))
@@ -651,8 +815,6 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             self.view.inputArea.focusEditor()
         })
         }
-        menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: ""))
         return menu
     }
 

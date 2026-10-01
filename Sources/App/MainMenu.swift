@@ -79,6 +79,8 @@ enum MainMenu {
     private static func editMenu() -> NSMenu {
         let menu = NSMenu(title: "Edit")
         menu.addItem(item("Copy", #selector(NSText.copy(_:)), "c"))
+        menu.addItem(item("Copy Last Output", #selector(MainWindowController.copyLatestOutput(_:)), "c", [.command, .shift]))
+        menu.addItem(item("Copy Last Block as Image", #selector(MainWindowController.copyLatestBlockImage(_:)), "c", [.command, .option]))
         menu.addItem(item("Paste", #selector(NSText.paste(_:)), "v"))
         menu.addItem(item("Select All", #selector(NSText.selectAll(_:)), "a"))
         menu.addItem(.separator())

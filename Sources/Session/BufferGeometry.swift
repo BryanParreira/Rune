@@ -74,6 +74,10 @@ struct BufferGeometry {
             }
             out += line.translateToString(trimRight: true)
         }
-        return out.trimmingCharacters(in: .newlines)
+        // Programs often pad lines with spaces; nobody wants them in a paste.
+        return out.components(separatedBy: "\n")
+            .map { String($0.reversed().drop { $0 == " " }.reversed()) }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .newlines)
     }
 }

@@ -331,6 +331,14 @@ extension InputAreaView: CommandTextViewDelegate {
         chipsModel.completions = result.isUnique ? [] : result.candidates.map { CompletionItem(name: $0, detail: nil) }
     }
 
+    func commandTextViewCopyWithoutSelection(_ view: CommandTextView) -> Bool {
+        sessionView?.session?.copySelectedBlock() ?? false
+    }
+
+    func commandTextViewCanCopyWithoutSelection(_ view: CommandTextView) -> Bool {
+        sessionView?.session?.canCopySelectedBlock ?? false
+    }
+
     func commandTextViewAskAI(_ view: CommandTextView) {
         guard let sessionView, let session = sessionView.session else { return }
         let text = editor.string

@@ -12,6 +12,9 @@ protocol CommandTextViewDelegate: AnyObject {
     func commandTextViewEndOfInput(_ view: CommandTextView)
     func commandTextViewClearScreen(_ view: CommandTextView)
     func commandTextViewAskAI(_ view: CommandTextView)
+    /// ⌘C with no text selected; return false if there's nothing else to copy.
+    func commandTextViewCopyWithoutSelection(_ view: CommandTextView) -> Bool
+    func commandTextViewCanCopyWithoutSelection(_ view: CommandTextView) -> Bool
 }
 
 /// Native multi-line command editor: Enter runs, Shift-Enter inserts a newline,
@@ -188,6 +191,19 @@ final class CommandTextView: NSTextView {
     /// Paste as plain text only.
     override func paste(_ sender: Any?) {
         pasteAsPlainText(sender)
+    }
+
+    /// With nothing selected in the editor, ⌘C copies the selected block (⌘↑).
+    override func copy(_ sender: Any?) {
+        if selectedRange().length == 0, commandDelegate?.commandTextViewCopyWithoutSelection(self) == true { return }
+        super.copy(sender)
+    }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(copy(_:)), selectedRange().length == 0 {
+            return commandDelegate?.commandTextViewCanCopyWithoutSelection(self) ?? false
+        }
+        return super.validateUserInterfaceItem(item)
     }
 
     private var caretLocation: Int { selectedRange().location }

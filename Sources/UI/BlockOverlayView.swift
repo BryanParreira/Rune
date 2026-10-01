@@ -12,6 +12,7 @@ final class BlockOverlayView: NSView {
     private var hoveredBlockID: Int?
     private var lastMouseLocation: NSPoint?
     private let actionBar = BlockActionBar()
+    private let toast = CopyToast()
 
     // Scroll indicator: thin thumb on the right that appears while scrolling and fades out.
     // Its own layer, so Core Animation runs the fade instead of redrawing the overlay.
@@ -32,6 +33,8 @@ final class BlockOverlayView: NSView {
         layer?.addSublayer(indicatorLayer)
         actionBar.isHidden = true
         addSubview(actionBar)
+        toast.isHidden = true
+        addSubview(toast)
         actionBar.onAction = { [weak self] action in self?.perform(action) }
     }
 
@@ -329,7 +332,7 @@ final class BlockOverlayView: NSView {
     /// Masked credentials currently on screen (overlay coordinates) and their text.
     private var secretMasks: [(rect: NSRect, text: String)] = []
     /// Secrets the user clicked to see.
-    private var revealedSecrets: Set<String> = []
+    private(set) var revealedSecrets: Set<String> = []
 
     private func drawSecretMasks(palette: ChromePalette, session: TerminalSession) {
         secretMasks.removeAll()
@@ -489,17 +492,111 @@ final class BlockOverlayView: NSView {
     private func perform(_ action: BlockActionBar.Action) {
         guard let session = sessionView?.session, let id = hoveredBlockID, let block = session.tracker.block(id: id) else { return }
         switch action {
-        case .copyCommand: session.copyCommand(block)
-        case .copyOutput: session.copyOutput(block)
+        case .copyCommand: session.copy(.command, of: block)
+        case .copyOutput: session.copy(.output, of: block)
         case .rerun: session.rerun(block)
         case .explain: session.explain(block)
+        case .more:
+            let menu = session.blockMenu(for: block)
+            menu.popUp(positioning: nil, at: NSPoint(x: actionBar.frame.maxX - 26, y: actionBar.frame.maxY + 4), in: self)
         }
+    }
+
+    // MARK: - Copy feedback
+
+    /// A short "Copied …" note beside the block (or at the bottom of the pane when the block
+    /// is off screen), and a checkmark on the button that did it.
+    func showCopied(_ message: String, for block: Block?, action: TerminalSession.CopyKind? = nil) {
+        guard let palette else { return }
+        if let action, block?.id == hoveredBlockID {
+            switch action {
+            case .command: actionBar.flashDone(.copyCommand)
+            case .output: actionBar.flashDone(.copyOutput)
+            default: break
+            }
+        }
+        toast.configure(message: message, palette: palette, font: font)
+        let size = toast.fittingSize
+        let right = bounds.width - (sessionView?.session?.terminalView.frame.minX ?? 16)
+        var y = bounds.maxY - size.height - 10
+        if let block, let frame = visibleBlockFrames().first(where: { $0.block.id == block.id }),
+           frame.headerRect.minY >= bounds.minY, frame.headerRect.maxY + size.height + 6 <= bounds.maxY {
+            // Just under the block's header row, so it reads as being about that block.
+            y = frame.headerRect.maxY + 4
+        }
+        toast.show(at: NSRect(x: right - size.width, y: y, width: size.width, height: size.height))
+    }
+}
+
+/// Pill that appears for a moment after copying.
+final class CopyToast: NSView {
+    private let label = NSTextField(labelWithString: "")
+    private var hideWork: DispatchWorkItem?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        layer?.borderWidth = 1
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 9),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    func configure(message: String, palette: ChromePalette, font: NSFont) {
+        layer?.backgroundColor = palette.surface2.cgColor
+        layer?.borderColor = palette.outline.cgColor
+        let size = max(10, font.pointSize - 2)
+        let text = NSMutableAttributedString(string: "✓  ", attributes: [
+            .font: NSFont.systemFont(ofSize: size, weight: .bold), .foregroundColor: palette.success,
+        ])
+        text.append(NSAttributedString(string: message, attributes: [
+            .font: NSFont.systemFont(ofSize: size, weight: .medium), .foregroundColor: palette.text,
+        ]))
+        label.attributedStringValue = text
+    }
+
+    /// Fades and slides in at `frame`, then fades out.
+    func show(at frame: NSRect) {
+        hideWork?.cancel()
+        if isHidden || alphaValue < 0.01 {
+            setFrameSize(frame.size)
+            setFrameOrigin(NSPoint(x: frame.minX, y: frame.minY + 4))
+            alphaValue = 0
+            isHidden = false
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.16
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            animator().alphaValue = 1
+            animator().frame = frame
+        }
+        let work = DispatchWorkItem { [weak self] in
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.3
+                self?.animator().alphaValue = 0
+            }, completionHandler: { [weak self] in
+                if self?.alphaValue ?? 1 < 0.01 { self?.isHidden = true }
+            })
+        }
+        hideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: work)
     }
 }
 
 /// Small floating bar with block actions.
 final class BlockActionBar: NSView {
-    enum Action { case copyCommand, copyOutput, rerun, explain }
+    enum Action { case copyCommand, copyOutput, rerun, explain, more }
 
     var onAction: ((Action) -> Void)?
     var palette: ChromePalette? { didSet { restyle() } }
@@ -511,6 +608,7 @@ final class BlockActionBar: NSView {
     private lazy var copyOutputButton = makeButton("doc.on.doc", "Copy output", .copyOutput)
     private lazy var rerunButton = makeButton("arrow.clockwise", "Re-run", .rerun)
     private lazy var explainButton = makeButton("sparkle", "Explain this error with AI", .explain)
+    private lazy var moreButton = makeButton("ellipsis", "Copy as Markdown, image, and more", .more)
 
     static let height: CGFloat = 24
 
@@ -523,7 +621,7 @@ final class BlockActionBar: NSView {
         stack.spacing = 0
         stack.edgeInsets = NSEdgeInsets(top: 0, left: 2, bottom: 0, right: 2)
         stack.translatesAutoresizingMaskIntoConstraints = false
-        [explainButton, copyCommandButton, copyOutputButton, rerunButton].forEach(stack.addArrangedSubview)
+        [explainButton, copyCommandButton, copyOutputButton, rerunButton, moreButton].forEach(stack.addArrangedSubview)
         explainButton.isHidden = true
         addSubview(stack)
         NSLayoutConstraint.activate([
@@ -548,6 +646,26 @@ final class BlockActionBar: NSView {
         button.widthAnchor.constraint(equalToConstant: 26).isActive = true
         button.heightAnchor.constraint(equalToConstant: Self.height).isActive = true
         return button
+    }
+
+    /// Shows a checkmark on the button for a moment.
+    func flashDone(_ action: Action) {
+        let button: HoverIconButton?
+        switch action {
+        case .copyCommand: button = copyCommandButton as? HoverIconButton
+        case .copyOutput: button = copyOutputButton as? HoverIconButton
+        default: button = nil
+        }
+        guard let button, let original = button.image,
+              let check = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Copied")?
+                .withSymbolConfiguration(.init(pointSize: 11, weight: .semibold)) else { return }
+        button.image = check
+        button.contentTintColor = palette?.success
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            button.image = original
+            button.contentTintColor = nil
+            if let palette = self?.palette { button.palette = palette }
+        }
     }
 
     private func restyle() {

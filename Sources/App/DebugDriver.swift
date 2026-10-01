@@ -241,6 +241,30 @@ enum DebugDriver {
                 (session.view.window?.windowController as? MainWindowController)?.closeTab(nil)
             case "@reopen":
                 (session.view.window?.windowController as? MainWindowController)?.reopenClosedTab(nil)
+            case let copy where copy.hasPrefix("@copy:"):
+                // `@copy:output`, `@copy:markdown`, `@copy:image:/path.png`… on the last block.
+                // Restores the clipboard afterwards.
+                let parts = copy.dropFirst(6).split(separator: ":", maxSplits: 1).map(String.init)
+                let kinds: [String: TerminalSession.CopyKind] = ["command": .command, "output": .output, "both": .commandAndOutput,
+                                                                  "markdown": .markdown, "image": .image, "secrets": .outputWithSecrets]
+                let pasteboard = NSPasteboard.general
+                let saved = pasteboard.pasteboardItems?.map { item -> NSPasteboardItem in
+                    let copy = NSPasteboardItem()
+                    for type in item.types { if let data = item.data(forType: type) { copy.setData(data, forType: type) } }
+                    return copy
+                } ?? []
+                if let kind = kinds[parts[0]] {
+                    session.copyLatestBlock(as: kind)
+                    if kind == .image, parts.count > 1, let data = pasteboard.data(forType: .png) {
+                        try? data.write(to: URL(fileURLWithPath: parts[1]))
+                        print("COPY image \(data.count) bytes")
+                    } else {
+                        print("COPY \(parts[0]) <<\(pasteboard.string(forType: .string) ?? "nil")>>")
+                    }
+                }
+                pasteboard.clearContents()
+                pasteboard.writeObjects(saved)
+                fflush(stdout)
             case "@gap":
                 // Distance between the last non-blank row on screen and the terminal area's bottom.
                 let terminal = session.terminalView.getTerminal()
