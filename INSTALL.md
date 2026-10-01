@@ -5,12 +5,9 @@ Rune is a local-first terminal for macOS 14 or later, on Apple Silicon or Intel.
 ## From the DMG
 
 1. Open `Rune.dmg` and drag **Rune** onto **Applications**.
-2. Rune is ad-hoc signed, not notarized, so macOS blocks the first launch. Allow it in one of these ways:
-   - In Finder, right-click **Rune.app** → **Open**, then click **Open** in the dialog. You only need to do this once.
-   - Or, in a terminal:
-     ```sh
-     xattr -dr com.apple.quarantine /Applications/Rune.app
-     ```
+2. Open Rune. Releases are signed with a Developer ID and notarized by Apple, so macOS opens it without a warning. Rune updates itself from then on (Rune › Check for Updates).
+
+   Or with Homebrew: `brew install --cask bryanparreira/tap/rune`.
 3. On first launch Rune creates `~/.config/rune/config.json` with defaults. It works right away with no setup.
 
 ## The `rune` command (optional)
