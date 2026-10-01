@@ -106,6 +106,9 @@ enum MainMenu {
         menu.addItem(.separator())
         menu.addItem(item("Select Previous Block", #selector(MainWindowController.selectPreviousBlock(_:)), "\u{F700}"))
         menu.addItem(item("Select Next Block", #selector(MainWindowController.selectNextBlock(_:)), "\u{F701}"))
+        menu.addItem(item("Extend Selection Up", #selector(MainWindowController.extendSelectionUp(_:)), "\u{F700}", [.command, .shift]))
+        menu.addItem(item("Extend Selection Down", #selector(MainWindowController.extendSelectionDown(_:)), "\u{F701}", [.command, .shift]))
+        menu.addItem(item("Compare with Previous Run", #selector(MainWindowController.compareRuns(_:)), "d", [.command, .option]))
         menu.addItem(.separator())
         menu.addItem(item("Clear Screen", #selector(MainWindowController.clearScreen(_:)), "k"))
         return menu

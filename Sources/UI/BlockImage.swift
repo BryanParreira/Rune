@@ -8,7 +8,8 @@ enum BlockImage {
     static let maxOutputLines = 300
     static let maxColumns = 160
 
-    struct Content {
+    /// One block in the picture.
+    struct Section {
         let command: String
         /// Output rows in order; a row with `isWrapped` continues the one before it.
         let rows: [BufferLine]
@@ -16,102 +17,129 @@ enum BlockImage {
         let omittedLines: Int
         let status: String
         let failed: Bool
+    }
+
+    struct Style {
         let terminalColumns: Int
         let theme: Theme
         let palette: ChromePalette
         let font: NSFont
-        /// Secrets to mask (nil when hiding is off), except those the user revealed.
+        /// Mask secrets (hiding is on), except those the user revealed.
         let maskSecrets: Bool
         let revealed: Set<String>
     }
 
     /// The picture as PNG data, and how many secrets were masked in it.
-    static func png(_ content: Content) -> (data: Data, hidden: Int)? {
+    static func png(_ sections: [Section], style: Style) -> (data: Data, hidden: Int)? {
+        guard !sections.isEmpty else { return nil }
         var hidden = 0
-        let lines = logicalLines(content, hidden: &hidden)
-        let font = content.font
+        let font = style.font
+        let palette = style.palette
         let bold = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
         let cellWidth = font.advancement(forGlyph: font.glyph(withName: "W")).width
-        let longest = max(content.command.count + 2, lines.map(\.length).max() ?? 0)
-        let columns = min(maxColumns, max(48, min(longest, max(48, content.terminalColumns))))
-        let textWidth = ceil(CGFloat(columns) * cellWidth)
-
-        let palette = content.palette
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byCharWrapping
         paragraph.lineHeightMultiple = 1.12
-
-        let command = NSMutableAttributedString(string: "$ ", attributes: [.font: bold, .foregroundColor: palette.accent, .paragraphStyle: paragraph])
-        let commandText = content.command.replacingOccurrences(of: "\n", with: "\n  ")
-        command.append(NSAttributedString(string: content.maskSecrets ? maskSecrets(in: commandText, revealed: content.revealed, hidden: &hidden) : commandText,
-                                          attributes: [.font: bold, .foregroundColor: palette.text, .paragraphStyle: paragraph]))
-
-        let output = NSMutableAttributedString()
-        if content.omittedLines > 0 {
-            output.append(NSAttributedString(string: "… \(content.omittedLines.formatted()) earlier lines\n",
-                                             attributes: [.font: font, .foregroundColor: palette.hint, .paragraphStyle: paragraph]))
-        }
-        for (index, line) in lines.enumerated() {
-            output.append(line)
-            if index < lines.count - 1 { output.append(NSAttributedString(string: "\n", attributes: [.font: font])) }
-        }
-        output.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: output.length))
-
         let statusFont = NSFont.monospacedSystemFont(ofSize: max(10, font.pointSize - 2), weight: .regular)
-        let status = NSAttributedString(string: content.status, attributes: [
-            .font: statusFont, .foregroundColor: content.failed ? palette.error : palette.hint,
-        ])
+
+        struct Laid {
+            let command: NSAttributedString
+            let output: NSAttributedString
+            let status: NSAttributedString
+            let failed: Bool
+        }
+        var longest = 0
+        let laid: [Laid] = sections.map { section in
+            let lines = logicalLines(section.rows, style: style, hidden: &hidden)
+            longest = max(longest, section.command.count + 2, lines.map(\.length).max() ?? 0)
+
+            let command = NSMutableAttributedString(string: "$ ", attributes: [.font: bold, .foregroundColor: palette.accent, .paragraphStyle: paragraph])
+            var commandText = section.command.replacingOccurrences(of: "\n", with: "\n  ")
+            if style.maskSecrets { commandText = maskSecrets(in: commandText, revealed: style.revealed, hidden: &hidden) }
+            command.append(NSAttributedString(string: commandText, attributes: [.font: bold, .foregroundColor: palette.text, .paragraphStyle: paragraph]))
+
+            let output = NSMutableAttributedString()
+            if section.omittedLines > 0 {
+                output.append(NSAttributedString(string: "… \(section.omittedLines.formatted()) earlier lines\n",
+                                                 attributes: [.font: font, .foregroundColor: palette.hint]))
+            }
+            for (index, line) in lines.enumerated() {
+                output.append(line)
+                if index < lines.count - 1 { output.append(NSAttributedString(string: "\n", attributes: [.font: font])) }
+            }
+            output.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: output.length))
+            let status = NSAttributedString(string: section.status, attributes: [
+                .font: statusFont, .foregroundColor: section.failed ? palette.error : palette.hint,
+            ])
+            return Laid(command: command, output: output, status: status, failed: section.failed)
+        }
+        let columns = min(maxColumns, max(48, min(longest, max(48, style.terminalColumns))))
+        let textWidth = ceil(CGFloat(columns) * cellWidth)
         let signature = NSAttributedString(string: "made in Rune", attributes: [
             .font: NSFont(name: "Caveat", size: font.pointSize + 5) ?? NSFont.systemFont(ofSize: font.pointSize + 3),
             .foregroundColor: palette.secondary,
         ])
 
         let measure: (NSAttributedString) -> CGFloat = {
-            ceil($0.boundingRect(with: NSSize(width: textWidth, height: .greatestFiniteMagnitude),
-                                 options: [.usesLineFragmentOrigin, .usesFontLeading]).height)
+            $0.length == 0 ? 0 : ceil($0.boundingRect(with: NSSize(width: textWidth, height: .greatestFiniteMagnitude),
+                                                      options: [.usesLineFragmentOrigin, .usesFontLeading]).height)
         }
         let pad: CGFloat = 26
-        let commandHeight = measure(command)
-        let outputHeight = output.length > 0 ? measure(output) : 0
-        let footerHeight = max(ceil(status.size().height), ceil(signature.size().height))
-        let gap: CGFloat = 14
-        let size = NSSize(
-            width: textWidth + pad * 2,
-            height: pad + commandHeight + gap + (outputHeight > 0 ? outputHeight + gap : 0) + 1 + 12 + footerHeight + pad - 6
-        )
+        let gap: CGFloat = 12
+        let statusHeight = ceil(max(statusFont.ascender - statusFont.descender, 12))
+        let signatureHeight = ceil(signature.size().height)
+        // Each section: command, output, status line; then a divider before the next.
+        let heights = laid.map { (command: measure($0.command), output: measure($0.output)) }
+        var total = pad
+        for (index, height) in heights.enumerated() {
+            total += height.command + gap
+            if height.output > 0 { total += height.output + gap }
+            total += statusHeight
+            total += index < heights.count - 1 ? gap * 2 + 1 : 0
+        }
+        total += 8 + signatureHeight + pad - 10
+        let size = NSSize(width: textWidth + pad * 2, height: total)
 
         let image = NSImage(size: size, flipped: true) { _ in
             let card = NSRect(origin: .zero, size: size).insetBy(dx: 0.5, dy: 0.5)
             let shape = NSBezierPath(roundedRect: card, xRadius: 12, yRadius: 12)
-            content.theme.background.nsColor.setFill()
+            style.theme.background.nsColor.setFill()
             shape.fill()
-            if content.failed {
-                NSGraphicsContext.saveGraphicsState()
-                shape.addClip()
-                palette.error.setFill()
-                NSRect(x: 0, y: 0, width: 4, height: size.height).fill()
-                NSGraphicsContext.restoreGraphicsState()
+            var y = pad
+            for (index, section) in laid.enumerated() {
+                let top = y - (index == 0 ? pad : gap)
+                let height = heights[index]
+                section.command.draw(with: NSRect(x: pad, y: y, width: textWidth, height: height.command), options: [.usesLineFragmentOrigin, .usesFontLeading])
+                y += height.command + gap
+                if height.output > 0 {
+                    section.output.draw(with: NSRect(x: pad, y: y, width: textWidth, height: height.output), options: [.usesLineFragmentOrigin, .usesFontLeading])
+                    y += height.output + gap
+                }
+                section.status.draw(at: NSPoint(x: pad, y: y))
+                y += statusHeight
+                if section.failed {
+                    // Flag pole beside the failed block, like in the terminal.
+                    NSGraphicsContext.saveGraphicsState()
+                    shape.addClip()
+                    palette.error.setFill()
+                    NSRect(x: 0, y: top, width: 4, height: y + gap - top).fill()
+                    NSGraphicsContext.restoreGraphicsState()
+                }
+                if index < laid.count - 1 {
+                    y += gap
+                    palette.outline.setFill()
+                    NSRect(x: pad, y: y, width: textWidth, height: 1).fill()
+                    y += 1 + gap
+                }
             }
             palette.outline.setStroke()
             shape.lineWidth = 1
             shape.stroke()
-
-            var y = pad
-            command.draw(with: NSRect(x: pad, y: y, width: textWidth, height: commandHeight), options: [.usesLineFragmentOrigin, .usesFontLeading])
-            y += commandHeight + gap
-            if outputHeight > 0 {
-                output.draw(with: NSRect(x: pad, y: y, width: textWidth, height: outputHeight), options: [.usesLineFragmentOrigin, .usesFontLeading])
-                y += outputHeight + gap
-            }
-            palette.outline.setFill()
-            NSRect(x: pad, y: y, width: textWidth, height: 1).fill()
-            y += 12
-            status.draw(at: NSPoint(x: pad, y: y + (footerHeight - status.size().height) / 2))
             // The handwritten signature, tilted like a margin note.
             let signatureSize = signature.size()
             NSGraphicsContext.saveGraphicsState()
             let transform = NSAffineTransform()
-            transform.translateX(by: pad + textWidth - signatureSize.width / 2, yBy: y + footerHeight / 2)
+            transform.translateX(by: pad + textWidth - signatureSize.width / 2, yBy: size.height - pad + 10 - signatureHeight / 2)
             transform.rotate(byDegrees: -2.5)
             transform.concat()
             signature.draw(at: NSPoint(x: -signatureSize.width / 2, y: -signatureSize.height / 2))
@@ -120,8 +148,7 @@ enum BlockImage {
         }
 
         var rect = NSRect(origin: .zero, size: size)
-        let scale: CGFloat = 2
-        guard let cgImage = image.cgImage(forProposedRect: &rect, context: nil, hints: [.ctm: AffineTransform(scale: scale)]) else { return nil }
+        guard let cgImage = image.cgImage(forProposedRect: &rect, context: nil, hints: [.ctm: AffineTransform(scale: 2)]) else { return nil }
         let rep = NSBitmapImageRep(cgImage: cgImage)
         rep.size = size
         guard let data = rep.representation(using: .png, properties: [:]) else { return nil }
@@ -131,9 +158,9 @@ enum BlockImage {
     // MARK: - Output text
 
     /// Joins soft-wrapped rows into lines, keeping each cell's colors and style.
-    private static func logicalLines(_ content: Content, hidden: inout Int) -> [NSMutableAttributedString] {
+    private static func logicalLines(_ rows: [BufferLine], style content: Style, hidden: inout Int) -> [NSMutableAttributedString] {
         var lines: [NSMutableAttributedString] = []
-        for row in content.rows {
+        for row in rows {
             let text = attributed(row, content: content)
             if row.isWrapped, let last = lines.last {
                 last.append(text)
@@ -160,7 +187,7 @@ enum BlockImage {
         return lines
     }
 
-    private static func attributed(_ line: BufferLine, content: Content) -> NSMutableAttributedString {
+    private static func attributed(_ line: BufferLine, content: Style) -> NSMutableAttributedString {
         let out = NSMutableAttributedString()
         var run = ""
         var runAttributes: [NSAttributedString.Key: Any] = [:]
@@ -186,7 +213,7 @@ enum BlockImage {
         return out
     }
 
-    private static func attributes(for attribute: Attribute, content: Content) -> [NSAttributedString.Key: Any] {
+    private static func attributes(for attribute: Attribute, content: Style) -> [NSAttributedString.Key: Any] {
         let style = attribute.style
         var font = content.font
         if style.contains(.bold) { font = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask) }

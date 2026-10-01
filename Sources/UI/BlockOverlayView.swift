@@ -290,7 +290,7 @@ final class BlockOverlayView: NSView {
                 palette.error.withAlphaComponent(0.10).setFill()
                 frame.rect.fill()
             }
-            if block.id == session.selectedBlockID {
+            if session.selectedBlockIDs.contains(block.id) {
                 palette.accent.withAlphaComponent(0.14).setFill()
                 frame.rect.fill()
                 palette.accent.withAlphaComponent(0.7).setStroke()

@@ -425,6 +425,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             guard let self, let session else { return }
             self.closePane(session)
         }
+        session.onCompare = { [weak self] old, new in
+            guard let self else { return }
+            self.insert(OutputCompareTab(old: old, new: new, snapshot: self.configStore.snapshot))
+        }
         session.onOpenFile = { [weak self] path, line in
             self?.openFile(path: path, pinned: true)
             if let line, let preview = self?.selectedTab as? FilePreviewTab { preview.reveal(line: line) }
@@ -844,6 +848,18 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         selectedSession?.selectAdjacentBlock(previous: false)
     }
 
+    @objc func extendSelectionUp(_ sender: Any?) {
+        selectedSession?.selectAdjacentBlock(previous: true, extend: true)
+    }
+
+    @objc func extendSelectionDown(_ sender: Any?) {
+        selectedSession?.selectAdjacentBlock(previous: false, extend: true)
+    }
+
+    @objc func compareRuns(_ sender: Any?) {
+        selectedSession?.compareLatestRuns()
+    }
+
     @objc func copyLatestOutput(_ sender: Any?) {
         selectedSession?.copyLatestOutput()
     }
@@ -999,6 +1015,9 @@ extension MainWindowController {
             action("Clear Screen", "eraser", "⌘K") { [weak self] in self?.clearScreen(nil) }
             action("Select Previous Block", "arrow.up.square", "⌘↑") { [weak self] in self?.selectPreviousBlock(nil) }
             action("Copy Last Output", "doc.on.doc", "⇧⌘C", keywords: "clipboard result") { [weak self] in self?.copyLatestOutput(nil) }
+            action("Compare with Previous Run", "arrow.left.arrow.right", "⌥⌘D", keywords: "diff changes output before after test") { [weak self] in
+                self?.compareRuns(nil)
+            }
             action("Copy Last Block as Image", "photo", "⌥⌘C", keywords: "screenshot picture png share") { [weak self] in self?.copyLatestBlockImage(nil) }
             action("Copy Last Block as Markdown", "text.badge.checkmark", keywords: "clipboard code fence share issue") { [weak self] in
                 self?.selectedSession?.copyLatestBlock(as: .markdown)

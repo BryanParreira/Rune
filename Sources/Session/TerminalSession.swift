@@ -46,6 +46,28 @@ final class RuneTerminalView: LocalProcessTerminalView {
     /// Whether ⌘C can do something with no text selected (a block is selected).
     var canCopyWithoutSelection: (() -> Bool)?
 
+    /// A click that didn't select text or open a link: point in view coordinates, and whether
+    /// ⇧ was held.
+    var onPlainClick: ((NSPoint, Bool) -> Void)?
+    private var pressLocation: NSPoint?
+    private var pressHadSelection = false
+
+    override func mouseDown(with event: NSEvent) {
+        pressLocation = event.locationInWindow
+        pressHadSelection = selection.active
+        super.mouseDown(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        defer { pressLocation = nil }
+        guard event.clickCount == 1, let start = pressLocation, !event.modifierFlags.contains(.command),
+              hypot(event.locationInWindow.x - start.x, event.locationInWindow.y - start.y) < 4,
+              !selection.active, !pressHadSelection || event.modifierFlags.contains(.shift)
+        else { return }
+        onPlainClick?(convert(event.locationInWindow, from: nil), event.modifierFlags.contains(.shift))
+    }
+
     override func copy(_ sender: Any) {
         if copyHandler?(selection.active ? getSelection() : nil) == true { return }
         super.copy(sender)
@@ -97,8 +119,13 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     private(set) var gitBranch: String?
     private(set) var integration: IntegrationState = .pending
     private(set) var mode: InputMode = .editor
-    /// Block highlighted by Cmd-Up/Down.
+    /// Block highlighted by Cmd-Up/Down or a click: the end of the selection that moves.
     private(set) var selectedBlockID: Int?
+    /// Every selected block (⇧-click or ⇧⌘↑ selects a range).
+    private(set) var selectedBlockIDs: Set<Int> = []
+    private var selectionAnchorID: Int?
+    /// Open two runs' outputs as a diff.
+    var onCompare: ((OutputCompareModel.Run, OutputCompareModel.Run) -> Void)?
 
     /// Title, cwd or mode changed.
     var onChange: (() -> Void)?
@@ -190,6 +217,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         terminalView.contextMenuProvider = { [weak self] point in self?.contextMenu(atTerminalPoint: point) }
         terminalView.onOpenLink = { [weak self] link in self?.openLink(link) ?? false }
         terminalView.copyHandler = { [weak self] selected in self?.copySelection(selected) ?? false }
+        terminalView.onPlainClick = { [weak self] point, extend in self?.clickedOutput(atTerminalPoint: point, extend: extend) }
         terminalView.canCopyWithoutSelection = { [weak self] in self?.canCopySelectedBlock ?? false }
         terminalView.outputFilter = { [weak self] slice in self?.filterOutput(slice) ?? slice }
         installOSCHandlers()
@@ -412,7 +440,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             HistoryStore.shared.append(trimmed)
         }
         historyNavigator.reset()
-        selectedBlockID = nil
+        selectBlock(nil)
         view.dismissWelcomeForSession()
         // Make room for the output; the conversation stays available for follow-ups.
         view.conversation.collapse()
@@ -455,7 +483,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     func clearScreen() {
         tracker.removeAll()
         anchorLines.removeAll()
-        selectedBlockID = nil
+        selectBlock(nil)
         terminalView.feed(text: "\u{1b}[H\u{1b}[2J\u{1b}[3J")
         if promptIsInvisible, integration == .active {
             reanchorPromptAtBottom()
@@ -561,7 +589,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
 
     // MARK: - Blocks
 
-    func selectAdjacentBlock(previous: Bool) {
+    /// ⌘↑/⌘↓ move the selection a block at a time; with ⇧ they extend it.
+    func selectAdjacentBlock(previous: Bool, extend: Bool = false) {
         let blocks = tracker.blocks
         guard !blocks.isEmpty else { return }
         let index: Int
@@ -572,16 +601,87 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         }
         guard index < blocks.count else {
             // Past the newest block: back to the input.
-            selectedBlockID = nil
+            selectBlock(nil)
             terminalView.scrollTo(row: Int.max)
-            view.blocksDidChange()
             view.focusPreferredResponder()
             return
         }
         let block = blocks[index]
-        selectedBlockID = block.id
+        selectBlock(block.id, extend: extend)
         scrollToTop(row: block.headerRow)
-        view.blocksDidChange()
+    }
+
+    /// Selects one block, or (with `extend`) every block from the selection's anchor to it.
+    func selectBlock(_ id: Int?, extend: Bool = false) {
+        defer { view.blocksDidChange() }
+        guard let id else {
+            selectedBlockID = nil
+            selectedBlockIDs = []
+            selectionAnchorID = nil
+            return
+        }
+        let blocks = tracker.blocks
+        if extend, let anchor = selectionAnchorID ?? selectedBlockID,
+           let from = blocks.firstIndex(where: { $0.id == anchor }), let to = blocks.firstIndex(where: { $0.id == id }) {
+            selectedBlockIDs = Set(blocks[min(from, to)...max(from, to)].map(\.id))
+            selectionAnchorID = anchor
+        } else {
+            selectedBlockIDs = [id]
+            selectionAnchorID = id
+        }
+        selectedBlockID = id
+    }
+
+    /// The selected blocks, oldest first.
+    var selectedBlocks: [Block] { tracker.blocks.filter { selectedBlockIDs.contains($0.id) } }
+
+    /// A click (not a drag) on the output: selects the block under it, ⇧ extends the
+    /// selection, and clicking the only selected block again (or empty space) deselects.
+    func clickedOutput(atTerminalPoint point: NSPoint, extend: Bool) {
+        guard mode == .editor || mode == .runningCommand else { return }
+        let row = geometry.row(atY: point.y)
+        guard let index = tracker.blockIndex(containing: row, currentRow: geometry.cursorPosition.row) else {
+            selectBlock(nil)
+            return
+        }
+        let id = tracker.blocks[index].id
+        if !extend, selectedBlockIDs == [id] {
+            selectBlock(nil)
+        } else {
+            selectBlock(id, extend: extend)
+        }
+    }
+
+    // MARK: - Comparing runs
+
+    /// The last earlier run of the same command, if any.
+    func previousRun(of block: Block) -> Block? {
+        let command = commandText(of: block).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let index = tracker.blocks.firstIndex(where: { $0.id == block.id }) else { return nil }
+        return tracker.blocks[..<index].last {
+            $0.state == .finished && commandText(of: $0).trimmingCharacters(in: .whitespacesAndNewlines) == command
+        }
+    }
+
+    /// Opens a diff of two blocks' outputs, older one first.
+    func compare(_ first: Block, _ second: Block) {
+        let (old, new) = first.startedAt <= second.startedAt ? (first, second) : (second, first)
+        func run(_ block: Block) -> OutputCompareModel.Run {
+            OutputCompareModel.Run(command: commandText(of: block), output: outputText(of: block),
+                                   startedAt: block.startedAt, exitCode: block.exitCode, failed: block.isFailed)
+        }
+        onCompare?(run(old), run(new))
+    }
+
+    /// The two selected blocks; otherwise the latest command against its previous run, or
+    /// the last two commands.
+    func compareLatestRuns() {
+        let selected = selectedBlocks
+        if selected.count == 2 { return compare(selected[0], selected[1]) }
+        let finished = tracker.blocks.filter { $0.state == .finished }
+        if let latest = finished.last, let previous = previousRun(of: latest) { return compare(previous, latest) }
+        if finished.count >= 2 { return compare(finished[finished.count - 2], finished[finished.count - 1]) }
+        NSSound.beep()
     }
 
     /// Scrolls so a (scroll-invariant) row is the first one on screen, below any rows the
@@ -591,9 +691,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     }
 
     func clearBlockSelection() {
-        guard selectedBlockID != nil else { return }
-        selectedBlockID = nil
-        view.blocksDidChange()
+        guard selectedBlockID != nil || !selectedBlockIDs.isEmpty else { return }
+        selectBlock(nil)
     }
 
     func commandText(of block: Block) -> String {
@@ -655,8 +754,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             pasteboard.setData(png.data, forType: .png)
             message = "Copied as image"
         }
-        let note = hidden == 0 ? "" : "  ·  \(hidden) secret\(hidden == 1 ? "" : "s") hidden"
-        view.overlay.showCopied(message + note, for: block, action: kind)
+        view.overlay.showCopied(message + Self.hiddenNote(hidden), for: block, action: kind)
     }
 
     /// Whether the block's output has secrets that copying would mask.
@@ -667,15 +765,49 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         return SecretRedactor.matches(in: output).contains { !revealed.contains((output as NSString).substring(with: $0.range)) }
     }
 
-    /// ⌘C with nothing selected copies the selected block. Returns false if there is none.
+    /// ⌘C with no text selected copies the selected blocks. Returns false if there are none.
     @discardableResult
     func copySelectedBlock() -> Bool {
-        guard let id = selectedBlockID, let block = tracker.block(id: id) else { return false }
-        copy(.commandAndOutput, of: block)
+        let blocks = selectedBlocks
+        guard !blocks.isEmpty else { return false }
+        if blocks.count == 1 {
+            copy(.commandAndOutput, of: blocks[0])
+        } else {
+            copy(.commandAndOutput, of: blocks)
+        }
         return true
     }
 
-    var canCopySelectedBlock: Bool { selectedBlockID.flatMap(tracker.block(id:)) != nil }
+    var canCopySelectedBlock: Bool { !selectedBlocks.isEmpty }
+
+    /// Several blocks at once (a ⇧-selected range): one after the other.
+    func copy(_ kind: CopyKind, of blocks: [Block]) {
+        guard let last = blocks.last else { return }
+        guard blocks.count > 1 else { return copy(kind, of: last) }
+        var hidden = 0
+        let noun = "\(blocks.count) blocks"
+        switch kind {
+        case .image:
+            guard let png = blockImage(of: blocks) else { return NSSound.beep() }
+            hidden = png.hidden
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setData(png.data, forType: .png)
+            view.overlay.showCopied("Copied \(noun) as image" + Self.hiddenNote(hidden), for: last)
+        case .markdown:
+            let markdown = blocks.map(markdownText(of:)).joined(separator: "\n\n")
+            hidden = SecretRedactor.matches(in: markdown).count
+            copyToPasteboard(SecretRedactor.redact(markdown))
+            view.overlay.showCopied("Copied \(noun) as Markdown" + Self.hiddenNote(hidden), for: last)
+        default:
+            let text = blocks.map { transcript(of: $0) }.joined(separator: "\n\n")
+            copyToPasteboard(shown(text, hidden: &hidden))
+            view.overlay.showCopied("Copied \(noun)" + Self.hiddenNote(hidden), for: last)
+        }
+    }
+
+    private static func hiddenNote(_ hidden: Int) -> String {
+        hidden == 0 ? "" : "  ·  \(hidden) secret\(hidden == 1 ? "" : "s") hidden"
+    }
 
     /// ⇧⌘C: the output of the selected block, or of the last command that printed something.
     func copyLatestOutput() {
@@ -739,23 +871,33 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     }
 
     private func blockImage(of block: Block) -> (data: Data, hidden: Int)? {
+        blockImage(of: [block])
+    }
+
+    private func blockImage(of blocks: [Block]) -> (data: Data, hidden: Int)? {
         let terminal = terminalView.getTerminal()
-        var rows: [BufferLine] = []
-        var omitted = 0
-        if let range = block.outputRows(currentRow: geometry.cursorPosition.row) {
-            let kept = max(range.lowerBound, range.upperBound - BlockImage.maxOutputLines + 1)...range.upperBound
-            omitted = range.count - kept.count
-            rows = kept.compactMap { terminal.getScrollInvariantLine(row: $0) }
+        let current = geometry.cursorPosition.row
+        // A long selection keeps the newest output: about as many lines as one block gets.
+        var budget = BlockImage.maxOutputLines
+        var sections: [BlockImage.Section] = []
+        for block in blocks.reversed() {
+            var rows: [BufferLine] = []
+            var omitted = 0
+            if let range = block.outputRows(currentRow: current) {
+                let keep = max(0, min(range.count, budget))
+                budget -= keep
+                omitted = range.count - keep
+                if keep > 0 {
+                    rows = ((range.upperBound - keep + 1)...range.upperBound).compactMap { terminal.getScrollInvariantLine(row: $0) }
+                }
+            }
+            var status = [TabTitle.abbreviate(path: block.cwd, home: NSHomeDirectory())]
+            if block.isFailed, let code = block.exitCode { status.append("exit \(code)") }
+            if block.state == .finished { status.append(BlockOverlayView.format(duration: block.duration())) }
+            sections.insert(BlockImage.Section(command: commandText(of: block), rows: rows, omittedLines: omitted,
+                                               status: status.joined(separator: "  ·  "), failed: block.isFailed), at: 0)
         }
-        var status = [TabTitle.abbreviate(path: block.cwd, home: NSHomeDirectory())]
-        if block.isFailed, let code = block.exitCode { status.append("exit \(code)") }
-        if block.state == .finished { status.append(BlockOverlayView.format(duration: block.duration())) }
-        return BlockImage.png(BlockImage.Content(
-            command: commandText(of: block),
-            rows: rows,
-            omittedLines: omitted,
-            status: status.joined(separator: "  ·  "),
-            failed: block.isFailed,
+        return BlockImage.png(sections, style: BlockImage.Style(
             terminalColumns: terminal.cols,
             theme: snapshot.theme,
             palette: palette,
@@ -787,6 +929,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
 
     /// Everything you can do with a block: copying it in various forms, filtering, re-running.
     func blockMenu(for block: Block) -> NSMenu {
+        let selected = selectedBlocks
+        if selected.count > 1, selectedBlockIDs.contains(block.id) { return selectionMenu(for: selected) }
         let menu = NSMenu()
         menu.addItem(BlockMenuItem(title: "Copy Command", block: block) { [weak self] in self?.copy(.command, of: $0) })
         menu.addItem(BlockMenuItem(title: "Copy Output", block: block) { [weak self] in self?.copy(.output, of: $0) })
@@ -797,6 +941,9 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         menu.addItem(BlockMenuItem(title: "Copy as Markdown", block: block) { [weak self] in self?.copy(.markdown, of: $0) })
         menu.addItem(BlockMenuItem(title: "Copy as Image", block: block) { [weak self] in self?.copy(.image, of: $0) })
         menu.addItem(.separator())
+        if let previous = previousRun(of: block) {
+            menu.addItem(BlockMenuItem(title: "Compare with Previous Run", block: block) { [weak self] in self?.compare(previous, $0) })
+        }
         menu.addItem(BlockMenuItem(title: "Filter Output…", block: block) { [weak self] b in
             guard let self else { return }
             self.view.showFilter(command: self.commandText(of: b), output: self.outputText(of: b, maxRows: BlockFilterModel.maxLines))
@@ -810,11 +957,26 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         if AIService.shared.isEnabled {
         menu.addItem(BlockMenuItem(title: "Ask AI About This Block…", block: block) { [weak self] b in
             guard let self else { return }
-            self.selectedBlockID = b.id
-            self.view.blocksDidChange()
+            self.selectBlock(b.id)
             self.view.inputArea.focusEditor()
         })
         }
+        return menu
+    }
+
+    /// Actions on a ⇧-selected range of blocks.
+    private func selectionMenu(for blocks: [Block]) -> NSMenu {
+        let menu = NSMenu()
+        let count = blocks.count
+        menu.addItem(ClosureMenuItem(title: "Copy \(count) Blocks") { [weak self] in self?.copy(.commandAndOutput, of: blocks) })
+        menu.addItem(ClosureMenuItem(title: "Copy \(count) Blocks as Markdown") { [weak self] in self?.copy(.markdown, of: blocks) })
+        menu.addItem(ClosureMenuItem(title: "Copy \(count) Blocks as Image") { [weak self] in self?.copy(.image, of: blocks) })
+        if count == 2 {
+            menu.addItem(.separator())
+            menu.addItem(ClosureMenuItem(title: "Compare Outputs") { [weak self] in self?.compare(blocks[0], blocks[1]) })
+        }
+        menu.addItem(.separator())
+        menu.addItem(ClosureMenuItem(title: "Clear Selection") { [weak self] in self?.selectBlock(nil) })
         return menu
     }
 

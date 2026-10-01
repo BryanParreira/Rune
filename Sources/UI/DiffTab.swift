@@ -171,12 +171,24 @@ struct DiffView: View {
     }
 
     private func lines(_ diff: GitDiff) -> some View {
-        let p = model.palette
-        let font = Font(model.font)
-        let numberFont = Font(NSFont.monospacedDigitSystemFont(ofSize: max(9, model.font.pointSize - 2), weight: .regular))
+        DiffLinesView(diff: diff, palette: model.palette, font: model.font)
+    }
+}
+
+/// Diff lines: removed in red, added in green, numbered on both sides.
+struct DiffLinesView: View {
+    let diff: GitDiff
+    let palette: ChromePalette
+    let font: NSFont
+
+    var body: some View {
+        let p = palette
+        let nsFont = self.font
+        let font = Font(nsFont)
+        let numberFont = Font(NSFont.monospacedDigitSystemFont(ofSize: max(9, nsFont.pointSize - 2), weight: .regular))
         // Wide enough for the largest line number.
         let digits = String(diff.lines.compactMap { max($0.oldNumber ?? 0, $0.newNumber ?? 0) }.max() ?? 0).count
-        let numberWidth = CGFloat(max(3, digits)) * (model.font.pointSize * 0.62) + 8
+        let numberWidth = CGFloat(max(3, digits)) * (nsFont.pointSize * 0.62) + 8
         return GeometryReader { viewport in
         ScrollView([.vertical, .horizontal]) {
             LazyVStack(alignment: .leading, spacing: 0) {

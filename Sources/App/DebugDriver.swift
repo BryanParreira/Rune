@@ -253,7 +253,14 @@ enum DebugDriver {
                     for type in item.types { if let data = item.data(forType: type) { copy.setData(data, forType: type) } }
                     return copy
                 } ?? []
-                if let kind = kinds[parts[0]] {
+                if parts[0] == "selected" {
+                    session.copySelectedBlock()
+                    print("COPY selected(\(session.selectedBlocks.count)) <<\(pasteboard.string(forType: .string) ?? "nil")>>")
+                } else if parts[0] == "selectedImage", parts.count > 1 {
+                    session.copy(.image, of: session.selectedBlocks)
+                    try? pasteboard.data(forType: .png)?.write(to: URL(fileURLWithPath: parts[1]))
+                    print("COPY selectedImage")
+                } else if let kind = kinds[parts[0]] {
                     session.copyLatestBlock(as: kind)
                     if kind == .image, parts.count > 1, let data = pasteboard.data(forType: .png) {
                         try? data.write(to: URL(fileURLWithPath: parts[1]))
@@ -265,6 +272,12 @@ enum DebugDriver {
                 pasteboard.clearContents()
                 pasteboard.writeObjects(saved)
                 fflush(stdout)
+            case "@selectPrev":
+                session.selectAdjacentBlock(previous: true)
+            case "@extendPrev":
+                session.selectAdjacentBlock(previous: true, extend: true)
+            case "@compare":
+                session.compareLatestRuns()
             case "@gap":
                 // Distance between the last non-blank row on screen and the terminal area's bottom.
                 let terminal = session.terminalView.getTerminal()
