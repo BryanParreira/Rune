@@ -61,6 +61,8 @@ public enum ShellMarkParser {
         case "remote": return value.isEmpty ? nil : .remoteHost(value)
         case "rcwd": return value.isEmpty ? nil : .remoteDirectory(value)
         case "remote-ready": return .remoteReady
+        // fish reports prompt/command marks here instead of OSC 133 (see rune.fish).
+        case "mark": return parse133(value)
         default: return nil
         }
     }

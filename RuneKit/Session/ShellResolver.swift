@@ -32,7 +32,21 @@ public enum ShellResolver {
 
     /// True if the shell is zsh (used later to decide whether integration can be injected).
     public static func isZsh(_ shellPath: String) -> Bool {
-        (shellPath as NSString).lastPathComponent == "zsh"
+        kind(of: shellPath) == .zsh
+    }
+
+    /// Shells Rune can add its integration to (blocks, the input editor).
+    public enum Kind: Equatable, Sendable {
+        case zsh, bash, fish, other
+    }
+
+    public static func kind(of shellPath: String) -> Kind {
+        switch (shellPath as NSString).lastPathComponent {
+        case "zsh": return .zsh
+        case "bash": return .bash
+        case "fish": return .fish
+        default: return .other
+        }
     }
 }
 
@@ -85,6 +99,31 @@ public enum ShellEnvironment {
         // Typing at the shell prompt needs the real prompt and a visible cursor.
         env["RUNE_HONOR_PROMPT"] = (honorPrompt || typeInShell) ? "1" : "0"
         env["RUNE_INPUT_MODE"] = typeInShell ? "shell" : "editor"
+    }
+
+    /// bash: started (not as a login shell) with `--init-file`; Rune's file loads the user's
+    /// login startup files itself, then adds the integration. Returns the arguments.
+    public static func addBashIntegration(to env: inout [String: String], integrationDirectory: String,
+                                          honorPrompt: Bool, typeInShell: Bool = false) -> [String] {
+        env["RUNE_INTEGRATION_DIR"] = integrationDirectory
+        env["RUNE_HONOR_PROMPT"] = (honorPrompt || typeInShell) ? "1" : "0"
+        env["RUNE_INPUT_MODE"] = typeInShell ? "shell" : "editor"
+        // macOS's bash prints "The default interactive shell is now zsh" in every new shell;
+        // someone who picked bash has seen it.
+        if env["BASH_SILENCE_DEPRECATION_WARNING"] == nil { env["BASH_SILENCE_DEPRECATION_WARNING"] = "1" }
+        return ["--init-file", (integrationDirectory as NSString).appendingPathComponent("rune.bash")]
+    }
+
+    /// fish: a login shell that sources Rune's file after the user's config.fish. Returns the
+    /// arguments.
+    public static func addFishIntegration(to env: inout [String: String], integrationDirectory: String,
+                                          honorPrompt: Bool, typeInShell: Bool = false) -> [String] {
+        env["RUNE_INTEGRATION_DIR"] = integrationDirectory
+        env["RUNE_HONOR_PROMPT"] = (honorPrompt || typeInShell) ? "1" : "0"
+        env["RUNE_INPUT_MODE"] = typeInShell ? "shell" : "editor"
+        let script = (integrationDirectory as NSString).appendingPathComponent("rune.fish")
+        let quoted = "'" + script.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'") + "'"
+        return ["--init-command", "source " + quoted]
     }
 
     /// `KEY=value` array form expected by forkpty/execve, sorted for determinism.

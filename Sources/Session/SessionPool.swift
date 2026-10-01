@@ -36,7 +36,8 @@ final class SessionPool {
     func take(snapshot: ConfigSnapshot, directory: String) -> TerminalSession? {
         defer { scheduleRefill(snapshot: snapshot) }
         guard let session = spare, spareKey == StartKey(snapshot.config),
-              session.state == .running, session.hasPrompted, session.integration == .active
+              session.state == .running, session.hasPrompted, session.integration == .active,
+              session.canMoveIdleShell || session.currentDirectory == directory
         else {
             discard()
             return nil

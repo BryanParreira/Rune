@@ -90,7 +90,10 @@ final class RuneTerminalView: LocalProcessTerminalView {
     }
 
     override func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        if !bypassInterceptor, let inputInterceptor, inputInterceptor(data) {
+        // Sent while output is being parsed: the terminal answering the program (cursor
+        // position, device attributes, colors…), not a keystroke. fish waits for these at
+        // startup, so they always go to the shell.
+        if !bypassInterceptor, !feeding, let inputInterceptor, inputInterceptor(data) {
             return
         }
         super.send(source: source, data: data)
@@ -376,9 +379,33 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         var env = ShellEnvironment.build(inherited: ProcessInfo.processInfo.environment, currentDirectory: directory, appVersion: version)
 
         typeInShell = config.inputMode == .shell
-        if ShellResolver.isZsh(shell), let integrationDir = Self.zshIntegrationDirectory() {
-            ShellEnvironment.addZshIntegration(to: &env, integrationDirectory: integrationDir,
-                                               honorPrompt: config.honorPrompt, typeInShell: typeInShell)
+        shellKind = ShellResolver.kind(of: shell)
+        var arguments: [String] = []
+        var execName = ShellResolver.loginArgv0(for: shell)
+        var integrationDir: String?
+        switch shellKind {
+        case .zsh:
+            if let dir = Self.integrationDirectory("zsh", marker: ".zshenv") {
+                ShellEnvironment.addZshIntegration(to: &env, integrationDirectory: dir, honorPrompt: config.honorPrompt, typeInShell: typeInShell)
+                integrationDir = dir
+            }
+        case .bash:
+            if let dir = Self.integrationDirectory("bash", marker: "rune.bash") {
+                arguments = ShellEnvironment.addBashIntegration(to: &env, integrationDirectory: dir, honorPrompt: config.honorPrompt, typeInShell: typeInShell)
+                // Not a login shell: --init-file only applies otherwise, and Rune's file loads
+                // the login startup files itself.
+                execName = "bash"
+                integrationDir = dir
+            }
+        case .fish:
+            if let dir = Self.integrationDirectory("fish", marker: "rune.fish") {
+                arguments = ShellEnvironment.addFishIntegration(to: &env, integrationDirectory: dir, honorPrompt: config.honorPrompt, typeInShell: typeInShell)
+                integrationDir = dir
+            }
+        case .other:
+            break
+        }
+        if integrationDir != nil {
             env["RUNE_CD_FILE"] = cdRequestFile.path
             integration = .pending
             // Keep the caret hidden while zsh loads; the integration shows it when it's
@@ -404,9 +431,9 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         padToBottom()
         terminalView.startProcess(
             executable: shell,
-            args: [],
+            args: arguments,
             environment: ShellEnvironment.toArray(env),
-            execName: ShellResolver.loginArgv0(for: shell),
+            execName: execName,
             currentDirectory: directory
         )
         updateMode()
@@ -483,12 +510,19 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         view.blocksDidChange()
     }
 
-    private static func zshIntegrationDirectory() -> String? {
-        guard let dir = Bundle.main.resourceURL?.appendingPathComponent("ShellIntegration/zsh", isDirectory: true),
-              FileManager.default.fileExists(atPath: dir.appendingPathComponent(".zshenv").path)
+    private static func integrationDirectory(_ shell: String, marker: String) -> String? {
+        guard let dir = Bundle.main.resourceURL?.appendingPathComponent("ShellIntegration/\(shell)", isDirectory: true),
+              FileManager.default.fileExists(atPath: dir.appendingPathComponent(marker).path)
         else { return nil }
         return dir.path
     }
+
+    /// Which shell this session runs (fixed when it starts).
+    private(set) var shellKind: ShellResolver.Kind = .other
+
+    /// Whether an idle shell can be moved to another folder without a visible command:
+    /// bash only runs its signal trap at the next prompt, so a spare bash isn't reused.
+    var canMoveIdleShell: Bool { shellKind == .zsh || shellKind == .fish }
 
     /// Name of a program running in this tab (vim, npm, ssh…), or nil when the shell is idle.
     var runningProgram: String? {
@@ -1293,7 +1327,9 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         // observe each mark first, while the cursor is where the shell put it.
         let builtIn133 = terminal.parser.oscHandlers[133]
         terminal.registerOscHandler(code: 133) { [weak self] data in
-            if let text = String(bytes: data, encoding: .utf8), let mark = ShellMarkParser.parse133(text) {
+            // fish 4 prints OSC 133 marks of its own; Rune's fish integration reports them on its
+            // private channel instead, so only that one counts.
+            if self?.shellKind != .fish, let text = String(bytes: data, encoding: .utf8), let mark = ShellMarkParser.parse133(text) {
                 self?.handle(mark)
             }
             builtIn133?(data)
