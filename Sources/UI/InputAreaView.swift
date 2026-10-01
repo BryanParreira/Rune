@@ -106,6 +106,7 @@ final class InputAreaView: NSView, NSTextViewDelegate {
         chipsModel.palette = palette
         chipsModel.monoFontSize = CGFloat(config.fontSize)
         editor.configure(font: snapshot.font, palette: palette)
+        editor.optionAsMeta = config.optionAsMeta
         refreshHighlighting()
         updateEditorHeight()
         needsDisplay = true

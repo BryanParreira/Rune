@@ -30,6 +30,13 @@ final class CommandTextView: NSTextView {
     /// Set while a workflow from the palette is being filled in: Tab jumps between its
     /// `{{placeholders}}` and Return won't run it until they're all replaced.
     var fillingWorkflow = false
+    /// ⌥B / ⌥F / ⌥D / ⌥. act as in a shell instead of typing ∫ ƒ ∂ ≥ (the "Option as Meta"
+    /// setting, like the terminal).
+    var optionAsMeta = true
+    /// What ⌃U, ⌃W and ⌃K removed, for ⌃Y.
+    private var killBuffer = ""
+    /// ⌥. pressed again right away steps to the previous command's last argument.
+    private var lastArgument: (offset: Int, range: NSRange)?
 
     convenience init() {
         // TextKit 1: line heights and the suggestion overlay use the layout manager directly.
@@ -117,6 +124,10 @@ final class CommandTextView: NSTextView {
     override func keyDown(with event: NSEvent) {
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let plain = mods.subtracting([.numericPad, .function, .capsLock]).isEmpty
+        let key = event.charactersIgnoringModifiers?.lowercased()
+        let cyclingLastArgument = lastArgument
+        lastArgument = nil
+        if handleShellKey(key, mods: mods, cycling: cyclingLastArgument) { return }
 
         switch event.keyCode {
         case 36, 76: // Return, keypad Enter
@@ -186,6 +197,76 @@ final class CommandTextView: NSTextView {
             }
         }
         super.keyDown(with: event)
+    }
+
+    // MARK: - Shell editing keys
+
+    /// Line-editing keys from shells (readline/zle) that terminal users type without thinking.
+    private func handleShellKey(_ key: String?, mods: NSEvent.ModifierFlags, cycling: (offset: Int, range: NSRange)?) -> Bool {
+        guard let key, !hasMarkedText() else { return false }
+        let text = string as NSString
+        let caret = selectedRange().location
+        if mods == .control {
+            switch key {
+            case "u": // to the start of the line
+                let line = text.lineRange(for: NSRange(location: caret, length: 0))
+                kill(NSRange(location: line.location, length: caret - line.location))
+                return true
+            case "w": // the word before the caret
+                kill(ShellWords.wordBeforeCaret(in: string, caret: caret))
+                return true
+            case "k": // to the end of the line (or the line break, at its end)
+                var end = NSMaxRange(text.lineRange(for: NSRange(location: caret, length: 0)))
+                if end > caret, text.character(at: end - 1) == 0x0A, end - 1 > caret { end -= 1 }
+                kill(NSRange(location: caret, length: end - caret))
+                return true
+            case "y":
+                guard !killBuffer.isEmpty else { return true }
+                insertText(killBuffer, replacementRange: selectedRange())
+                return true
+            case "p":
+                if isCaretOnFirstLine, commandDelegate?.commandTextView(self, historyOlder: string) == true { return true }
+                return false
+            case "n":
+                if isCaretOnLastLine, commandDelegate?.commandTextViewHistoryNewer(self) == true { return true }
+                return false
+            default:
+                return false
+            }
+        }
+        guard optionAsMeta, mods == .option else { return false }
+        switch key {
+        case "b": moveWordBackward(nil)
+        case "f": moveWordForward(nil)
+        case "d": deleteWordForward(nil)
+        case ".": insertLastArgument(after: cycling)
+        default: return false
+        }
+        return true
+    }
+
+    private func kill(_ range: NSRange) {
+        guard range.length > 0 else { return }
+        killBuffer = (string as NSString).substring(with: range)
+        insertText("", replacementRange: range)
+    }
+
+    /// ⌥.: the last argument of the previous command; again for the one before.
+    private func insertLastArgument(after previous: (offset: Int, range: NSRange)?) {
+        let commands = HistoryStore.shared.history.entries
+        var offset = previous.map { $0.offset + 1 } ?? 0
+        while offset < commands.count {
+            if let argument = ShellWords.lastArgument(of: commands[commands.count - 1 - offset]) {
+                let target = previous?.range ?? selectedRange()
+                insertText(argument, replacementRange: target)
+                lastArgument = (offset, NSRange(location: target.location, length: (argument as NSString).length))
+                return
+            }
+            offset += 1
+        }
+        // Nothing older: keep the last one in place so another ⌥. still does nothing odd.
+        if let previous { lastArgument = previous }
+        NSSound.beep()
     }
 
     /// Paste as plain text only.

@@ -331,6 +331,28 @@ enum DebugDriver {
                     }
                     fflush(stdout)
                 }
+            case let keys where keys.hasPrefix("@chord:"):
+                // `@chord:ctrl+w`, `@chord:opt+.` — sent to the input editor, then its text is printed.
+                let spec = String(keys.dropFirst(7))
+                let parts = spec.split(separator: "+").map(String.init)
+                var flags: NSEvent.ModifierFlags = []
+                for part in parts.dropLast() {
+                    switch part {
+                    case "ctrl": flags.insert(.control)
+                    case "opt": flags.insert(.option)
+                    case "cmd": flags.insert(.command)
+                    case "shift": flags.insert(.shift)
+                    default: break
+                    }
+                }
+                let editor = session.view.inputArea.editor
+                if let char = parts.last, let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+                                                                     windowNumber: editor.window?.windowNumber ?? 0, context: nil,
+                                                                     characters: char, charactersIgnoringModifiers: char, isARepeat: false, keyCode: 0) {
+                    editor.keyDown(with: event)
+                }
+                print("KEY \(spec) → <\(editor.string)> caret=\(editor.selectedRange().location)")
+                fflush(stdout)
             case "@frame":
                 if let window = session.view.window {
                     print("FRAME window=\(window.frame.size) content=\(window.contentView?.frame.size ?? .zero)")
