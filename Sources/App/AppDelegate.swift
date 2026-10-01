@@ -130,6 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.scheme == "rune" { openRuneURL(url) }
         let directories = urls.compactMap(Self.directory(for:))
         guard didFinishLaunching, !isFirstRunOnboarding else {
             pendingDirectories.append(contentsOf: directories)
@@ -138,6 +139,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         directories.forEach(open(directory:))
         NSApp.activate()
     }
+
+    /// `rune://open?dir=~/project&command=npm%20test` opens a tab in that folder with the
+    /// command typed in the input, for launchers like Raycast and Alfred. It never runs the
+    /// command: any web page can open a URL.
+    private func openRuneURL(_ url: URL) {
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let value = { (name: String) in items.first { $0.name == name }?.value }
+        let directory = value("dir").map { ($0 as NSString).expandingTildeInPath } ?? NSHomeDirectory()
+        let command = value("command")
+        guard didFinishLaunching, !isFirstRunOnboarding else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.openRuneURL(url) }
+            return
+        }
+        openTab(directory: directory, command: command, run: false)
+        NSApp.activate()
+    }
+
+    // MARK: - Automation (Shortcuts, URLs)
+
+    /// A new tab in `directory` (a folder that doesn't exist falls back to home), with
+    /// `command` in its input, run once the shell is ready if `run` is set.
+    @discardableResult
+    func openTab(directory: String, command: String?, run: Bool) -> TerminalSession? {
+        var isDirectory: ObjCBool = false
+        let folder = FileManager.default.fileExists(atPath: directory, isDirectory: &isDirectory) && isDirectory.boolValue
+            ? directory : NSHomeDirectory()
+        if frontController() == nil { makeWindow(directory: folder) } else { open(directory: folder) }
+        guard let controller = frontController(), let session = controller.selectedSession else { return nil }
+        controller.window?.makeKeyAndOrderFront(nil)
+        if let command, !command.isEmpty {
+            if run { session.runWhenReady(command) } else { session.view.inputArea.setText(command) }
+        }
+        return session
+    }
+
+    /// The pane the user is looking at in the frontmost window.
+    var frontSession: TerminalSession? { frontController()?.selectedSession }
 
     // MARK: - Finder services
 

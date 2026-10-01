@@ -516,6 +516,41 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     /// settings, the most recent block goes along as context.
     /// ⌘-click on a link in the output. File paths resolve against the folders commands ran
     /// in (newest first) and open at their line in editors that support it.
+    /// A file or folder named in the output at a point (terminal view coordinates), if it
+    /// exists: `src/app.ts:42:7`, `~/notes.md`, `./build/log.txt`.
+    func filePath(atTerminalPoint point: NSPoint) -> String? {
+        let terminal = terminalView.getTerminal()
+        let font = terminalView.font
+        let cellWidth = font.advancement(forGlyph: font.glyph(withName: "W")).width
+        guard cellWidth > 0, let line = terminal.getScrollInvariantLine(row: geometry.row(atY: point.y)) else { return nil }
+        let text = Array(line.translateToString(trimRight: true))
+        let column = Int(point.x / cellWidth)
+        guard column >= 0, column < text.count else { return nil }
+        let separators: Set<Character> = [" ", "\t", "\"", "'", "`", "(", ")", "[", "]", "<", ">", ",", ";", "|", "="]
+        guard !separators.contains(text[column]) else { return nil }
+        var start = column
+        var end = column
+        while start > 0, !separators.contains(text[start - 1]) { start -= 1 }
+        while end < text.count - 1, !separators.contains(text[end + 1]) { end += 1 }
+        guard case .file(let path, _, _) = LinkTarget.resolve(String(text[start...end]), folders: outputFolders) else { return nil }
+        return path
+    }
+
+    /// The file or folder named under the mouse pointer, for Quick Look (⌘Y).
+    func filePathUnderPointer() -> String? {
+        guard let window = terminalView.window else { return nil }
+        let point = terminalView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        guard terminalView.bounds.contains(point) else { return nil }
+        return filePath(atTerminalPoint: point)
+    }
+
+    /// Folders the output may refer to, newest first.
+    private var outputFolders: [String] {
+        var folders = [currentDirectory]
+        for block in tracker.blocks.reversed() where !block.cwd.isEmpty && !folders.contains(block.cwd) { folders.append(block.cwd) }
+        return folders
+    }
+
     private func openLink(_ link: String) -> Bool {
         var folders = [currentDirectory]
         for block in tracker.blocks.reversed() where !block.cwd.isEmpty && !folders.contains(block.cwd) { folders.append(block.cwd) }
@@ -933,6 +968,15 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         copyLatestBlock(as: .output)
     }
 
+    /// The output of the last command (or the selected block) as copying would give it.
+    func latestOutputAsShown() -> String {
+        let current = geometry.cursorPosition.row
+        guard let block = selectedBlockID.flatMap(tracker.block(id:))
+            ?? tracker.blocks.last(where: { $0.state == .finished && $0.outputRows(currentRow: current) != nil }) else { return "" }
+        var hidden = 0
+        return shown(outputText(of: block), hidden: &hidden)
+    }
+
     /// The selected block, or the last finished command with output.
     func copyLatestBlock(as kind: CopyKind) {
         let current = geometry.cursorPosition.row
@@ -1041,6 +1085,14 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         let row = geometry.row(atY: point.y)
         guard let index = tracker.blockIndex(containing: row, currentRow: geometry.cursorPosition.row) else { return nil }
         let menu = blockMenu(for: tracker.blocks[index])
+        if let path = filePath(atTerminalPoint: point) {
+            let name = (path as NSString).lastPathComponent
+            menu.insertItem(.separator(), at: 0)
+            menu.insertItem(ClosureMenuItem(title: "Reveal “\(name)” in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+            }, at: 0)
+            menu.insertItem(ClosureMenuItem(title: "Quick Look “\(name)”") { QuickLook.shared.show([URL(fileURLWithPath: path)]) }, at: 0)
+        }
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: ""))
         return menu

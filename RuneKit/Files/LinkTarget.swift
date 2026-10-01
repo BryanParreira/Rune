@@ -12,7 +12,10 @@ public enum LinkTarget: Equatable, Sendable {
                                fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> LinkTarget? {
         let trimmed = link.trimmingCharacters(in: CharacterSet(charactersIn: " \t\"'`()[]<>,;"))
         guard !trimmed.isEmpty else { return nil }
-        if let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(), scheme != "file", scheme.count > 1 {
+        // `README.md:27` parses as a URL with the scheme "readme.md": only `scheme://…` (and
+        // mailto:) count as links.
+        if let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(), scheme != "file", scheme.count > 1,
+           trimmed.contains("://") || scheme == "mailto" {
             return .url(url)
         }
         var path = trimmed.hasPrefix("file://") ? (URL(string: trimmed)?.path ?? trimmed) : trimmed

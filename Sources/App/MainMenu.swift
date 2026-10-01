@@ -109,6 +109,7 @@ enum MainMenu {
         menu.addItem(item("Extend Selection Up", #selector(MainWindowController.extendSelectionUp(_:)), "\u{F700}", [.command, .shift]))
         menu.addItem(item("Extend Selection Down", #selector(MainWindowController.extendSelectionDown(_:)), "\u{F701}", [.command, .shift]))
         menu.addItem(item("Compare with Previous Run", #selector(MainWindowController.compareRuns(_:)), "d", [.command, .option]))
+        menu.addItem(item("Quick Look Path Under Pointer", #selector(MainWindowController.quickLookPath(_:)), "y"))
         menu.addItem(.separator())
         menu.addItem(item("Jump to Previous Error", #selector(MainWindowController.previousError(_:)), "'"))
         menu.addItem(item("Jump to Next Error", #selector(MainWindowController.nextError(_:)), "'", [.command, .shift]))

@@ -1,4 +1,5 @@
 import AppKit
+import Quartz
 import Combine
 import RuneKit
 import SwiftUI
@@ -879,6 +880,22 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     @objc func nextError(_ sender: Any?) {
         selectedSession?.jumpToError(previous: false)
     }
+
+    /// ⌘Y: Quick Look the file named under the mouse pointer in the output.
+    @objc func quickLookPath(_ sender: Any?) {
+        guard let path = selectedSession?.filePathUnderPointer() else { return NSSound.beep() }
+        QuickLook.shared.show([URL(fileURLWithPath: path)])
+    }
+
+    override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool {
+        !QuickLook.shared.urls.isEmpty
+    }
+
+    override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        panel.dataSource = QuickLook.shared
+    }
+
+    override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {}
 
     @objc func compareRuns(_ sender: Any?) {
         selectedSession?.compareLatestRuns()

@@ -284,6 +284,28 @@ enum DebugDriver {
                 session.jumpToError(previous: true)
                 print("ERROR marked=\(session.markedRow.map(String.init) ?? "nil") text=<\(session.markedRow.flatMap { session.terminalView.getTerminal().getScrollInvariantLine(row: $0)?.translateToString(trimRight: true) } ?? "")>")
                 fflush(stdout)
+            case "@pathInOutput":
+                // The file named at the start of the last block's first output row.
+                if let block = session.tracker.blocks.last {
+                    let geometry = session.geometry
+                    let y = geometry.topY(ofRow: block.outputStartRow) - geometry.cellHeight / 2
+                    let row = geometry.row(atY: y)
+                    print("PATH \(session.filePath(atTerminalPoint: NSPoint(x: 3, y: y)) ?? "nil") row=\(row) out=\(block.outputStartRow) text=<\(session.terminalView.getTerminal().getScrollInvariantLine(row: row)?.translateToString(trimRight: true) ?? "-")> cwd=\(session.currentDirectory)")
+                    fflush(stdout)
+                }
+            case let url where url.hasPrefix("@url:"):
+                if let link = URL(string: String(url.dropFirst(5))) { NSApp.delegate.map { ($0 as? AppDelegate)?.application(NSApp, open: [link]) } }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    let front = (NSApp.delegate as? AppDelegate)?.frontSession
+                    print("URL dir=\(front?.currentDirectory ?? "nil") input=<\(front?.view.inputArea.editor.string ?? "")> mode=\(String(describing: front?.mode))")
+                    fflush(stdout)
+                }
+            case "@intentLastOutput":
+                Task { @MainActor in
+                    let result = try? await GetLastOutputIntent().perform()
+                    print("INTENT \(String(describing: result))")
+                    fflush(stdout)
+                }
             case "@watch":
                 session.watchLatest()
             case "@compare":
