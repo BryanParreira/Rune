@@ -5,6 +5,7 @@ import RuneKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var configStore: ConfigStore?
     private var windowControllers: [MainWindowController] = []
+    private var shortcutObserver: AnyCancellable?
     /// Folders handed to us (Finder, `rune` CLI) before launch finished.
     private var pendingDirectories: [String] = []
     private var didFinishLaunching = false
@@ -79,6 +80,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !Self.isAutomatedRun else { return }
         GlobalHotKey.shared.onPress = { [weak self] in self?.toggleFromHotKey() }
         GlobalHotKey.shared.register(store.snapshot.config.globalHotkey)
+        MainMenu.applyShortcuts(store.snapshot.config.keyboardShortcuts)
+        shortcutObserver = store.$snapshot
+            .map(\.config.keyboardShortcuts)
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { MainMenu.applyShortcuts($0) }
         hotKeyObserver = store.$snapshot
             .map(\.config.globalHotkey)
             .removeDuplicates()
@@ -261,9 +269,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return windowControllers.last
     }
 
-    private func makeWindow(directory: String, restoring saved: SavedSession.Window? = nil) {
+    /// The window a tab is in (for a tab dragged between windows).
+    func controller(owningTab id: UUID) -> MainWindowController? {
+        windowControllers.first { $0.containsTab(id: id) }
+    }
+
+    /// A new window holding a tab taken out of another one.
+    func newWindow(adopting tab: TabContent, cascadingFrom source: NSWindow?) {
+        makeWindow(directory: NSHomeDirectory(), adopting: tab)
+        if let source, let window = windowControllers.last?.window {
+            window.setFrameTopLeftPoint(source.cascadeTopLeft(from: NSPoint(x: source.frame.minX, y: source.frame.maxY)))
+        }
+    }
+
+    private func makeWindow(directory: String, restoring saved: SavedSession.Window? = nil, adopting tab: TabContent? = nil) {
         guard let configStore else { return }
-        let controller = MainWindowController(configStore: configStore, directory: directory, restoring: saved)
+        let controller = MainWindowController(configStore: configStore, directory: directory, restoring: saved, adopting: tab)
         controller.onClose = { [weak self] closed in
             self?.windowControllers.removeAll { $0 === closed }
             // Unless the app is quitting (already saved), closing a window updates the session.

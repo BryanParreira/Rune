@@ -367,6 +367,38 @@ enum DebugDriver {
             case "@findOlder":
                 session.find(.nextMatch)
                 print("FIND current=\(session.view.finder.current.map(String.init) ?? "nil")"); fflush(stdout)
+            case let move where move.hasPrefix("@dropTab:"):
+                // `@dropTab:2:0` drops tab 2 before tab 0 (`end` for the end) in the first window.
+                let parts = move.dropFirst(9).split(separator: ":").map(String.init)
+                if let controller = session.view.window?.windowController as? MainWindowController ?? NSApp.windows.compactMap({ $0.windowController as? MainWindowController }).first,
+                   let from = Int(parts[0]) {
+                    let ids = controller.tabSummaries.map(\.id)
+                    let before = parts.count > 1 ? Int(parts[1]).flatMap { ids.indices.contains($0) ? ids[$0] : nil } : nil
+                    if ids.indices.contains(from) { controller.dropTab(id: ids[from], before: before) }
+                }
+            case "@toNewWindow":
+                (NSApp.windows.compactMap { $0.windowController as? MainWindowController }.first)?.moveTabToNewWindow(nil)
+            case "@pullBack":
+                // Drags the other window's first tab onto the first window's tab bar.
+                let controllers = NSApp.windows.compactMap { $0.windowController as? MainWindowController }
+                if controllers.count > 1, let other = controllers.first(where: { $0 !== controllers.first }), let id = other.tabSummaries.first?.id {
+                    controllers.first?.dropTab(id: id, before: nil)
+                }
+            case "@shortcuts":
+                func show(_ title: String) -> String {
+                    guard let item = MainMenu.customizableItems().first(where: { $0.item.title == title })?.item else { return "missing" }
+                    return item.keyEquivalent.isEmpty ? "none" : MainMenu.display(key: item.keyEquivalent, modifiers: item.keyEquivalentModifierMask)
+                }
+                MainMenu.applyShortcuts(["Clear Screen": "cmd+shift+l", "Split Pane Right": "none", "Compare with Previous Run": "ctrl+option+up"])
+                print("SHORTCUT applied clear=\(show("Clear Screen")) split=\(show("Split Pane Right")) compare=\(show("Compare with Previous Run")) newTab=\(show("New Tab"))")
+                MainMenu.applyShortcuts([:])
+                print("SHORTCUT reset clear=\(show("Clear Screen")) split=\(show("Split Pane Right")) compare=\(show("Compare with Previous Run")) count=\(MainMenu.customizableItems().count)")
+                fflush(stdout)
+            case let query where query.hasPrefix("@keyboardSettings"):
+                if let controller = session.view.window?.windowController as? MainWindowController {
+                    controller.openSettingsTab()
+                    controller.debugSettings()?.debugShow(page: .keyboard, query: String(query.dropFirst(18)))
+                }
             case "@frame":
                 if let window = session.view.window {
                     print("FRAME window=\(window.frame.size) content=\(window.contentView?.frame.size ?? .zero)")

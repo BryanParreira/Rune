@@ -14,6 +14,13 @@ final class SettingsTab: TabContent {
     let contentView: NSView
     private let model: SettingsModel
 
+    #if DEBUG
+    func debugShow(page: SettingsModel.Page, query: String = "") {
+        model.page = page
+        model.query = query
+    }
+    #endif
+
     init(store: ConfigStore) {
         model = SettingsModel(store: store)
         let host = NSHostingView(rootView: SettingsView(model: model))
@@ -173,7 +180,8 @@ enum SettingsIndex {
         case .ai:
             return ["AI", "Ollama", "Model", "local", "LLM", "Endpoint", "context", "Explain"]
         case .keyboard:
-            return KeyboardShortcut.all.map(\.action) + ["shortcuts", "keybindings", "hotkey", "global", "login", "launch"]
+            return KeyboardShortcut.all.map(\.action) + MainMenu.customizableItems().map(\.item.title)
+                + ["shortcuts", "keybindings", "hotkey", "global", "login", "launch", "customize", "menu"]
         case .sync:
             return ["Sync folder", "iCloud", "dotfiles", "This Mac only", "machine", "hosts", "per-machine"]
         case .about:
@@ -922,7 +930,12 @@ struct KeyboardPage: View {
                 LoginItemToggle()
             }
             SettingsDivider(palette: p)
-            let rows = KeyboardShortcut.all.filter { model.matches($0.action) || model.matches("shortcuts") }
+            MenuShortcutsSection(model: model)
+            SettingsDivider(palette: p)
+            SectionHeader(text: "In the input and the output", palette: p)
+            // Menu commands are listed (and changed) above.
+            let menuTitles = Set(MainMenu.customizableItems().map { $0.item.title.lowercased() })
+            let rows = KeyboardShortcut.all.filter { !menuTitles.contains($0.action.lowercased()) && (model.matches($0.action) || model.matches("shortcuts")) }
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, shortcut in
                 HStack {
                     Text(shortcut.action)
@@ -1287,5 +1300,113 @@ struct TouchIDSudoControl: View {
             }
         }
         .onAppear { enabled = TouchIDSudo.isEnabled }
+    }
+}
+
+/// Every menu command with its shortcut; click one and press new keys to change it. Written
+/// to `keyboardShortcuts` in config.json, so it syncs like any other setting.
+struct MenuShortcutsSection: View {
+    @ObservedObject var model: SettingsModel
+    @State private var recording: String?
+    @State private var monitor: Any?
+
+    var body: some View {
+        let p = model.palette
+        let items = MainMenu.customizableItems().filter { model.matches($0.item.title) || model.matches("shortcuts") || model.matches("menu") }
+        VStack(alignment: .leading, spacing: 0) {
+            SectionHeader(text: "Menu commands", palette: p)
+            Text("Click a shortcut and press the keys you want. ⌫ removes it, esc cancels.")
+                .font(.system(size: 12))
+                .foregroundColor(Color(nsColor: p.secondary))
+                .padding(.bottom, 8)
+            ForEach(Array(items.enumerated()), id: \.offset) { index, entry in
+                row(menu: entry.menu, title: entry.item.title, index: index)
+            }
+        }
+        .onDisappear(perform: stopRecording)
+    }
+
+    private func row(menu: String, title: String, index: Int) -> some View {
+        let p = model.palette
+        let override = model.config.keyboardShortcuts[title]
+        let shown: String = {
+            if let override { return ShortcutSpec(override)?.display ?? "None" }
+            return MainMenu.defaultShortcut(of: title) ?? "—"
+        }()
+        let conflict = override.flatMap(ShortcutSpec.init).flatMap { spec in
+            MainMenu.customizableItems().first { other in
+                other.item.title != title && current(of: other.item.title) == spec.display
+            }?.item.title
+        }
+        return HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 13))
+                    .foregroundColor(Color(nsColor: p.text))
+                Text(conflict.map { "Also used by \($0)" } ?? menu)
+                    .font(.system(size: 10.5))
+                    .foregroundColor(Color(nsColor: conflict == nil ? p.hint : p.error))
+            }
+            Spacer()
+            if override != nil {
+                Button("Reset") { set(title, nil) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11.5))
+                    .foregroundColor(Color(nsColor: p.accent))
+            }
+            Button {
+                recording == title ? stopRecording() : startRecording(title)
+            } label: {
+                Text(recording == title ? "Press keys…" : shown)
+                    .font(.system(size: 12, weight: .medium, design: recording == title ? .default : .monospaced))
+                    .foregroundColor(Color(nsColor: recording == title ? p.accent : p.text))
+                    .frame(minWidth: 96)
+                    .padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(Color(nsColor: recording == title ? p.highlight : p.surface2)))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: index % 2 == 0 ? p.surface1 : .clear))
+    }
+
+    /// What a command's shortcut is right now (override, else built-in), as displayed.
+    private func current(of title: String) -> String? {
+        if let override = model.config.keyboardShortcuts[title] { return ShortcutSpec(override)?.display }
+        return MainMenu.defaultShortcut(of: title)
+    }
+
+    private func set(_ title: String, _ value: String?) {
+        var shortcuts = model.config.keyboardShortcuts
+        shortcuts[title] = value
+        model.set("keyboardShortcuts", shortcuts.isEmpty ? nil : shortcuts)
+    }
+
+    private func startRecording(_ title: String) {
+        stopRecording()
+        recording = title
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let plain = event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty
+            if event.keyCode == 53, plain {
+                stopRecording()
+            } else if event.keyCode == 51, plain {
+                set(title, "none")
+                stopRecording()
+            } else if let spec = MainMenu.spec(from: event) {
+                set(title, spec.text)
+                stopRecording()
+            } else {
+                NSSound.beep()
+            }
+            return nil
+        }
+    }
+
+    private func stopRecording() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        recording = nil
     }
 }

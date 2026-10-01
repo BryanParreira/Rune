@@ -70,7 +70,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     /// Called whenever tabs, panes or folders change, so the session can be saved.
     var onStateChange: (() -> Void)?
 
-    init(configStore: ConfigStore, directory: String, restoring saved: SavedSession.Window? = nil) {
+    init(configStore: ConfigStore, directory: String, restoring saved: SavedSession.Window? = nil, adopting tab: TabContent? = nil) {
         self.configStore = configStore
         let palette = ChromePalette(theme: configStore.snapshot.theme)
         tabsModel = TabsModel(palette: palette)
@@ -109,7 +109,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             .sink { [weak self] in self?.applySnapshot($0) }
             .store(in: &cancellables)
 
-        if let saved {
+        if let tab {
+            adopt(tab)
+        } else if let saved {
             restore(saved)
         } else {
             addTab(directory: directory)
@@ -348,6 +350,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         tabsModel.onRename = { [weak self] id, title in self?.setStyle(ofTab: id) { $0.title = title } }
         tabsModel.onSetColor = { [weak self] id, color in self?.setStyle(ofTab: id) { $0.color = color } }
         tabsModel.onCloseOthers = { [weak self] id in self?.closeOtherTabs(keeping: id) }
+        tabsModel.onDropTab = { [weak self] id, before in self?.dropTab(id: id, before: before) }
+        tabsModel.onMoveToNewWindow = { [weak self] id in self?.moveToNewWindow(id) }
         fileTree.onInsertPath = { [weak self] path in
             guard let session = self?.fileTreeSession else { return }
             let quoted = FileListing.shellQuoted(path)
@@ -420,6 +424,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         let snapshot = configStore.snapshot
         let session = SessionPool.shared.take(snapshot: snapshot, directory: directory)
             ?? TerminalSession(snapshot: snapshot, directory: directory)
+        wire(session)
+        return session
+    }
+
+    /// Points a session's requests (new tab, close, open file…) at this window.
+    private func wire(_ session: TerminalSession) {
         session.onChange = { [weak self] in self?.refreshTabs() }
         session.onRequestNewTab = { [weak self, weak session] text in
             self?.addTab(directory: session?.currentDirectory ?? NSHomeDirectory(), prefill: text)
@@ -440,7 +450,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             self?.openFile(path: path, pinned: true)
             if let line, let preview = self?.selectedTab as? FilePreviewTab { preview.reveal(line: line) }
         }
-        return session
     }
 
     private func start(_ session: TerminalSession, prefill: String?) {
@@ -505,6 +514,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     }
 
     #if DEBUG
+    func debugSettings() -> SettingsTab? { selectedTab as? SettingsTab }
+
     func debugSelectedPreview() -> FilePreviewView? {
         (selectedTab as? FilePreviewTab)?.contentView as? FilePreviewView
     }
@@ -617,6 +628,72 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         let insertAt = tabs.isEmpty ? 0 : selectedIndex + 1
         tabs.insert(tab, at: insertAt)
         select(index: insertAt)
+    }
+
+    // MARK: - Moving tabs
+
+    /// Takes a tab out of this window without closing it (it's moving to another window).
+    func detachTab(id: UUID) -> TabContent? {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return nil }
+        let tab = tabs.remove(at: index)
+        tab.contentView.removeFromSuperview()
+        if tabs.isEmpty {
+            window?.close()
+        } else {
+            select(index: min(index < selectedIndex ? selectedIndex - 1 : selectedIndex, tabs.count - 1))
+        }
+        return tab
+    }
+
+    /// Takes in a tab from another window, before the tab `before` (or after the selected one).
+    func adopt(_ tab: TabContent, before: UUID? = nil) {
+        if let terminal = tab as? TerminalTab {
+            terminal.sessions.forEach(wire)
+            terminal.apply(configStore.snapshot)
+        } else if let file = tab as? FilePreviewTab {
+            file.onRunSnippet = { [weak self] command, folder in self?.runSnippet(command, from: folder) }
+        }
+        insert(tab)
+        if let before, let target = tabs.firstIndex(where: { $0.id == before }), let index = tabs.firstIndex(where: { $0 === tab }) {
+            moveTab(from: index, to: target)
+        }
+        window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// A tab dropped on this window's tab bar: reordered here, or brought over from another window.
+    func dropTab(id: UUID, before: UUID?) {
+        guard id != before else { return }
+        if let index = tabs.firstIndex(where: { $0.id == id }) {
+            let target = before.flatMap { b in tabs.firstIndex(where: { $0.id == b }) } ?? tabs.count
+            moveTab(from: index, to: target)
+        } else if let source = (NSApp.delegate as? AppDelegate)?.controller(owningTab: id), source !== self,
+                  let tab = source.detachTab(id: id) {
+            adopt(tab, before: before)
+            // Dropped on the + (no tab after it): it goes last.
+            if before == nil, let index = tabs.firstIndex(where: { $0 === tab }) { moveTab(from: index, to: tabs.count) }
+        }
+    }
+
+    /// Moves the tab at `from` to just before position `to` (in the order before the move).
+    private func moveTab(from: Int, to: Int) {
+        guard tabs.indices.contains(from) else { return }
+        let selected = selectedTab
+        let tab = tabs.remove(at: from)
+        let destination = min(to > from ? to - 1 : to, tabs.count)
+        tabs.insert(tab, at: destination)
+        if let selected, let index = tabs.firstIndex(where: { $0 === selected }) { selectedIndex = index }
+        refreshTabs()
+    }
+
+    func containsTab(id: UUID) -> Bool { tabs.contains { $0.id == id } }
+
+    @objc func moveTabToNewWindow(_ sender: Any?) {
+        if let id = selectedTab?.id { moveToNewWindow(id) }
+    }
+
+    private func moveToNewWindow(_ id: UUID) {
+        guard tabs.count > 1, let tab = detachTab(id: id) else { return NSSound.beep() }
+        (NSApp.delegate as? AppDelegate)?.newWindow(adopting: tab, cascadingFrom: window)
     }
 
     private func select(index: Int) {

@@ -1,4 +1,5 @@
 import AppKit
+import RuneKit
 
 enum MainMenu {
     static func build() -> NSMenu {
@@ -60,6 +61,7 @@ enum MainMenu {
         menu.addItem(item("New Window", #selector(AppDelegate.newWindow(_:)), "n"))
         menu.addItem(item("Reopen Closed Tab", #selector(MainWindowController.reopenClosedTab(_:)), "t", [.command, .shift]))
         menu.addItem(item("Rename Tab…", #selector(MainWindowController.renameTab(_:)), ""))
+        menu.addItem(item("Move Tab to New Window", #selector(MainWindowController.moveTabToNewWindow(_:)), ""))
         menu.addItem(.separator())
         menu.addItem(item("Save Window as Layout…", #selector(MainWindowController.saveLayout(_:)), ""))
         let layouts = NSMenu(title: "Open Layout")
@@ -166,5 +168,110 @@ final class LayoutsMenu: NSObject, NSMenuDelegate {
         }
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Show Layouts Folder", action: #selector(AppDelegate.showLayoutsFolder(_:)), keyEquivalent: ""))
+    }
+}
+
+// MARK: - Custom shortcuts
+
+extension MainMenu {
+    /// Shortcuts as the menus were built, by command title, to go back to.
+    private static var defaults: [String: (key: String, modifiers: NSEvent.ModifierFlags)] = [:]
+
+    /// Commands whose shortcut can be changed: every menu item that performs an action, by
+    /// title, with its menu ("Shell › Split Pane Right").
+    static func customizableItems() -> [(menu: String, item: NSMenuItem)] {
+        guard let main = NSApp.mainMenu else { return [] }
+        var items: [(String, NSMenuItem)] = []
+        for top in main.items {
+            guard let submenu = top.submenu else { continue }
+            for item in submenu.items where item.action != nil && !item.isSeparatorItem && item.submenu == nil && !item.title.isEmpty {
+                // Remember the built-in shortcut before anything overrides it.
+                if defaults[item.title] == nil { defaults[item.title] = (item.keyEquivalent, item.keyEquivalentModifierMask) }
+                items.append((top.title.isEmpty ? "Rune" : top.title, item))
+            }
+        }
+        return items
+    }
+
+    /// Applies `keyboardShortcuts` from config.json over the built-in shortcuts.
+    static func applyShortcuts(_ overrides: [String: String]) {
+        for (_, item) in customizableItems() {
+            guard let original = defaults[item.title] else { continue }
+            guard let text = overrides[item.title] else {
+                item.keyEquivalent = original.key
+                item.keyEquivalentModifierMask = original.modifiers
+                continue
+            }
+            guard let spec = ShortcutSpec(text) else {
+                // "none" (or something unreadable, reported as a config warning): no shortcut.
+                item.keyEquivalent = ""
+                continue
+            }
+            item.keyEquivalent = keyEquivalent(for: spec.key)
+            var modifiers: NSEvent.ModifierFlags = []
+            if spec.command { modifiers.insert(.command) }
+            if spec.shift { modifiers.insert(.shift) }
+            if spec.option { modifiers.insert(.option) }
+            if spec.control { modifiers.insert(.control) }
+            item.keyEquivalentModifierMask = modifiers
+        }
+    }
+
+    /// The built-in shortcut of a command, for display after a reset.
+    static func defaultShortcut(of title: String) -> String? {
+        guard let original = defaults[title], !original.key.isEmpty else { return nil }
+        return display(key: original.key, modifiers: original.modifiers)
+    }
+
+    private static func keyEquivalent(for key: String) -> String {
+        switch key {
+        case "up": return "\u{F700}"
+        case "down": return "\u{F701}"
+        case "left": return "\u{F702}"
+        case "right": return "\u{F703}"
+        case "return": return "\r"
+        case "tab": return "\t"
+        case "space": return " "
+        case "delete": return "\u{8}"
+        case "escape": return "\u{1b}"
+        default:
+            if key.hasPrefix("f"), let n = Int(key.dropFirst()), (1...20).contains(n), let scalar = UnicodeScalar(0xF704 + n - 1) {
+                return String(Character(scalar))
+            }
+            return key
+        }
+    }
+
+    /// ⌃⌥⇧⌘ + key, as menus show it.
+    static func display(key: String, modifiers: NSEvent.ModifierFlags) -> String {
+        let names: [String: String] = ["\u{F700}": "↑", "\u{F701}": "↓", "\u{F702}": "←", "\u{F703}": "→", "\r": "↵", "\t": "⇥", " ": "Space", "\u{8}": "⌫", "\u{1b}": "esc"]
+        var symbol = names[key] ?? key.uppercased()
+        if let scalar = key.unicodeScalars.first, (0xF704...0xF717).contains(scalar.value) { symbol = "F\(scalar.value - 0xF704 + 1)" }
+        var shown = ""
+        if modifiers.contains(.control) { shown += "⌃" }
+        if modifiers.contains(.option) { shown += "⌥" }
+        if modifiers.contains(.shift) || key != key.lowercased() { shown += "⇧" }
+        if modifiers.contains(.command) { shown += "⌘" }
+        return shown + symbol
+    }
+
+    /// A shortcut typed in the recorder, as config text; nil if it needs a modifier.
+    static func spec(from event: NSEvent) -> ShortcutSpec? {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let names: [UInt16: String] = [126: "up", 125: "down", 123: "left", 124: "right", 36: "return", 48: "tab", 49: "space", 51: "delete", 53: "escape"]
+        let functionKeys: [UInt16: Int] = [122: 1, 120: 2, 99: 3, 118: 4, 96: 5, 97: 6, 98: 7, 100: 8, 101: 9, 109: 10, 103: 11, 111: 12]
+        let key: String
+        if let name = names[event.keyCode] {
+            key = name
+        } else if let number = functionKeys[event.keyCode] {
+            key = "f\(number)"
+        } else if let character = event.charactersIgnoringModifiers?.lowercased(), character.count == 1 {
+            key = character
+        } else {
+            return nil
+        }
+        let spec = ShortcutSpec(key: key, command: flags.contains(.command), shift: flags.contains(.shift),
+                                option: flags.contains(.option), control: flags.contains(.control))
+        return ShortcutSpec(spec.text)
     }
 }

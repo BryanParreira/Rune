@@ -51,6 +51,8 @@ public struct RuneConfig: Equatable, Sendable {
     public var syncPath: String?
     /// System-wide shortcut that shows or hides Rune ("ctrl+`", "option+space"…, or "off").
     public var globalHotkey: String = "ctrl+`"
+    /// Menu command title → shortcut ("cmd+shift+k"), or "none" to remove it.
+    public var keyboardShortcuts: [String: String] = [:]
     /// Where ⌘-clicked file paths in output open: "editor" (the file's default app, at the
     /// line when it's VS Code, Cursor, Windsurf or Zed) or "rune" (Rune's file preview).
     public var openFilesIn: String = "editor"
@@ -82,7 +84,7 @@ public struct RuneConfig: Equatable, Sendable {
         "fontFamily", "fontSize", "lineHeight", "theme", "paddingX", "paddingY", "cursorStyle",
         "cursorBlink", "scrollback", "optionAsMeta", "showWelcome", "honorPrompt", "inputMode", "shell",
         "aiEnabled", "ollamaEndpoint", "aiModel", "aiIncludeBlockContext",
-        "syncPath", "hosts", "workflows", "notifyWhenDone", "notifyAfterSeconds", "gpuRendering", "restoreSession", "hideSecrets", "recallEnabled", "recallDays", "globalHotkey", "openFilesIn", "remoteInput",
+        "syncPath", "hosts", "workflows", "notifyWhenDone", "notifyAfterSeconds", "gpuRendering", "restoreSession", "hideSecrets", "recallEnabled", "recallDays", "globalHotkey", "keyboardShortcuts", "openFilesIn", "remoteInput",
     ]
 
     /// Written to ~/.config/rune/config.json on first launch.
@@ -166,6 +168,16 @@ extension RuneConfig {
             if ["editor", "rune"].contains(v) { openFilesIn = v } else { reader.warnings.append("openFilesIn \"\(v)\" is not one of editor, rune; using editor") }
         }
         if let v = reader.string("globalHotkey") { globalHotkey = v.isEmpty ? "off" : v }
+        if let raw = dictionary["keyboardShortcuts"], !(raw is NSNull) {
+            if let shortcuts = raw as? [String: String] {
+                keyboardShortcuts = shortcuts
+                for (command, spec) in shortcuts where spec.lowercased() != "none" && ShortcutSpec(spec) == nil {
+                    reader.warnings.append("keyboardShortcuts: \"\(spec)\" for \(command) isn't a shortcut Rune understands")
+                }
+            } else {
+                reader.warnings.append("keyboardShortcuts should be an object like {\"Clear Screen\": \"cmd+shift+k\"}")
+            }
+        }
         if let v = reader.number("recallDays", range: 1...3650) { recallDays = v }
         if let v = reader.number("notifyAfterSeconds", range: 1...3600) { notifyAfterSeconds = v }
 

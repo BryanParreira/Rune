@@ -49,6 +49,9 @@ final class TabsModel: ObservableObject {
     var onRename: (UUID, String?) -> Void = { _, _ in }
     var onSetColor: (UUID, TabColor?) -> Void = { _, _ in }
     var onCloseOthers: (UUID) -> Void = { _ in }
+    /// A tab (from this window or another) dropped before `before` (nil: at the end).
+    var onDropTab: (UUID, _ before: UUID?) -> Void = { _, _ in }
+    var onMoveToNewWindow: (UUID) -> Void = { _ in }
 
     init(palette: ChromePalette) {
         self.palette = palette
@@ -99,6 +102,11 @@ struct TabBarView: View {
                 }
                 HStack(spacing: 2) {
                     IconButton(systemName: "plus", size: 14, palette: model.palette, help: "New Tab (⌘T)", action: model.onNew)
+                        .dropDestination(for: String.self) { items, _ in
+                            guard let id = items.first.flatMap(TabBarView.tabID) else { return false }
+                            model.onDropTab(id, nil)
+                            return true
+                        }
                     Menu {
                         Button("New Tab") { model.onNew() }
                         Button("New Window") { NSApp.sendAction(#selector(AppDelegate.newWindow(_:)), to: nil, from: nil) }
@@ -151,6 +159,7 @@ struct TabBarView: View {
             onSelect: { model.onSelect(tab.id) },
             onClose: { model.onClose(tab.id) },
             onCloseOthers: { model.onCloseOthers(tab.id) },
+            onMoveToNewWindow: { model.onMoveToNewWindow(tab.id) },
             onStartRename: { if tab.canStyle { model.editingID = tab.id } },
             onRename: { name in
                 model.editingID = nil
@@ -158,6 +167,26 @@ struct TabBarView: View {
             },
             onSetColor: { model.onSetColor(tab.id, $0) }
         )
+        // Drag a tab to reorder it, or onto another Rune window's tabs to move it there.
+        .draggable(TabBarView.dragPrefix + tab.id.uuidString) {
+            Text(tab.title)
+                .font(.system(size: 12))
+                .padding(.horizontal, 12)
+                .frame(height: 26)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: model.palette.tabSelected)))
+        }
+        .dropDestination(for: String.self) { items, _ in
+            guard let id = items.first.flatMap(TabBarView.tabID) else { return false }
+            model.onDropTab(id, tab.id)
+            return true
+        }
+    }
+
+    static let dragPrefix = "rune-tab:"
+
+    static func tabID(_ payload: String) -> UUID? {
+        guard payload.hasPrefix(dragPrefix) else { return nil }
+        return UUID(uuidString: String(payload.dropFirst(dragPrefix.count)))
     }
 }
 
@@ -231,6 +260,7 @@ private struct TabSegment: View {
     let onSelect: () -> Void
     let onClose: () -> Void
     let onCloseOthers: () -> Void
+    let onMoveToNewWindow: () -> Void
     let onStartRename: () -> Void
     /// The typed name ("" resets to the automatic name), or nil when editing was cancelled.
     let onRename: (String?) -> Void
@@ -326,6 +356,10 @@ private struct TabSegment: View {
                     Text(color.displayName).tag(TabColor?.some(color))
                 }
             }
+            SwiftUI.Divider()
+        }
+        if hasOthers {
+            Button("Move Tab to New Window", action: onMoveToNewWindow)
             SwiftUI.Divider()
         }
         Button("Close Tab", action: onClose)
