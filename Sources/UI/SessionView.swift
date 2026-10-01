@@ -73,6 +73,10 @@ final class SessionView: NSView {
             stack.addArrangedSubview(view)
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
+        // Panels wrap or truncate in a narrow pane instead of widening the window.
+        for host in [welcomeHost, aiHost, remoteHost] as [NSView] {
+            host.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
         terminalContainer.setContentHuggingPriority(.defaultLow, for: .vertical)
         terminalContainer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         welcomeHost.setContentHuggingPriority(.required, for: .vertical)

@@ -21,6 +21,8 @@ final class DiffTab: TabContent {
         model.onOpenFile = onOpenFile
         host = NSHostingView(rootView: DiffView(model: model))
         host.safeAreaRegions = []
+        // Fills the pane; its content never sets a minimum size that would grow the window.
+        host.sizingOptions = []
         model.reload()
         let folder = URL(fileURLWithPath: (path as NSString).deletingLastPathComponent, isDirectory: true)
         watcher = DirectoryWatcher(debounce: 0.4) { [weak self] in self?.model.reload() }

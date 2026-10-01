@@ -20,6 +20,8 @@ final class OutputCompareTab: TabContent {
         model = OutputCompareModel(old: old, new: new, snapshot: snapshot)
         host = NSHostingView(rootView: OutputCompareView(model: model))
         host.safeAreaRegions = []
+        // Fills the pane; its content never sets a minimum size that would grow the window.
+        host.sizingOptions = []
     }
 
     func focus() {

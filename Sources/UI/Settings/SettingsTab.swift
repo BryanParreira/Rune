@@ -18,6 +18,8 @@ final class SettingsTab: TabContent {
         model = SettingsModel(store: store)
         let host = NSHostingView(rootView: SettingsView(model: model))
         host.safeAreaRegions = []
+        // Fills the pane; its content never sets a minimum size that would grow the window.
+        host.sizingOptions = []
         contentView = host
     }
 

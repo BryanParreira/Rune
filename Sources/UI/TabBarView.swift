@@ -60,56 +60,134 @@ struct TabBarView: View {
     /// Space reserved on the left for the traffic lights.
     let leadingInset: CGFloat
 
+    /// Index of the first tab shown when they don't all fit.
+    @State private var firstVisible = 0
+
+    /// Tabs shrink to share the bar down to this width; past that the strip scrolls.
+    static let minTabWidth: CGFloat = 110
+    static let maxTabWidth: CGFloat = 200
+    /// Sidebar toggle, the + and ⌄ buttons and the gear: the bar's fixed parts.
+    private static let fixedWidth: CGFloat = 36 + 1 + 8 + 52 + 38 + 24
+
     var body: some View {
-        HStack(spacing: 0) {
-            SidebarToggle(isOn: model.sidebarVisible, palette: model.palette, action: model.onToggleSidebar)
-                .padding(.trailing, 8)
-            Divider(palette: model.palette)
-            ForEach(model.tabs) { tab in
-                TabSegment(
-                    tab: tab,
-                    isSelected: tab.id == model.selectedID,
-                    isEditing: tab.id == model.editingID,
-                    hasOthers: model.tabs.count > 1,
-                    palette: model.palette,
-                    onSelect: { model.onSelect(tab.id) },
-                    onClose: { model.onClose(tab.id) },
-                    onCloseOthers: { model.onCloseOthers(tab.id) },
-                    onStartRename: { if tab.canStyle { model.editingID = tab.id } },
-                    onRename: { name in
-                        model.editingID = nil
-                        if let name, name != tab.title { model.onRename(tab.id, name) }
-                    },
-                    onSetColor: { model.onSetColor(tab.id, $0) }
-                )
+        GeometryReader { geometry in
+            let available = max(0, geometry.size.width - leadingInset - Self.fixedWidth)
+            let count = CGFloat(max(1, model.tabs.count))
+            // One divider (1pt) follows each tab.
+            let tabWidth = min(Self.maxTabWidth, max(Self.minTabWidth, available / count - 1))
+            let stripWidth = min(available, (tabWidth + 1) * count)
+            HStack(spacing: 0) {
+                SidebarToggle(isOn: model.sidebarVisible, palette: model.palette, action: model.onToggleSidebar)
+                    .padding(.trailing, 8)
                 Divider(palette: model.palette)
-            }
-            HStack(spacing: 2) {
-                IconButton(systemName: "plus", size: 14, palette: model.palette, help: "New Tab (⌘T)", action: model.onNew)
-                Menu {
-                    Button("New Tab") { model.onNew() }
-                    Button("New Window") { NSApp.sendAction(#selector(AppDelegate.newWindow(_:)), to: nil, from: nil) }
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
+                let visible = max(1, Int((available + 0.5) / (tabWidth + 1)))
+                let first = min(firstVisible, max(0, model.tabs.count - visible))
+                // When the tabs don't fit, the strip slides to keep the selected one in view.
+                HStack(spacing: 0) {
+                    ForEach(model.tabs) { tab in
+                        segment(tab).frame(width: tabWidth)
+                        Divider(palette: model.palette)
+                    }
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .foregroundColor(Color(nsColor: model.palette.secondary))
-                .frame(width: 22, height: 28)
+                .offset(x: -CGFloat(first) * (tabWidth + 1))
+                .frame(width: stripWidth, alignment: .leading)
+                .clipped()
+                .onChange(of: model.selectedID) { _, id in reveal(id, visible: visible) }
+                .onChange(of: model.tabs.count) { _, _ in reveal(model.selectedID, visible: visible) }
+                if model.tabs.count > visible {
+                    OverflowMenu(model: model)
+                }
+                HStack(spacing: 2) {
+                    IconButton(systemName: "plus", size: 14, palette: model.palette, help: "New Tab (⌘T)", action: model.onNew)
+                    Menu {
+                        Button("New Tab") { model.onNew() }
+                        Button("New Window") { NSApp.sendAction(#selector(AppDelegate.newWindow(_:)), to: nil, from: nil) }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .foregroundColor(Color(nsColor: model.palette.secondary))
+                    .frame(width: 22, height: 28)
+                }
+                .padding(.leading, 8)
+                Spacer(minLength: 0)
+                IconButton(systemName: "gearshape", size: 13, palette: model.palette, help: "Settings (⌘,)", action: model.onOpenSettings)
+                    .padding(.trailing, 10)
             }
-            .padding(.leading, 8)
-            Spacer(minLength: 0)
-            IconButton(systemName: "gearshape", size: 13, palette: model.palette, help: "Settings (⌘,)", action: model.onOpenSettings)
-                .padding(.trailing, 10)
+            .padding(.leading, leadingInset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(.leading, leadingInset)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(WindowDragArea())
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color(nsColor: model.palette.separator)).frame(height: 1)
         }
+    }
+
+    /// Slides the strip as little as needed to show the tab (`visible` tabs fit at once).
+    private func reveal(_ id: UUID?, visible: Int) {
+        guard let id, let index = model.tabs.firstIndex(where: { $0.id == id }) else { return }
+        let first = min(firstVisible, max(0, model.tabs.count - visible))
+        var newFirst = first
+        if index < first {
+            newFirst = index
+        } else if index >= first + visible {
+            newFirst = index - visible + 1
+        }
+        newFirst = max(0, min(newFirst, model.tabs.count - visible))
+        guard newFirst != firstVisible else { return }
+        withAnimation(.easeOut(duration: 0.18)) { firstVisible = newFirst }
+    }
+
+    private func segment(_ tab: TabItem) -> some View {
+        TabSegment(
+            tab: tab,
+            isSelected: tab.id == model.selectedID,
+            isEditing: tab.id == model.editingID,
+            hasOthers: model.tabs.count > 1,
+            palette: model.palette,
+            onSelect: { model.onSelect(tab.id) },
+            onClose: { model.onClose(tab.id) },
+            onCloseOthers: { model.onCloseOthers(tab.id) },
+            onStartRename: { if tab.canStyle { model.editingID = tab.id } },
+            onRename: { name in
+                model.editingID = nil
+                if let name, name != tab.title { model.onRename(tab.id, name) }
+            },
+            onSetColor: { model.onSetColor(tab.id, $0) }
+        )
+    }
+}
+
+/// » when the tabs don't all fit: every tab, to jump to one that's out of view.
+private struct OverflowMenu: View {
+    @ObservedObject var model: TabsModel
+
+    var body: some View {
+        Menu {
+            ForEach(model.tabs) { tab in
+                Button {
+                    model.onSelect(tab.id)
+                } label: {
+                    if tab.id == model.selectedID {
+                        Label(tab.title, systemImage: "checkmark")
+                    } else {
+                        Text(tab.title)
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "chevron.right.2")
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .foregroundColor(Color(nsColor: model.palette.secondary))
+        .frame(width: 24, height: 28)
+        .help("All tabs")
     }
 }
 
@@ -195,7 +273,8 @@ private struct TabSegment: View {
                         .lineLimit(1)
                         .truncationMode(.head)
                 }
-                .padding(.horizontal, 28)
+                // Room for the close button; a crowded tab keeps a few letters of its title.
+                .padding(.horizontal, 22)
                 HStack {
                     Spacer()
                     if hovering {
@@ -213,7 +292,7 @@ private struct TabSegment: View {
                 .padding(.trailing, 8)
             }
         }
-        .frame(minWidth: 90, idealWidth: 200, maxWidth: 200, maxHeight: .infinity)
+        .frame(minWidth: 60, idealWidth: 200, maxWidth: 200, maxHeight: .infinity)
         .background(background)
         .overlay(alignment: .bottom) {
             if let tint {

@@ -1,6 +1,7 @@
 import AppKit
 import RuneKit
 import SwiftUI
+import UniformTypeIdentifiers
 import WebKit
 
 /// A read-only file viewer in a tab: code with line numbers and syntax colors, images, or a
@@ -70,12 +71,7 @@ final class FilePreviewView: NSView {
     /// Created on first use (Markdown only); `webViewIfLoaded` never creates it.
     private var webViewIfLoaded: WKWebView?
     private lazy var webView: WKWebView = {
-        let configuration = WKWebViewConfiguration()
-        // Rendered documents never run scripts.
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
-        // Belt and braces: never load anything from the network in the viewer.
-        configuration.websiteDataStore = .nonPersistent()
-        let view = WKWebView(frame: .zero, configuration: configuration)
+        let view = WKWebView(frame: .zero, configuration: MarkdownWebEngine.configuration())
         view.navigationDelegate = linkHandler
         view.setValue(false, forKey: "drawsBackground")
         view.translatesAutoresizingMaskIntoConstraints = false
@@ -91,6 +87,8 @@ final class FilePreviewView: NSView {
         return view
     }()
     private let linkHandler = PreviewLinkHandler()
+    /// The file the web view last rendered.
+    private var renderedPath: String?
     /// Commands behind the rendered document's "Run…" buttons.
     private var snippets: [String] = []
     var onRunSnippet: ((String, String) -> Void)?
@@ -121,6 +119,9 @@ final class FilePreviewView: NSView {
         wantsLayer = true
 
         header.safeAreaRegions = []
+        // Sized by constraints; long paths truncate instead of widening the window.
+        header.sizingOptions = []
+        messageHost.sizingOptions = []
         header.translatesAutoresizingMaskIntoConstraints = false
         addSubview(header)
 
@@ -153,6 +154,13 @@ final class FilePreviewView: NSView {
         gutter.onWidthChange = { [weak self] width in self?.gutterWidth?.constant = width }
 
         imageView.imageScaling = .scaleProportionallyDown
+        imageView.animates = true
+        // An image view's intrinsic size is the image's: at the default priorities a big
+        // photo would push the window to grow to fit it. The pane decides; the image scales.
+        for orientation in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
+            imageView.setContentCompressionResistancePriority(.init(1), for: orientation)
+            imageView.setContentHuggingPriority(.init(1), for: orientation)
+        }
         imageView.translatesAutoresizingMaskIntoConstraints = false
         imageView.isHidden = true
         addSubview(imageView)
@@ -202,6 +210,9 @@ final class FilePreviewView: NSView {
             guard let self, self.snippets.indices.contains(index) else { return }
             self.onRunSnippet?(self.snippets[index], (self.currentPath as NSString).deletingLastPathComponent)
         }
+        #if DEBUG
+        linkHandler.onFinish = { [weak self] in self?.reportShown("markdown") }
+        #endif
         headerModel.onToggleWrap = { [weak self] in
             guard let self else { return }
             self.setWrapping(!self.wrapLines)
@@ -270,7 +281,21 @@ final class FilePreviewView: NSView {
 
     // MARK: Loading
 
+    #if DEBUG
+    /// When the current file started loading, for RUNE_DEBUG_TIMING.
+    private var loadStarted: Date?
+    private func reportShown(_ what: String) {
+        guard ProcessInfo.processInfo.environment["RUNE_DEBUG_TIMING"] != nil, let started = loadStarted else { return }
+        loadStarted = nil
+        print(String(format: "OPEN %@ %@ %.0fms", what, (currentPath as NSString).lastPathComponent, Date().timeIntervalSince(started) * 1000))
+        fflush(stdout)
+    }
+    #endif
+
     func load(path: String) {
+        #if DEBUG
+        if path != currentPath { loadStarted = Date() }
+        #endif
         let isNewFile = path != currentPath
         currentPath = path
         loadGeneration += 1
@@ -332,12 +357,15 @@ final class FilePreviewView: NSView {
             if reloadingSameFile { scrollView.contentView.scroll(to: visible) }
             showCurrentTextMode()
             revealPendingLine()
+            #if DEBUG
+            if headerModel.mode != .preview { reportShown("text") }
+            #endif
         case .image:
             headerModel.mode = nil
             headerModel.wraps = nil
             headerModel.detail = ["Image", sizeText].compactMap { $0 }.joined(separator: " · ")
-            imageView.image = NSImage(contentsOfFile: currentPath)
             showOnly(imageView)
+            loadImage(path: currentPath, sizeText: sizeText)
         case .binary:
             headerModel.mode = nil
             headerModel.wraps = nil
@@ -346,6 +374,29 @@ final class FilePreviewView: NSView {
         case .unreadable(let reason):
             headerModel.detail = "Can't open"
             showMessage(symbol: "lock", text: reason, action: nil)
+        }
+    }
+
+    /// Decodes the image off the main thread, scaled down to what a screen can show, so a
+    /// 50-megapixel photo neither stalls the app nor holds hundreds of MB.
+    private func loadImage(path: String, sizeText: String?) {
+        let generation = loadGeneration
+        DispatchQueue.global(qos: .userInitiated).async {
+            let loaded = PreviewImage.load(path: path)
+            DispatchQueue.main.async {
+                guard generation == self.loadGeneration, path == self.currentPath else { return }
+                // Keep what's on screen if a save is still being written.
+                guard let loaded else {
+                    if self.imageView.image == nil { self.showMessage(symbol: "photo", text: "Rune couldn't read this image.", action: "Open with Default App") }
+                    return
+                }
+                self.imageView.image = loaded.image
+                #if DEBUG
+                self.reportShown("image")
+                #endif
+                let kind = loaded.typeName.map { "\($0) image" } ?? "Image"
+                self.headerModel.detail = [kind, "\(loaded.pixelWidth) × \(loaded.pixelHeight)", sizeText].compactMap { $0 }.joined(separator: " · ")
+            }
         }
     }
 
@@ -389,15 +440,33 @@ final class FilePreviewView: NSView {
         return String(decoding: pretty, as: UTF8.self)
     }
 
+    /// Builds the page off the main thread (rendering, and reading and encoding the document's
+    /// images, can take a while for a README full of screenshots), then shows it.
+    private var renderGeneration = 0
+
     private func renderMarkdown() {
-        let rendered = MarkdownRenderer.renderRunnable(currentText)
-        snippets = rendered.snippets
-        let body = Self.inlineLocalImages(rendered.html, relativeTo: (currentPath as NSString).deletingLastPathComponent)
-        let page = MarkdownPage.document(body: body, palette: palette, font: snapshot.font)
-        #if DEBUG
-        if let out = ProcessInfo.processInfo.environment["RUNE_DEBUG_HTML"] { try? page.write(toFile: out, atomically: true, encoding: .utf8) }
-        #endif
-        webView.loadHTMLString(page, baseURL: nil)
+        renderGeneration += 1
+        let generation = renderGeneration
+        let (text, path, palette, font) = (currentText, currentPath, palette, snapshot.font)
+        // A new document fades in when it's ready; re-rendering the same one (theme change,
+        // file saved) swaps in place.
+        if renderedPath != path {
+            webView.alphaValue = 0
+            renderedPath = path
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let rendered = MarkdownRenderer.renderRunnable(text)
+            let body = Self.inlineLocalImages(rendered.html, relativeTo: (path as NSString).deletingLastPathComponent)
+            let page = MarkdownPage.document(body: body, palette: palette, font: font)
+            DispatchQueue.main.async {
+                guard generation == self.renderGeneration else { return }
+                self.snippets = rendered.snippets
+                #if DEBUG
+                if let out = ProcessInfo.processInfo.environment["RUNE_DEBUG_HTML"] { try? page.write(toFile: out, atomically: true, encoding: .utf8) }
+                #endif
+                self.webView.loadHTMLString(page, baseURL: nil)
+            }
+        }
     }
 
     /// Relative <img src> paths become data URIs so images in a README show up. Remote images
@@ -555,6 +624,8 @@ struct FilePreviewHeader: View {
                     .lineLimit(1)
                     .truncationMode(.head)
             }
+            // In a narrow pane the name and path give way first; the controls keep their size.
+            .layoutPriority(-1)
             Spacer(minLength: 16)
             if let note = model.note {
                 MetaChip(text: note, palette: p, color: p.ansiYellow)
@@ -564,6 +635,7 @@ struct FilePreviewHeader: View {
             }
             if let mode = model.mode {
                 ModeSwitch(mode: mode, palette: p, onChange: model.onModeChange)
+                    .fixedSize()
             }
             if let wraps = model.wraps, model.mode != .preview {
                 IconAction(symbol: wraps ? "text.alignleft" : "arrow.left.and.right", help: wraps ? "Don't wrap lines" : "Wrap long lines",
@@ -758,6 +830,19 @@ final class LineNumberGutter: NSView {
 final class PreviewLinkHandler: NSObject, WKNavigationDelegate {
     /// A snippet's "Run…" link (`rune-run:<index>`).
     var onRun: ((Int) -> Void)?
+    /// The rendered document finished loading.
+    var onFinish: (() -> Void)?
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // Fade the page in once it's laid out instead of showing a blank pane while it loads.
+        if webView.alphaValue < 1 {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.12
+                webView.animator().alphaValue = 1
+            }
+        }
+        onFinish?()
+    }
 
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         if let url = action.request.url, url.scheme == "rune-run" {
@@ -843,5 +928,94 @@ private struct FileStamp: Equatable {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: path) else { return nil }
         modified = attributes[.modificationDate] as? Date
         size = (attributes[.size] as? NSNumber)?.int64Value
+    }
+}
+
+/// An image file ready to show: downsampled to at most a large screen's worth of pixels,
+/// turned upright (EXIF orientation), and still animated if it's an animated GIF.
+struct PreviewImage {
+    let image: NSImage
+    let pixelWidth: Int
+    let pixelHeight: Int
+    let typeName: String?
+
+    /// Longest side kept, in pixels: sharp on a 5K display without decoding everything.
+    static let maxPixels = 4096
+
+    /// Recently shown images, so going back to one is instant. Keyed by path, size and
+    /// modification date, so an edited image is decoded again.
+    private static let cache: NSCache<NSString, Box> = {
+        let cache = NSCache<NSString, Box>()
+        cache.countLimit = 12
+        return cache
+    }()
+
+    private final class Box {
+        let image: PreviewImage
+        init(_ image: PreviewImage) { self.image = image }
+    }
+
+    static func load(path: String) -> PreviewImage? {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: path)
+        let key = "\(path)|\((attributes?[.size] as? Int) ?? 0)|\((attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)" as NSString
+        if let cached = cache.object(forKey: key) { return cached.image }
+        guard let image = decode(path: path) else { return nil }
+        cache.setObject(Box(image), forKey: key)
+        return image
+    }
+
+    private static func decode(path: String) -> PreviewImage? {
+        let url = URL(fileURLWithPath: path) as CFURL
+        guard let source = CGImageSourceCreateWithURL(url, [kCGImageSourceShouldCache: false] as CFDictionary),
+              CGImageSourceGetCount(source) > 0,
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        else { return nil }
+        var width = properties[kCGImagePropertyPixelWidth] as? Int ?? 0
+        var height = properties[kCGImagePropertyPixelHeight] as? Int ?? 0
+        // Orientations 5–8 are rotated a quarter turn.
+        if let orientation = properties[kCGImagePropertyOrientation] as? Int, (5...8).contains(orientation) { swap(&width, &height) }
+        let typeName = (CGImageSourceGetType(source) as String?).flatMap { UTType($0)?.preferredFilenameExtension?.uppercased() }
+        // DPI metadata decides the natural size in points (a Retina screenshot is half its pixels).
+        let dpi = (properties[kCGImagePropertyDPIWidth] as? Double).flatMap { $0 > 0 ? $0 : nil } ?? 72
+        let pointSize = NSSize(width: Double(width) * 72 / dpi, height: Double(height) * 72 / dpi)
+
+        if CGImageSourceGetCount(source) > 1, let animated = NSImage(contentsOfFile: path) {
+            // NSImageView animates GIFs it's given whole.
+            return PreviewImage(image: animated, pixelWidth: width, pixelHeight: height, typeName: typeName)
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: min(maxPixels, max(width, height, 1)),
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        let image = NSImage(cgImage: cgImage, size: pointSize.width > 0 ? pointSize : NSSize(width: cgImage.width, height: cgImage.height))
+        return PreviewImage(image: image, pixelWidth: width, pixelHeight: height, typeName: typeName)
+    }
+}
+
+/// The web engine behind rendered Markdown. Its first page takes a while to start (a separate
+/// process); warming it up after launch makes the first README open about as fast as code.
+enum MarkdownWebEngine {
+    /// Shared so every preview reuses the same, already running processes.
+    private static let dataStore = WKWebsiteDataStore.nonPersistent()
+    private static var warm: WKWebView?
+
+    static func configuration() -> WKWebViewConfiguration {
+        let configuration = WKWebViewConfiguration()
+        // Rendered documents never run scripts.
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        // Belt and braces: never load anything from the network in the viewer.
+        configuration.websiteDataStore = dataStore
+        return configuration
+    }
+
+    /// Starts the engine with an empty page, off the critical path.
+    static func prewarm() {
+        guard warm == nil else { return }
+        let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 10, height: 10), configuration: configuration())
+        view.loadHTMLString("<html><body></body></html>", baseURL: nil)
+        warm = view
     }
 }

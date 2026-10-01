@@ -298,6 +298,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         contentArea.setContentHuggingPriority(.defaultLow, for: .vertical)
         // The tab bar deliberately lives under the transparent titlebar.
         tabBar.safeAreaRegions = []
+        // Its height is a constraint; tabs shrink to fit instead of making the window wider.
+        tabBar.sizingOptions = []
         banner.safeAreaRegions = []
 
         let treeHost = NSHostingView(rootView: makeFileTreeView(palette: ChromePalette(theme: configStore.snapshot.theme)))

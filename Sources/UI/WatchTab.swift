@@ -21,6 +21,8 @@ final class WatchTab: TabContent {
         model = WatchModel(command: command, directory: directory, shell: shell, path: path, snapshot: snapshot)
         host = NSHostingView(rootView: WatchView(model: model))
         host.safeAreaRegions = []
+        // Fills the pane; its content never sets a minimum size that would grow the window.
+        host.sizingOptions = []
         model.start()
     }
 

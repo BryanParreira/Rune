@@ -316,6 +316,26 @@ enum DebugDriver {
                 }
                 print("SCROLL top=\(session.terminalView.getTerminal().getTopVisibleRow()) offset=\(session.view.terminalContainer.smoothOffset) covered=\(session.view.terminalContainer.coveredTopRows)")
                 fflush(stdout)
+            case let size where size.hasPrefix("@size:"):
+                let parts = size.dropFirst(6).split(separator: "x").compactMap { Double($0) }
+                if let window = session.view.window, parts.count == 2 {
+                    window.setFrame(NSRect(origin: window.frame.origin, size: NSSize(width: parts[0], height: parts[1])), display: true)
+                }
+            case "@tabScroll":
+                func scrollViews(_ view: NSView) -> [NSScrollView] {
+                    (view as? NSScrollView).map { [$0] } ?? view.subviews.flatMap(scrollViews)
+                }
+                if let root = session.view.window?.contentView {
+                    for scroll in scrollViews(root) where scroll.frame.height < 60 {
+                        print("TABSCROLL x=\(scroll.contentView.bounds.origin.x) visible=\(scroll.contentView.bounds.width) doc=\(scroll.documentView?.frame.width ?? -1)")
+                    }
+                    fflush(stdout)
+                }
+            case "@frame":
+                if let window = session.view.window {
+                    print("FRAME window=\(window.frame.size) content=\(window.contentView?.frame.size ?? .zero)")
+                    fflush(stdout)
+                }
             case "@watch":
                 session.watchLatest()
             case "@compare":
