@@ -425,6 +425,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             guard let self, let session else { return }
             self.closePane(session)
         }
+        session.onWatch = { [weak self] command, directory, shell, path in
+            guard let self else { return }
+            self.insert(WatchTab(command: command, directory: directory, shell: shell, path: path, snapshot: self.configStore.snapshot))
+        }
         session.onCompare = { [weak self] old, new in
             guard let self else { return }
             self.insert(OutputCompareTab(old: old, new: new, snapshot: self.configStore.snapshot))
@@ -1037,6 +1041,9 @@ extension MainWindowController {
             action("Copy Last Output", "doc.on.doc", "⇧⌘C", keywords: "clipboard result") { [weak self] in self?.copyLatestOutput(nil) }
             action("Jump to Error", "exclamationmark.triangle", "⌘'", keywords: "failed failure exception panic compiler next") { [weak self] in
                 self?.previousError(nil)
+            }
+            action("Watch Last Command", "eye", keywords: "repeat rerun loop interval live refresh files change") { [weak self] in
+                self?.selectedSession?.watchLatest()
             }
             action("Bookmark Block", "bookmark", "⌥⌘B", keywords: "pin mark remember") { [weak self] in self?.toggleBookmark(nil) }
             action("Previous Bookmark", "bookmark.fill", "⌃⌘↑", keywords: "jump pinned") { [weak self] in self?.previousBookmark(nil) }

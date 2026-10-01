@@ -18,19 +18,18 @@ final class CommandNotifier: NSObject, UNUserNotificationCenterDelegate {
         center.delegate = self
     }
 
-    func commandFinished(command: String, exitCode: Int32?, duration: TimeInterval, sessionID: UUID) {
+    /// A plain notification (no session to reveal), e.g. a watched command's output changed.
+    func post(title: String, subtitle: String, body: String) {
         let content = UNMutableNotificationContent()
-        let failed = exitCode.map { $0 != 0 && !Block.nonFailureExitCodes.contains($0) } ?? false
-        content.title = failed ? "Command failed" : "Command finished"
-        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        content.body = (trimmed.count > 120 ? String(trimmed.prefix(119)) + "…" : trimmed)
-        var details = [Self.format(duration)]
-        if failed, let exitCode { details.append("exit \(exitCode)") }
-        content.subtitle = details.joined(separator: " · ")
+        content.title = title
+        content.subtitle = subtitle
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        content.body = trimmed.count > 120 ? String(trimmed.prefix(119)) + "…" : trimmed
         content.sound = .default
-        content.userInfo = [Self.sessionKey: sessionID.uuidString]
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        deliver(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+    }
 
+    private func deliver(_ request: UNNotificationRequest) {
         let center = center
         center.getNotificationSettings { settings in
             switch settings.authorizationStatus {
@@ -44,6 +43,20 @@ final class CommandNotifier: NSObject, UNUserNotificationCenterDelegate {
                 break
             }
         }
+    }
+
+    func commandFinished(command: String, exitCode: Int32?, duration: TimeInterval, sessionID: UUID) {
+        let content = UNMutableNotificationContent()
+        let failed = exitCode.map { $0 != 0 && !Block.nonFailureExitCodes.contains($0) } ?? false
+        content.title = failed ? "Command failed" : "Command finished"
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        content.body = (trimmed.count > 120 ? String(trimmed.prefix(119)) + "…" : trimmed)
+        var details = [Self.format(duration)]
+        if failed, let exitCode { details.append("exit \(exitCode)") }
+        content.subtitle = details.joined(separator: " · ")
+        content.sound = .default
+        content.userInfo = [Self.sessionKey: sessionID.uuidString]
+        deliver(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
 
     static func format(_ duration: TimeInterval) -> String {

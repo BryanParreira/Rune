@@ -78,6 +78,16 @@ public enum OutputDiff {
         )
     }
 
+    /// Indices of the lines in `new` that weren't in `old` (in the same place).
+    public static func changedLines(old: [String], new: [String], ignoreNumbers: Bool = false) -> IndexSet {
+        let key: (String) -> String = ignoreNumbers ? normalizingNumbers : { $0 }
+        var changed = IndexSet()
+        for change in new.map(key).difference(from: old.map(key)) {
+            if case .insert(let offset, _, _) = change { changed.insert(offset) }
+        }
+        return changed
+    }
+
     /// Runs of digits (with decimals) replaced by one placeholder.
     static func normalizingNumbers(_ line: String) -> String {
         line.replacingOccurrences(of: #"\d+(?:[.,:]\d+)*"#, with: "#", options: .regularExpression)

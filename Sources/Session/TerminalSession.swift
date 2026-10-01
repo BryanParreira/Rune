@@ -129,6 +129,11 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     /// A row "Jump to Error" landed on, highlighted for a moment.
     private(set) var markedRow: Int?
     private var markedRowClear: DispatchWorkItem?
+    /// Watch a command: (command, folder, shell, PATH).
+    var onWatch: ((String, String, String, String?) -> Void)?
+    /// The shell this session runs, and the PATH its integration last reported.
+    private(set) var shellExecutable = "/bin/zsh"
+    private var shellSearchPath: String?
     /// Open two runs' outputs as a diff.
     var onCompare: ((OutputCompareModel.Run, OutputCompareModel.Run) -> Void)?
 
@@ -279,6 +284,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         )
         let directory = FileManager.default.fileExists(atPath: currentDirectory) ? currentDirectory : NSHomeDirectory()
         currentDirectory = directory
+        shellExecutable = shell
         refreshGitBranch()
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
         var env = ShellEnvironment.build(inherited: ProcessInfo.processInfo.environment, currentDirectory: directory, appVersion: version)
@@ -746,6 +752,25 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: clear)
     }
 
+    // MARK: - Watching
+
+    /// Opens a Watch tab that keeps re-running this block's command (locally only).
+    func watch(_ block: Block) {
+        guard !isRemote else { return NSSound.beep() }
+        let command = commandText(of: block).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty else { return }
+        let directory = FileManager.default.fileExists(atPath: block.cwd) ? block.cwd : currentDirectory
+        onWatch?(command, directory, shellExecutable, shellSearchPath)
+    }
+
+    /// The selected block, or the last command.
+    func watchLatest() {
+        guard let block = selectedBlockID.flatMap(tracker.block(id:)) ?? tracker.blocks.last(where: { $0.state == .finished }) else {
+            return NSSound.beep()
+        }
+        watch(block)
+    }
+
     // MARK: - Comparing runs
 
     /// The last earlier run of the same command, if any.
@@ -1038,6 +1063,9 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         if let previous = previousRun(of: block) {
             menu.addItem(BlockMenuItem(title: "Compare with Previous Run", block: block) { [weak self] in self?.compare(previous, $0) })
         }
+        if !isRemote {
+            menu.addItem(BlockMenuItem(title: "Watch…", block: block) { [weak self] in self?.watch($0) })
+        }
         let bookmarked = bookmarkedBlockIDs.contains(block.id)
         menu.addItem(BlockMenuItem(title: bookmarked ? "Remove Bookmark" : "Bookmark", block: block) { [weak self] in self?.toggleBookmark($0) })
         menu.addItem(BlockMenuItem(title: "Filter Output…", block: block) { [weak self] b in
@@ -1171,6 +1199,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             CommandCatalog.shared.setShellNames(Set(names))
             view.inputArea.refreshHighlighting()
         case .shellPath(let path):
+            shellSearchPath = path
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 CommandCatalog.shared.loadExecutables(path: path)
                 DispatchQueue.main.async { self?.view.inputArea.refreshHighlighting() }
