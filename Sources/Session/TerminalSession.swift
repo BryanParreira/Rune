@@ -46,6 +46,28 @@ final class RuneTerminalView: LocalProcessTerminalView {
     /// Whether ⌘C can do something with no text selected (a block is selected).
     var canCopyWithoutSelection: (() -> Bool)?
 
+    /// Offered scroll-wheel events over this terminal (and its padding) first; return true if
+    /// handled. SwiftTerm's `scrollWheel` can't be overridden, so a local event monitor does it.
+    var smoothScroll: ((NSEvent) -> Bool)?
+    private var scrollMonitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let scrollMonitor { NSEvent.removeMonitor(scrollMonitor) }
+        scrollMonitor = nil
+        guard window != nil else { return }
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self, let window = self.window, event.window === window, !self.isHiddenOrHasHiddenAncestor,
+                  let area = self.superview, area.bounds.contains(area.convert(event.locationInWindow, from: nil)),
+                  // Not when a panel over the output (Filter Output…) is under the pointer.
+                  let hit = window.contentView?.hitTest(event.locationInWindow),
+                  hit === self || hit === area || hit is BlockOverlayView,
+                  self.smoothScroll?(event) == true
+            else { return event }
+            return nil
+        }
+    }
+
     /// A click that didn't select text or open a link: point in view coordinates, and whether
     /// ⇧ was held.
     var onPlainClick: ((NSPoint, Bool) -> Void)?
@@ -228,6 +250,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         terminalView.onOpenLink = { [weak self] link in self?.openLink(link) ?? false }
         terminalView.copyHandler = { [weak self] selected in self?.copySelection(selected) ?? false }
         terminalView.onPlainClick = { [weak self] point, extend in self?.clickedOutput(atTerminalPoint: point, extend: extend) }
+        terminalView.smoothScroll = { [weak self] event in self?.smoothScroll(event) ?? false }
         terminalView.canCopyWithoutSelection = { [weak self] in self?.canCopySelectedBlock ?? false }
         terminalView.outputFilter = { [weak self] slice in self?.filterOutput(slice) ?? slice }
         installOSCHandlers()
@@ -1429,9 +1452,42 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
 
     // MARK: - Output
 
+    /// Set while a trackpad scroll moves the viewport, so that move keeps its sub-line offset.
+    private var smoothScrolling = false
+
+    /// Trackpad scrolling by the point instead of the line: the viewport moves whole lines and
+    /// the remainder shifts the terminal down by up to a row, which the rows the input area
+    /// covers keep out of sight. Returns false to let the terminal scroll the usual way (mouse
+    /// wheels, full-screen apps, programs that read the mouse).
+    private func smoothScroll(_ event: NSEvent) -> Bool {
+        let terminal = terminalView.getTerminal()
+        let container = view.terminalContainer
+        let cell = geometry.cellHeight
+        guard event.hasPreciseScrollingDeltas, mode == .editor || mode == .runningCommand,
+              !terminal.isCurrentBufferAlternate, terminal.mouseMode == .off,
+              container.coveredTopRows > 0, cell > 0
+        else {
+            container.smoothOffset = 0
+            return false
+        }
+        let top = terminal.getTopVisibleRow()
+        let maxTop = max(0, geometry.lineCount - terminal.rows)
+        // Distance from the top of the scrollback to the top of what's shown, in points.
+        var position = CGFloat(top) * cell - container.smoothOffset - event.scrollingDeltaY * terminalView.scrollSensitivity
+        position = min(max(0, position), CGFloat(maxTop) * cell)
+        let line = min(maxTop, Int(ceil(position / cell - 0.001)))
+        smoothScrolling = true
+        if line != top { terminalView.scrollTo(row: line) }
+        smoothScrolling = false
+        container.smoothOffset = max(0, min(cell - 0.5, CGFloat(line) * cell - position))
+        return true
+    }
+
     /// Called for every line that scrolls by. Chrome is redrawn with the text (coalesced per
     /// frame); the scroll indicator only appears when the view isn't simply following output.
     private func viewportDidScroll(to position: Double) {
+        // Any other scroll (new output, a jump, the keyboard) lands on a whole row.
+        if !smoothScrolling { view.terminalContainer.smoothOffset = 0 }
         view.viewportDidScroll()
         if position < 0.999 { view.overlay.flashScrollIndicator() }
     }

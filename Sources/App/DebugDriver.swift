@@ -306,6 +306,16 @@ enum DebugDriver {
                     print("INTENT \(String(describing: result))")
                     fflush(stdout)
                 }
+            case let scroll where scroll.hasPrefix("@smoothScroll:"):
+                // Trackpad-style scroll by this many points, in small steps like a real gesture.
+                let total = Double(scroll.dropFirst(14)) ?? 0
+                for _ in 0..<10 {
+                    guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: Int32(total / 10), wheel2: 0, wheel3: 0) else { break }
+                    cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+                    if let event = NSEvent(cgEvent: cg) { _ = session.terminalView.smoothScroll?(event) }
+                }
+                print("SCROLL top=\(session.terminalView.getTerminal().getTopVisibleRow()) offset=\(session.view.terminalContainer.smoothOffset) covered=\(session.view.terminalContainer.coveredTopRows)")
+                fflush(stdout)
             case "@watch":
                 session.watchLatest()
             case "@compare":

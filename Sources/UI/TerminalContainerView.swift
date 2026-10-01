@@ -40,6 +40,13 @@ final class TerminalContainerView: NSView {
         didSet { if keepsTopVisible != oldValue { layoutTerminal() } }
     }
 
+    /// How far below its row grid the terminal is drawn, in points (less than a row): the
+    /// part of a trackpad scroll that doesn't add up to a whole line yet, so scrolling glides
+    /// instead of jumping a line at a time.
+    var smoothOffset: CGFloat = 0 {
+        didSet { if smoothOffset != oldValue { layoutTerminal() } }
+    }
+
     /// Rows at the top of the terminal's viewport hidden above this view's edge.
     private(set) var coveredTopRows = 0
 
@@ -103,6 +110,7 @@ final class TerminalContainerView: NSView {
             origin.y += CGFloat(min(hiddenBottomRows, rows - 1)) * cellHeight + unused
         }
         coveredTopRows = origin.y < 0 && cellHeight > 0 ? min(rows - 1, Int(ceil(-origin.y / cellHeight - 0.01))) : 0
+        origin.y += smoothOffset
         if terminalView.frame.origin != origin {
             terminalView.setFrameOrigin(origin)
             // Block backgrounds and headers are drawn relative to the terminal's position.
