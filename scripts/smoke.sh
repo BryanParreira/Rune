@@ -1,5 +1,6 @@
 #!/bin/zsh
-# Drives the debug build through the things that must always work, in each shell, and
+# Drives the debug build through the things that must always work (in each shell), the
+# speed of typing, and the clipboard protection, and
 # prints PASS/FAIL per check. Run before every release (scripts/release.sh does).
 #   make build && scripts/smoke.sh
 # FISH=/path/to/fish tests fish too when it isn't on PATH.
@@ -82,6 +83,17 @@ check find "find in output" "FIND open=true matches=[3-9]"
 
 run copy /bin/zsh 14 1.5 "@wait||printf 'a  \\nb\\n'||@copy:output"
 check copy "copy output (trailing spaces trimmed)" "COPY output <<a"
+
+run clipboard /bin/zsh 18 2 "@wait||@clipboardWrite||@wait||@clipboardProbe"
+check clipboard "programs can set the clipboard but never read it" "CLIPBOARD write=true" "CLIPBOARD leaked=false"
+
+run typing /bin/zsh 12 2 "@wait||@typeTimed:git commit -m 'fix the thing in src/app.ts' && npm test"
+avg=$(grep -Eo "TYPING keys=[0-9]+ avg=[0-9.]+" "$LOGS/typing" | grep -Eo "[0-9.]+$")
+if [[ -n $avg ]] && (( avg < 4 )); then
+  echo "PASS  typing in the input: ${avg} ms per keystroke"
+else
+  echo "FAIL  typing in the input: ${avg:-no result} ms per keystroke (limit 4)"; failures=$((failures + 1))
+fi
 
 echo
 if (( failures == 0 )); then

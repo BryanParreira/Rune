@@ -8,7 +8,8 @@ The rest needs a person, a real trackpad and a few minutes. Do it on the release
 
 zsh, bash and fish blocks and exit codes · vim full screen at a stable size · 300,000 lines
 of output · long lines, wide characters and emoji · window resize · completion menu · shell
-editing keys · find in output · copy output.
+editing keys · find in output · copy output · clipboard can be set but not read by programs ·
+typing speed in the input.
 
 ## By hand
 
@@ -39,6 +40,11 @@ editing keys · find in output · copy output.
 - [ ] `open "rune://open?dir=/tmp&command=ls"` opens a tab with `ls` typed, not run.
 - [ ] ⌘Y Quick Looks a path in the output.
 - [ ] Help › Report a Problem makes a report folder and nothing else.
+
+**Security**
+- [ ] `ls -l ~/Library/Application\ Support/Rune`: recall.sqlite and session.json are `-rw-------`.
+- [ ] ⌘-click a link to a `.command` file: it's shown in Finder, not run. A `vscode://` link asks first.
+- [ ] Print a fake token (`echo shpat_` + 32 hex): it's masked on screen, in copies and in Recall.
 
 **Release build**
 - [ ] `spctl -a -vv` on the app says "Notarized Developer ID".
