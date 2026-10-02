@@ -84,6 +84,13 @@ check find "find in output" "FIND open=true matches=[3-9]"
 run copy /bin/zsh 14 1.5 "@wait||printf 'a  \\nb\\n'||@copy:output"
 check copy "copy output (trailing spaces trimmed)" "COPY output <<a"
 
+run remote /bin/zsh 26 2 "@wait||@send:PS1='SERVERPROMPT\\$ ' BASH_SILENCE_DEPRECATION_WARNING=1 bash --norc --noprofile||@wait||@fakeRemote||@wait||@wait||echo over-ssh||@remote||@screenText"
+if grep -q "REMOTE state=active" "$LOGS/remote" && grep -q "echo over-ssh exit=0" "$LOGS/remote" && ! grep "SCREEN<<" "$LOGS/remote" | grep -qF 'SERVERPROMPT$'; then
+  echo "PASS  remote shells (ssh): blocks, and the server's prompt stays hidden"
+else
+  echo "FAIL  remote shells (ssh): blocks and hidden server prompt"; failures=$((failures + 1))
+fi
+
 run clipboard /bin/zsh 18 2 "@wait||@clipboardWrite||@wait||@clipboardProbe"
 check clipboard "programs can set the clipboard but never read it" "CLIPBOARD write=true" "CLIPBOARD leaked=false"
 

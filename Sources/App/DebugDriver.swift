@@ -501,6 +501,17 @@ enum DebugDriver {
                     if let saved { pasteboard.setString(saved, forType: .string) }
                     fflush(stdout)
                 }
+            case let dump where dump.hasPrefix("@bootstrap:"):
+                let folder = String(dump.dropFirst(11))
+                try? RemoteShell.bootstrapScript(keepPrompt: false).write(toFile: folder + "/hidden.sh", atomically: true, encoding: .utf8)
+                try? RemoteShell.bootstrapScript(keepPrompt: true).write(toFile: folder + "/keep.sh", atomically: true, encoding: .utf8)
+            case "@screenText":
+                let g = session.geometry
+                let last = g.linesTrimmed + g.lineCount - 1
+                print("SCREEN<<" + g.text(rows: max(g.linesTrimmed, last - 40)...last).replacingOccurrences(of: "\n", with: "⏎") + ">>")
+                fflush(stdout)
+            case "@fakeRemote":
+                session.debugSetUpRemote()
             case "@frame":
                 if let window = session.view.window {
                     print("FRAME window=\(window.frame.size) content=\(window.contentView?.frame.size ?? .zero)")

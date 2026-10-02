@@ -1721,13 +1721,19 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     /// Types the setup script into the remote shell and hides its echo until it reports
     /// back. If it doesn't within a few seconds (another kind of shell), everything held
     /// back is shown and the session stays a plain terminal.
+    #if DEBUG
+    /// Runs the remote setup on whatever shell is running (a nested local one in tests).
+    func debugSetUpRemote() { setUpRemote(host: "test-server") }
+    #endif
+
     private func setUpRemote(host: String) {
         guard state == .running else { return }
         remote = .settingUp(host: host)
         heldOutput = []
         // A line at a time, like typing: one big write overflows the terminal's input buffer
         // (about 1 KB), and the shell then sees a mangled script.
-        let lines = RemoteShell.bootstrapScript.split(separator: "\n", omittingEmptySubsequences: false)
+        let script = RemoteShell.bootstrapScript(keepPrompt: config.honorPrompt)
+        let lines = script.split(separator: "\n", omittingEmptySubsequences: false)
         for (index, line) in lines.enumerated() {
             DispatchQueue.main.asyncAfter(deadline: .now() + Double(index) * 0.03) { [weak self] in
                 guard let self, case .settingUp = self.remote else { return }
@@ -1753,7 +1759,10 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             heldOutput = nil
             setupTimeout?.cancel()
             // What follows the marker (the remote host report and the new prompt) is shown.
-            return held[range.upperBound...]
+            // With the server's prompt hidden, its first one (printed before the setup ran)
+            // is wiped too, so the login block ends like any other.
+            guard !config.honorPrompt else { return held[range.upperBound...] }
+            return ArraySlice(Array("\r\u{1b}[2K".utf8) + held[range.upperBound...])
         }
         heldOutput = held
         return []
