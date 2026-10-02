@@ -399,6 +399,13 @@ enum DebugDriver {
                     controller.openSettingsTab()
                     controller.debugSettings()?.debugShow(page: .keyboard, query: String(query.dropFirst(18)))
                 }
+            case "@report":
+                if let store = ConfigStore.current, let folder = ProblemReport.create(sessions: [session], config: store) {
+                    print("REPORT \(folder.path)")
+                    print((try? String(contentsOf: folder.appendingPathComponent("report.md"), encoding: .utf8)) ?? "")
+                    print("REPORT files=\((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [])")
+                    fflush(stdout)
+                }
             case "@frame":
                 if let window = session.view.window {
                     print("FRAME window=\(window.frame.size) content=\(window.contentView?.frame.size ?? .zero)")
@@ -474,7 +481,7 @@ enum DebugDriver {
                 }
                 print("DUMP layout session=\(Int(v.frame.height)) container=\(Int(v.terminalContainer.frame.height)) terminal=\(Int(session.terminalView.frame.height)) input=\(Int(v.inputArea.frame.height)) inputY=\(Int(v.inputArea.frame.minY)) aiVisible=\(c.isVisible) collapsed=\(c.isCollapsed)")
                 print("DUMP screen cursorY=\(t.getCursorLocation().y) rows=\(t.rows) lines=\(g.lineCount) top=\(g.topVisibleRow) mode=\(session.mode)")
-                for b in session.tracker.blocks { print("DUMP block \(b.command) took=\(String(format: "%.2f", b.duration()))s header=\(b.headerRow) out=\(b.outputStartRow) end=\(b.endRow ?? -1) screenTop=\(g.linesTrimmed + g.screenTop)") }
+                for b in session.tracker.blocks { print("DUMP block \(b.command.isEmpty ? session.commandText(of: b) : b.command) exit=\(b.exitCode.map(String.init) ?? "-") took=\(String(format: "%.2f", b.duration()))s header=\(b.headerRow) out=\(b.outputStartRow) end=\(b.endRow ?? -1) screenTop=\(g.linesTrimmed + g.screenTop)") }
                 print("DUMP running=\(session.runningProgram ?? "nil")")
                 print("DUMP chunks=\(RuneTerminalView.debugChunks) bytes=\(RuneTerminalView.debugBytes)")
                 print("DUMP state=\(c.state) model=\(c.model) context=\(c.contextLabel ?? "-")")

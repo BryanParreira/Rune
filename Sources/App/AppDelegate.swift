@@ -166,6 +166,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate()
     }
 
+    // MARK: - Problem reports
+
+    @objc func reportProblem(_ sender: Any?) {
+        let sessions = windowControllers.flatMap(\.allSessions)
+        guard let configStore, let folder = ProblemReport.create(sessions: sessions, config: configStore) else {
+            NSSound.beep()
+            return
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([folder])
+        let alert = NSAlert()
+        alert.messageText = "Your report is ready"
+        alert.informativeText = "It's in the folder that just opened: Rune's version, your Mac, settings (with secrets removed) and any recent crash reports. Nothing was sent anywhere. Look it over, then attach it to an issue if you'd like help."
+        alert.addButton(withTitle: "Open an Issue on GitHub")
+        alert.addButton(withTitle: "Done")
+        if alert.runModal() == .alertFirstButtonReturn, let url = ProblemReport.issueURL(summary: ProblemReport.summary(sessions: sessions)) {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     // MARK: - Automation (Shortcuts, URLs)
 
     /// A new tab in `directory` (a folder that doesn't exist falls back to home), with

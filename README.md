@@ -39,7 +39,7 @@ Watch… on any block re-runs it in the background every few seconds, or wheneve
 ⌘' jumps to the last line that looks like an error and marks it; press it again for the one before. Bookmark blocks you want to come back to with ⌥⌘B and jump between them with ⌃⌘↑ ⌃⌘↓. Failed blocks and bookmarks show as ticks on the scroll bar.
 
 **An input that feels like an editor.**
-Type at the bottom, like a chat. Edit multi-line commands, accept suggestions from your history with →, and see typos in red before you press Enter. Mistype `gti status` or `cd Documetns` anyway, and Rune suggests the fix: press Tab to use it. Tab completes subcommands and flags for git, docker, npm, brew, kubectl and more, with a short note on what each does, plus your npm scripts, Makefile targets and git branches.
+Type at the bottom, like a chat. Edit multi-line commands, accept suggestions from your history with →, and see typos in red before you press Enter. The shell keys you know work there too: ⌃U, ⌃W, ⌃K and ⌃Y, ⌥B and ⌥F, and ⌥. for the last argument. Mistype `gti status` or `cd Documetns` anyway, and Rune suggests the fix: press Tab to use it. Tab opens a menu of subcommands and flags for git, docker, npm, brew, kubectl and more, with a short note on what each does, plus your npm scripts, Makefile targets and git branches.
 
 **Your input box, even over SSH.**
 When `ssh` (or `docker exec`, `kubectl exec`, `su`…) lands you in a shell on another machine, Rune offers to keep its input box there: blocks, history suggestions and ⌘↵ AI work like they do locally. Passwords and logins always go straight to the session, and nothing is saved on the server.
@@ -61,7 +61,7 @@ Open a README or any Markdown file and every shell snippet gets a Run button tha
 Press ⌘↵ to ask a question instead of running it. Rune answers with the context of where you are and what just happened, and suggested commands come back as cards you run with one click. Nothing runs until you say so. It works with any model you've installed in [Ollama](https://ollama.com). Your prompts never leave your machine.
 
 **Your shell, untouched.**
-Rune loads your own zsh setup exactly as it is: oh-my-zsh, Starship, plugins, aliases. It never edits your dotfiles.
+Rune loads your own setup exactly as it is, in zsh, bash or fish: oh-my-zsh, Starship, plugins, aliases. Blocks and the input box work in all three, and Rune never edits your dotfiles.
 
 **Everything is one keystroke away.**
 Press ⌘P for the command palette: every action, your open tabs, recent folders, themes and your whole command history, found with a few letters.
@@ -76,10 +76,16 @@ Set up a window the way you like it (a tab for the server with its dev command r
 Save a command once, with blanks like `git push {{remote}} {{branch}}`, then run it from the palette. Rune selects each blank for you to fill in and Tab moves to the next. Workflows live in your config file, so they travel with your sync folder. Commit a `.rune/workflows.json` to a repository and everyone on the team gets the same workflows there, no cloud account involved.
 
 **Fast, and right where you left off.**
-New tabs and splits open instantly, even with a heavy zsh setup, and huge outputs scroll by without slowing down. Quit or update, and your windows, tabs, splits and folders come back just as they were. Closed a tab by accident? ⇧⌘T brings it back. Press ⌘F to search any output.
+New tabs and splits open instantly, even with a heavy zsh setup, and huge outputs stream by: a million lines in about two seconds. Quit or update, and your windows, tabs, splits and folders come back just as they were. Closed a tab by accident? ⇧⌘T brings it back. Press ⌘F to search any output.
 
 **Part of your Mac.**
 The Shortcuts app gets Rune actions: open a folder, type a command, get the last output, search Recall. Use them in your own shortcuts, from Spotlight, or from Raycast. Launchers can also open `rune://open?dir=~/project&command=npm%20test`, which types the command for you and never runs it on its own.
+
+**Tabs that go where you want.**
+Drag tabs to reorder them, onto another Rune window, or out into a new one with Move Tab to New Window. Every menu shortcut can be changed in Settings.
+
+**Find anything in the output.**
+⌘F shows how many matches there are and marks them all; Return walks back through them, and a switch keeps the search inside the block you selected.
 
 **Know when it's done.**
 Start a long build, switch to something else, and Rune sends a notification when it finishes. Click it to jump straight back to that pane.
@@ -138,7 +144,9 @@ Rune finds your installed models automatically. You can choose one in Settings �
 | Open a link or file path from the output | ⌘-click |
 | Accept suggestion | → |
 | Command history | ↑ ↓ |
-| Complete commands, flags, files | ⇥ |
+| Complete commands, flags, files (menu: ↑↓, ⇥ or ↵) | ⇥ |
+| Delete to line start · previous word · to line end · paste back | ⌃U · ⌃W · ⌃K · ⌃Y |
+| Word back · forward · insert last argument | ⌥B · ⌥F · ⌥. |
 | Recall: search past commands and output | ⌃R |
 | Jump between blocks · select several | ⌘↑ ⌘↓ · ⇧⌘↑ ⇧⌘↓ |
 | Copy last output · last block as image | ⇧⌘C · ⌥⌘C |
@@ -146,7 +154,7 @@ Rune finds your installed models automatically. You can choose one in Settings �
 | Jump to error · next error | ⌘' · ⇧⌘' |
 | Bookmark block · jump between bookmarks | ⌥⌘B · ⌃⌘↑ ⌃⌘↓ |
 | Quick Look the path under the pointer | ⌘Y |
-| Search output · next · previous | ⌘F · ⌘G · ⇧⌘G |
+| Find in output · older · newer match | ⌘F · ⌘G · ⇧⌘G |
 | Clear screen | ⌘K |
 | Show or hide Rune from any app | ⌃\` |
 | Command palette | ⌘P |
@@ -156,7 +164,7 @@ Rune finds your installed models automatically. You can choose one in Settings �
 | New tab · close pane or tab | ⌘T · ⌘W |
 | Reopen closed tab | ⇧⌘T |
 | Rename tab | double-click the tab |
-| Settings | ⌘, |
+| Settings (change any menu shortcut under Keyboard shortcuts) | ⌘, |
 
 ## Privacy
 

@@ -405,6 +405,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
 
     private var terminalTabs: [TerminalTab] { tabs.compactMap { $0 as? TerminalTab } }
 
+    /// Every shell in this window (for a problem report).
+    var allSessions: [TerminalSession] { terminalTabs.flatMap(\.sessions) }
+
     /// The session new tabs inherit their directory from (the selected one, or the last terminal).
     private var directorySource: TerminalSession? {
         selectedSession ?? terminalTabs.last?.focusedSession

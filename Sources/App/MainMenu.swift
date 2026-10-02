@@ -11,6 +11,9 @@ enum MainMenu {
         let window = windowMenu()
         main.addItem(submenu(window))
         NSApp.windowsMenu = window
+        let help = helpMenu()
+        main.addItem(submenu(help))
+        NSApp.helpMenu = help
         return main
     }
 
@@ -120,6 +123,12 @@ enum MainMenu {
         menu.addItem(item("Next Bookmark", #selector(MainWindowController.nextBookmark(_:)), "\u{F701}", [.command, .control]))
         menu.addItem(.separator())
         menu.addItem(item("Clear Screen", #selector(MainWindowController.clearScreen(_:)), "k"))
+        return menu
+    }
+
+    private static func helpMenu() -> NSMenu {
+        let menu = NSMenu(title: "Help")
+        menu.addItem(item("Report a Problem…", #selector(AppDelegate.reportProblem(_:))))
         return menu
     }
 

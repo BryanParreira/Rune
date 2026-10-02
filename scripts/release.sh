@@ -27,6 +27,12 @@ if [ -n "$(git status --porcelain)" ]; then
   echo "Working tree has uncommitted changes; commit or stash them first."; exit 1
 fi
 
+# The things that must always work, in zsh, bash and fish (SKIP_SMOKE=1 to skip).
+if [ "${SKIP_SMOKE:-0}" != 1 ]; then
+  make build >/dev/null || { echo "Debug build failed"; exit 1; }
+  scripts/smoke.sh || { echo "Smoke checks failed; not releasing."; exit 1; }
+fi
+
 # Version bump. The build number must always increase for Sparkle to see an update.
 BUILD=$(( $(sed -nE 's/^ *CURRENT_PROJECT_VERSION: "?([0-9]+)"?/\1/p' project.yml | head -1) + 1 ))
 sed -i '' -E "s/^( *MARKETING_VERSION: ).*/\1\"$VERSION\"/" project.yml
