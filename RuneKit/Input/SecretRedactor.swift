@@ -23,6 +23,22 @@ public enum SecretRedactor {
             ("npm token", #"\bnpm_[A-Za-z0-9]{36}\b"#),
             ("JWT", #"\beyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"#),
             ("Private key", #"-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----"#),
+            ("Shopify token", #"\bshp(?:at|ca|pa|ss)_[a-fA-F0-9]{32}\b"#),
+            ("Hugging Face token", #"\bhf_[A-Za-z0-9]{34,}\b"#),
+            ("SendGrid key", #"\bSG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}\b"#),
+            ("DigitalOcean token", #"\bdo[po]_v1_[a-f0-9]{64}\b"#),
+            ("PyPI token", #"\bpypi-AgEIcHlwaS5vcmc[A-Za-z0-9_\-]{50,}"#),
+            ("Supabase token", #"\bsbp_[a-f0-9]{40}\b"#),
+            ("Linear key", #"\blin_api_[A-Za-z0-9]{40}\b"#),
+            ("Postman key", #"\bPMAK-[a-f0-9]{24}-[a-f0-9]{34}\b"#),
+            ("Doppler token", #"\bdp\.(?:pt|st|sa|ct)\.[A-Za-z0-9]{40,}\b"#),
+            ("Telegram bot token", #"\b\d{8,10}:AA[A-Za-z0-9_\-]{33}\b"#),
+            ("Mailgun key", #"\bkey-[0-9a-f]{32}\b"#),
+            ("Square token", #"\bsq0(?:atp|csp)-[0-9A-Za-z_\-]{22,43}\b"#),
+            // The password in user:password@host URLs (database and git remotes).
+            ("password in URL", #"(?<=://[^\s:/@]{1,64}:)[^\s/@]{3,}(?=@)"#),
+            // The value of KEY=…, *_TOKEN=…, PASSWORD: … style settings (env files, config output).
+            ("secret value", #"(?i)(?<=\b[a-z0-9_]{0,40}(?:secret|token|password|passwd|api_key|apikey|access_key|private_key)[a-z0-9_]{0,20}\s{0,3}[=:]\s{0,3}["']?)[^\s"']{8,}"#),
         ]
         return raw.compactMap { kind, pattern in
             (try? NSRegularExpression(pattern: pattern)).map { (kind, $0) }
