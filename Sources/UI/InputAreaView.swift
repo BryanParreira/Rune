@@ -240,12 +240,21 @@ final class InputAreaView: NSView, NSTextViewDelegate {
     }
 
     /// History-based suggestion shown in grey after the caret (like zsh-autosuggestions).
+    private let suggester = HistorySuggester()
+    /// Text and caret the suggestion was last worked out for: a keystroke reports both a text
+    /// change and a selection change, and one lookup is enough.
+    private var suggestionKey: (text: String, selection: NSRange, menuOpen: Bool, running: Bool)?
+
     private func updateSuggestion() {
         let text = editor.string
-        let atEnd = editor.selectedRange().length == 0 && editor.selectedRange().location == (text as NSString).length
+        let selection = editor.selectedRange()
+        if let key = suggestionKey, key.text == text, key.selection == selection, key.menuOpen == completionMenu.isOpen,
+           key.running == running { return }
+        suggestionKey = (text, selection, completionMenu.isOpen, running)
+        let atEnd = selection.length == 0 && selection.location == (text as NSString).length
         // The menu shows the choices; a grey guess behind it would only compete.
         guard atEnd, !running, !text.contains("\n"), !completionMenu.isOpen,
-              let match = HistoryStore.shared.history.suggestion(for: text)
+              let match = suggester.suggestion(for: text, in: HistoryStore.shared.history.entries)
         else {
             editor.suggestionSuffix = nil
             return

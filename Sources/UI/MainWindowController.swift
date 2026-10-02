@@ -913,6 +913,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         // and sending the shell a resize signal each time.
         host.isHidden = !show
         width.constant = show ? fileTreePreferredWidth : 0
+        // Files are about to be opened: start the Markdown engine now rather than at launch,
+        // so people who never preview files never pay for it.
+        if show { DispatchQueue.main.async { MarkdownWebEngine.prewarm() } }
         window?.contentView?.layoutSubtreeIfNeeded()
         if !show { selectedTab?.focus() }
         #if DEBUG

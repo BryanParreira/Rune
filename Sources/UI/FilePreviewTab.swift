@@ -1011,7 +1011,8 @@ enum MarkdownWebEngine {
         return configuration
     }
 
-    /// Starts the engine with an empty page, off the critical path.
+    /// Starts the engine with an empty page, off the critical path. Called when the Files
+    /// sidebar opens (not at launch: its helper processes take ~50 MB).
     static func prewarm() {
         guard warm == nil else { return }
         let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 10, height: 10), configuration: configuration())

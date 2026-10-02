@@ -406,6 +406,47 @@ enum DebugDriver {
                     print("REPORT files=\((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [])")
                     fflush(stdout)
                 }
+            case let typed where typed.hasPrefix("@typeTimed:"):
+                // Types one character at a time through the editor's normal path, timing each.
+                let editor = session.view.inputArea.editor
+                var times: [Double] = []
+                for character in typed.dropFirst(11) {
+                    let start = DispatchTime.now().uptimeNanoseconds
+                    editor.insertText(String(character), replacementRange: editor.selectedRange())
+                    editor.display()
+                    times.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1e6)
+                }
+                let sorted = times.sorted()
+                print("TYPING first five: " + times.prefix(5).map { String(format: "%.2f", $0) }.joined(separator: " "))
+                print(String(format: "TYPING keys=%d avg=%.2fms p95=%.2fms max=%.2fms", times.count,
+                             times.reduce(0, +) / Double(max(1, times.count)), sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))], sorted.last ?? 0))
+                fflush(stdout)
+            case "@echoLatency":
+                // Inside `cat` (raw echo): time from sending a key to it being parsed on screen.
+                let terminal = session.terminalView.getTerminal()
+                var results: [Double] = []
+                func measure(_ remaining: Int) {
+                    guard remaining > 0 else {
+                        let sorted = results.sorted()
+                        print(String(format: "ECHO keys=%d avg=%.2fms p95=%.2fms max=%.2fms", sorted.count,
+                                     sorted.reduce(0, +) / Double(max(1, sorted.count)), sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))], sorted.last ?? 0))
+                        fflush(stdout)
+                        return
+                    }
+                    let before = terminal.getCursorLocation().x
+                    let start = DispatchTime.now().uptimeNanoseconds
+                    session.terminalView.sendToShell([UInt8(ascii: "x")])
+                    func poll() {
+                        if terminal.getCursorLocation().x != before {
+                            results.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1e6)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { measure(remaining - 1) }
+                        } else {
+                            DispatchQueue.main.async(execute: poll)
+                        }
+                    }
+                    poll()
+                }
+                measure(40)
             case "@frame":
                 if let window = session.view.window {
                     print("FRAME window=\(window.frame.size) content=\(window.contentView?.frame.size ?? .zero)")

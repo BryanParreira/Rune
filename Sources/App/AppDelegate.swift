@@ -17,8 +17,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configStore = store
         ConfigStore.current = store
         AIService.shared.start(store: store)
-        // Rendered Markdown previews open without the web engine's cold start.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { MarkdownWebEngine.prewarm() }
         RecallService.shared.prune(keepingDays: store.snapshot.config.recallDays)
         Self.adoptNewDesignDefaults(store)
         CommandNotifier.shared.start()
