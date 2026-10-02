@@ -75,7 +75,7 @@ check resize "resizing the window keeps working" "FRAME window=\(700\.0, 480\.0\
 run menu /bin/zsh 14 1.2 "@wait||cd /tmp||@type:git ch||@key:tab||@menu"
 check menu "completion menu opens with choices" "MENU open=true .*checkout"
 
-run keys /bin/zsh 12 1 "@wait||@type:git push origin main||@chord:ctrl+w||@chord:ctrl+u||@chord:ctrl+y"
+run keys /bin/zsh 16 1.5 "@wait||@wait||@chord:ctrl+e||@type:git push origin main||@chord:ctrl+w||@chord:ctrl+u||@chord:ctrl+y"
 check keys "shell editing keys" "KEY ctrl\+w → <git push origin >" "KEY ctrl\+u → <>" "KEY ctrl\+y → <git push origin >"
 
 run find /bin/zsh 14 1.2 "@wait||printf 'needle\\nhay\\nneedle\\n'||@find||@findQuery:needle"

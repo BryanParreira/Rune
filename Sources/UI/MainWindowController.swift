@@ -87,7 +87,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         window.isMovableByWindowBackground = false
         window.minSize = NSSize(width: 420, height: 240)
         window.tabbingMode = .disallowed
-        window.setFrameAutosaveName("RuneMainWindow")
+        // Test runs share this Mac's settings; they must never change the user's window size.
+        if !AppDelegate.isAutomatedRun { window.setFrameAutosaveName("RuneMainWindow") }
         window.appearance = NSAppearance(named: configStore.snapshot.theme.isLight ? .aqua : .darkAqua)
 
         super.init(window: window)
