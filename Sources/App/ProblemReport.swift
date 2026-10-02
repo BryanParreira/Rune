@@ -15,7 +15,8 @@ enum ProblemReport {
             .replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: ".")
         let folder = support.appendingPathComponent("Rune/Problem Reports/Report \(stamp)", isDirectory: true)
         do {
-            try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+            PrivateFiles.makeDirectory(folder.deletingLastPathComponent())
+            PrivateFiles.makeDirectory(folder)
             try summary(sessions: sessions, config: config).write(to: folder.appendingPathComponent("report.md"), atomically: true, encoding: .utf8)
             // Settings, without anything that looks like a credential.
             if let text = try? String(contentsOf: config.writableConfigFile, encoding: .utf8) {
@@ -23,6 +24,9 @@ enum ProblemReport {
             }
             for crash in recentCrashReports(limit: 3) {
                 try? fileManager.copyItem(at: crash, to: folder.appendingPathComponent(crash.lastPathComponent))
+            }
+            for file in (try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [] {
+                PrivateFiles.restrict(file)
             }
             return folder
         } catch {

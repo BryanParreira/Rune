@@ -29,11 +29,14 @@ public final class RecallStore {
 
     /// Opens (or creates) the database; nil if it can't be opened.
     public init?(url: URL) {
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        PrivateFiles.makeDirectory(url.deletingLastPathComponent())
         guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
             sqlite3_close(db)
             return nil
         }
+        // Commands and their output: only the owner can read them. SQLite gives the -wal and
+        // -shm files the database's permissions; existing ones are tightened too.
+        for suffix in ["", "-wal", "-shm"] { PrivateFiles.restrict(URL(fileURLWithPath: url.path + suffix)) }
         let schema = """
         PRAGMA journal_mode=WAL;
         CREATE TABLE IF NOT EXISTS entries(id INTEGER PRIMARY KEY, date REAL NOT NULL, directory TEXT NOT NULL,

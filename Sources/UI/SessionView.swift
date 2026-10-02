@@ -57,6 +57,9 @@ final class SessionView: NSView {
         welcomeHost = NSHostingView(rootView: WelcomePanel(model: welcomeModel))
         super.init(frame: .zero)
 
+        #if DEBUG
+        Self.liveCount += 1
+        #endif
         overlay.sessionView = self
         terminalContainer.overlay = overlay
         inputArea.sessionView = self
@@ -126,8 +129,15 @@ final class SessionView: NSView {
         fatalError("init(coder:) is not supported")
     }
 
+    #if DEBUG
+    static var liveCount = 0
+    #endif
+
     deinit {
         chromeLink?.invalidate()
+        #if DEBUG
+        Self.liveCount -= 1
+        #endif
     }
 
     override var isFlipped: Bool { true }

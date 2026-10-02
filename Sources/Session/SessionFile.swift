@@ -28,7 +28,8 @@ enum SessionFile {
 
     static func save(_ session: SavedSession) {
         guard let url, let data = session.encoded() else { return }
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        PrivateFiles.makeDirectory(url.deletingLastPathComponent())
         try? data.write(to: url, options: .atomic)
+        PrivateFiles.restrict(url)
     }
 }

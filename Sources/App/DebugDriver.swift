@@ -447,6 +447,60 @@ enum DebugDriver {
                     poll()
                 }
                 measure(40)
+            case let churn where churn.hasPrefix("@churn:"):
+                // Opens and closes tabs (each runs a command), then reports what's still alive.
+                guard let controller = session.view.window?.windowController as? MainWindowController,
+                      let total = Int(churn.dropFirst(7)) else { break }
+                func rss() -> Double {
+                    var info = mach_task_basic_info()
+                    var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size)
+                    _ = withUnsafeMutablePointer(to: &info) { $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count) } }
+                    return Double(info.resident_size) / 1_048_576
+                }
+                print(String(format: "CHURN before sessions=%d views=%d rss=%.0fMB", TerminalSession.liveCount, SessionView.liveCount, rss()))
+                func step(_ remaining: Int) {
+                    guard remaining > 0 else {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+                            print(String(format: "CHURN after sessions=%d views=%d rss=%.0fMB", TerminalSession.liveCount, SessionView.liveCount, rss()))
+                            fflush(stdout)
+                        }
+                        return
+                    }
+                    controller.newTab(nil)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                        controller.selectedSession?.submit("seq 1 2000")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                            controller.closeTab(nil)
+                            step(remaining - 1)
+                        }
+                    }
+                }
+                step(total)
+            case "@clipboardWrite":
+                let pasteboard = NSPasteboard.general
+                let saved = pasteboard.string(forType: .string)
+                session.terminalView.sendToShell(Array("printf '\\033]52;c;UlVORS1XUklURQ==\\a'\r".utf8))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    print("CLIPBOARD write=\(pasteboard.string(forType: .string) == "RUNE-WRITE")")
+                    pasteboard.clearContents()
+                    if let saved { pasteboard.setString(saved, forType: .string) }
+                    fflush(stdout)
+                }
+            case "@clipboardProbe":
+                // A program asking for the clipboard (OSC 52 query): does the reply reach it?
+                let pasteboard = NSPasteboard.general
+                let saved = pasteboard.string(forType: .string)
+                pasteboard.clearContents()
+                pasteboard.setString("PROBE-SECRET-123", forType: .string)
+                // `cat -v` shows any reply typed back at it; Ctrl-C ends it after a moment.
+                session.terminalView.sendToShell(Array("stty -echo; printf '\\033]52;c;?\\a'; sleep 1; stty echo\r".utf8))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                    let text = session.geometry.text(rows: max(0, session.geometry.linesTrimmed + session.geometry.lineCount - 20)...(session.geometry.linesTrimmed + session.geometry.lineCount - 1))
+                    print("CLIPBOARD leaked=\(text.contains("UFJPQkUtU0VDUkVULTEyMw") || text.contains("PROBE-SECRET"))")
+                    pasteboard.clearContents()
+                    if let saved { pasteboard.setString(saved, forType: .string) }
+                    fflush(stdout)
+                }
             case "@frame":
                 if let window = session.view.window {
                     print("FRAME window=\(window.frame.size) content=\(window.contentView?.frame.size ?? .zero)")

@@ -188,6 +188,11 @@ final class RuneTerminalView: LocalProcessTerminalView {
 
 /// One shell running in a PTY: process lifecycle, shell integration, blocks, and input routing.
 final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
+    #if DEBUG
+    /// Sessions alive right now (leak checks).
+    static var liveCount = 0
+    deinit { Self.liveCount -= 1 }
+    #endif
     enum State: Equatable {
         case notStarted
         case running
@@ -303,6 +308,9 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         currentDirectory = directory
         view = SessionView(terminalView: terminalView)
         super.init()
+        #if DEBUG
+        Self.liveCount += 1
+        #endif
 
         view.session = self
         terminalView.processDelegate = self
@@ -677,6 +685,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         guard let target = LinkTarget.resolve(link, folders: folders) else { return false }
         switch target {
         case .url(let url):
+            // Web and mail links open; another app's link (vscode://, x-apple-…) asks first.
+            if LinkSafety.verdict(forURL: url) == .confirm, !confirmOpening(url) { return true }
             NSWorkspace.shared.open(url)
         case .file(let path, let line, let column):
             var isDirectory: ObjCBool = false
@@ -690,11 +700,28 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
                       let bundle = Bundle(url: app)?.bundleIdentifier,
                       let editorURL = EditorLink.url(bundleIdentifier: bundle, path: path, line: line, column: column) {
                 NSWorkspace.shared.open(editorURL)
+            } else if LinkSafety.verdict(forFile: path, isDirectory: false,
+                                         isExecutable: FileManager.default.isExecutableFile(atPath: path)) == .revealOnly {
+                // Apps, installers and scripts would run: show them instead.
+                NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+                view.overlay.showInfo("Shown in Finder: links never open apps, installers or scripts")
             } else {
                 NSWorkspace.shared.open(fileURL)
             }
         }
         return true
+    }
+
+    /// Asks before handing a link to another app, showing the full address.
+    private func confirmOpening(_ url: URL) -> Bool {
+        let alert = NSAlert()
+        let app = NSWorkspace.shared.urlForApplication(toOpen: url).map { FileManager.default.displayName(atPath: $0.path) }
+        alert.messageText = app.map { "Open this link in \($0)?" } ?? "Open this link?"
+        alert.informativeText = url.absoluteString.count > 300 ? String(url.absoluteString.prefix(300)) + "…" : url.absoluteString
+        alert.addButton(withTitle: "Open")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.last?.keyEquivalent = "\u{1b}"
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
 
@@ -1333,6 +1360,15 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
                 self?.handle(mark)
             }
             builtIn133?(data)
+        }
+        // OSC 52: programs may put text on the clipboard (vim, tmux), but never read it. A
+        // read would hand whatever you last copied (a password, a token) to any program or
+        // remote server that prints the request.
+        terminal.registerOscHandler(code: 52) { data in
+            guard let text = OSC52.textToWrite(data) else { return }
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
         }
         terminal.registerOscHandler(code: ShellMarkParser.runeOSC) { [weak self] data in
             if let text = String(bytes: data, encoding: .utf8), let mark = ShellMarkParser.parseRune(text) {
