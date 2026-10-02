@@ -91,7 +91,7 @@ Drag tabs to reorder them, onto another Rune window, or out into a new one with 
 Start a long build, switch to something else, and Rune sends a notification when it finishes. Click it to jump straight back to that pane.
 
 **Private by design.**
-API keys and tokens in your output are masked on screen and never sent to AI. With one switch, `sudo` accepts Touch ID instead of your password.
+API keys, tokens and passwords in your output are masked on screen, in copies and in Recall, and never sent to AI. Programs and remote servers can't read your clipboard, links in output never launch apps or scripts, and Rune's history files are readable only by you. With one switch, `sudo` accepts Touch ID instead of your password.
 
 **Easy on the eyes.**
 Rune's Paper theme is a soft, warm beige with ink-colored text and a highlighter for selections, with handwritten touches here and there. Prefer the dark? Paper Night keeps the same warmth after sunset.
@@ -168,7 +168,7 @@ Rune finds your installed models automatically. You can choose one in Settings �
 
 ## Privacy
 
-Rune has no accounts, analytics, crash reporting or telemetry. Recall history, restored sessions and settings stay on your Mac, and secrets are removed before anything is stored or sent to AI. AI requests go only to the Ollama server on your Mac, or to one you explicitly configure, in which case Rune shows a warning. The only other network request is a daily update check that downloads a public feed and sends nothing about you. You can turn it off in Settings → About.
+Rune has no accounts, analytics, crash reporting or telemetry. Recall history, restored sessions and settings stay on your Mac in files only your account can read, and secrets are removed before anything is stored or sent to AI. Programs running in Rune can put text on your clipboard but can't read it. AI requests go only to the Ollama server on your Mac, or to one you explicitly configure, in which case Rune shows a warning. The only other network request is a daily update check that downloads a public feed and sends nothing about you. You can turn it off in Settings → About.
 
 ## Updates
 
