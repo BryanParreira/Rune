@@ -17,6 +17,7 @@ final class InputAreaView: NSView, NSTextViewDelegate {
     private var trailing: NSLayoutConstraint?
     private var palette: ChromePalette?
     private var running = false
+    private var config = RuneConfig.defaults
 
     static let maxVisibleLines = 10
 
@@ -102,6 +103,12 @@ final class InputAreaView: NSView, NSTextViewDelegate {
     func apply(snapshot: ConfigSnapshot, palette: ChromePalette) {
         self.palette = palette
         let config = snapshot.config
+        self.config = config
+        chipsModel.showHints = config.showHints
+        editor.autoCloseBrackets = config.autoCloseBrackets
+        editor.vimMode = config.vimMode
+        editor.vimSystemClipboard = config.vimSystemClipboard
+        suggestionKey = nil
         leading?.constant = CGFloat(config.paddingX)
         trailing?.constant = -CGFloat(config.paddingX)
         chipsModel.palette = palette
@@ -230,6 +237,7 @@ final class InputAreaView: NSView, NSTextViewDelegate {
         // Only publish real changes: each write re-renders the SwiftUI chrome and re-measures it.
         setHint(currentHint)
         refreshCompletionMenu()
+        openCompletionMenuWhileTyping()
         sessionView?.session?.resetHistoryNavigation()
         refreshHighlighting()
         updateSuggestion()
@@ -251,6 +259,11 @@ final class InputAreaView: NSView, NSTextViewDelegate {
         storage.beginEditing()
         storage.setAttributes([.font: font, .foregroundColor: palette.text], range: full)
         for token in tokens where NSMaxRange(token.range) <= full.length {
+            if token.kind == .unknownCommand, config.underlineUnknownCommands {
+                storage.addAttributes([.underlineStyle: NSUnderlineStyle.single.rawValue | NSUnderlineStyle.patternDot.rawValue,
+                                       .underlineColor: palette.error], range: token.range)
+            }
+            guard config.syntaxHighlighting else { continue }
             let color: NSColor
             switch token.kind {
             case .command: color = palette.success
@@ -281,7 +294,7 @@ final class InputAreaView: NSView, NSTextViewDelegate {
         suggestionKey = (text, selection, completionMenu.isOpen, running)
         let atEnd = selection.length == 0 && selection.location == (text as NSString).length
         // The menu shows the choices; a grey guess behind it would only compete.
-        guard atEnd, !running, !text.contains("\n"), !completionMenu.isOpen,
+        guard config.autosuggestions, atEnd, !running, !text.contains("\n"), !completionMenu.isOpen,
               let match = suggester.suggestion(for: text, in: HistoryStore.shared.history.entries)
         else {
             editor.suggestionSuffix = nil
@@ -311,6 +324,7 @@ final class InputAreaView: NSView, NSTextViewDelegate {
         guard !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         session.submit(command)
         closeCompletionMenu()
+        editor.resetVim()
         editor.string = ""
         textDidChange(Notification(name: NSText.didChangeNotification))
     }
@@ -352,6 +366,24 @@ final class InputAreaView: NSView, NSTextViewDelegate {
         completionMenu.items = []
         setHint(currentHint)
         sessionView?.layoutCompletionMenu()
+    }
+
+    /// "Completions while typing": the menu opens by itself for an argument of a command (or a
+    /// path) once there's something to choose from, not for the command name itself.
+    private func openCompletionMenuWhileTyping() {
+        guard config.completionsWhileTyping, !completionMenu.isOpen, !running, !editor.hasMarkedText() else { return }
+        let text = editor.string as NSString
+        let caret = editor.selectedRange()
+        guard caret.length == 0, caret.location == text.length, text.length > 0,
+              let last = text.substring(from: text.length - 1).unicodeScalars.first,
+              !CharacterSet.whitespacesAndNewlines.contains(last) else { return }
+        let word = text.substring(to: caret.location).components(separatedBy: .whitespaces).last ?? ""
+        let isArgument = text.substring(to: caret.location).trimmingCharacters(in: .whitespaces).contains(" ")
+        guard !word.isEmpty, isArgument || word.contains("/") else { return }
+        guard let candidates = completionCandidates(), !candidates.items.isEmpty, candidates.items.count <= 40,
+              // Already complete: nothing to offer.
+              !(candidates.items.count == 1 && candidates.items[0].name == word) else { return }
+        openCompletionMenu(range: candidates.range, items: candidates.items)
     }
 
     /// Typing while the menu is open narrows it; it closes when nothing matches any more.
@@ -464,6 +496,10 @@ extension InputAreaView: CommandTextViewDelegate {
         return true
     }
 
+    func commandTextViewVimModeChanged(_ view: CommandTextView) {
+        if chipsModel.vimNormal != view.isVimNormal { chipsModel.vimNormal = view.isVimNormal }
+    }
+
     func commandTextViewCopyWithoutSelection(_ view: CommandTextView) -> Bool {
         sessionView?.session?.copySelectedBlock() ?? false
     }
@@ -504,6 +540,7 @@ extension InputAreaView: CommandTextViewDelegate {
     }
 
     func setText(_ text: String) {
+        editor.resetVim()
         editor.string = text
         editor.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
         textDidChange(Notification(name: NSText.didChangeNotification))
@@ -549,6 +586,10 @@ final class InputChromeModel: ObservableObject {
     @Published var hint: Hint = .idle
     /// A fix for the command that just failed (Tab on an empty input fills it in).
     @Published var correction: String?
+    /// The shortcut hints under the editor (a correction shows either way).
+    @Published var showHints = true
+    /// Vim normal mode (shown in place of the hints).
+    @Published var vimNormal = false
 }
 
 struct ContextChipsRow: View {
@@ -630,6 +671,17 @@ struct InputHintLine: View {
     @ObservedObject var ai = AIService.shared
 
     var body: some View {
+        if model.vimNormal {
+            Text("NORMAL   i a insert   ↵ run   u undo   k j history")
+                .font(.system(size: max(9, model.monoFontSize - 2), weight: .semibold, design: .monospaced))
+                .foregroundColor(Color(nsColor: model.palette.accent))
+                .lineLimit(1)
+        } else if model.showHints || (model.hint == .idle && model.correction != nil) {
+            line
+        }
+    }
+
+    private var line: some View {
         Group {
             switch model.hint {
             case .idle where model.correction != nil:

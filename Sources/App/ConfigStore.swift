@@ -113,6 +113,7 @@ final class ConfigStore {
         let loaded = loader.load()
         var warnings = loaded.warnings
         let config = loaded.config
+        SecretRedactor.setCustomPatterns(config.secretPatterns)
         var theme = ThemeLoader.load(named: config.themeName(systemIsDark: systemIsDark), resourceDirectories: loaded.resourceDirectories, warnings: &warnings)
         if config.minimumContrast { theme = theme.withMinimumContrast() }
         let font = FontResolver.font(family: config.fontFamily, size: config.fontSize, weight: config.fontWeight, warnings: &warnings)

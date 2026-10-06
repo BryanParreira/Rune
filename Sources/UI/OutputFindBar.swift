@@ -8,6 +8,10 @@ import SwiftUI
 final class OutputFindModel: ObservableObject {
     @Published var query = "" { didSet { if query != oldValue { scheduleSearch(delay: 0.06) } } }
     @Published var caseSensitive = false { didSet { search() } }
+    /// The query is a regular expression.
+    @Published var useRegex = false { didSet { search() } }
+    /// Regex on, and the query isn't a valid pattern.
+    var invalidPattern: Bool { useRegex && !query.isEmpty && !OutputSearch.isValidPattern(query) }
     @Published var inSelectedBlock = false { didSet { search() } }
     @Published private(set) var matches: [OutputSearch.Match] = []
     @Published private(set) var current: Int?
@@ -59,7 +63,7 @@ final class OutputFindModel: ObservableObject {
     func search() {
         guard isOpen else { return }
         let previous = current.flatMap { matches.indices.contains($0) ? matches[$0] : nil }
-        matches = OutputSearch.find(query, in: rows(inSelectedBlock), caseSensitive: caseSensitive)
+        matches = OutputSearch.find(query, in: rows(inSelectedBlock), caseSensitive: caseSensitive, regex: useRegex)
         if matches.isEmpty {
             current = nil
         } else if let previous, let same = matches.firstIndex(where: { $0.row == previous.row && $0.column == previous.column }) {
@@ -107,6 +111,7 @@ struct OutputFindBar: View {
                 .foregroundColor(Color(nsColor: model.query.isEmpty || !model.matches.isEmpty ? p.hint : p.error))
                 .fixedSize()
             toggle("Aa", on: model.caseSensitive, help: "Match case") { model.caseSensitive.toggle() }
+            toggle(".*", on: model.useRegex, help: "Regular expression") { model.useRegex.toggle() }
             if model.hasSelectedBlock {
                 toggle("Block", on: model.inSelectedBlock, help: "Only the selected block") { model.inSelectedBlock.toggle() }
             }
@@ -128,6 +133,7 @@ struct OutputFindBar: View {
 
     private var countText: String {
         if model.query.isEmpty { return "" }
+        if model.invalidPattern { return "invalid pattern" }
         guard let current = model.current, !model.matches.isEmpty else { return "no matches" }
         let total = model.matches.count >= 10_000 ? "10,000+" : model.matches.count.formatted()
         return "\(current + 1) of \(total)"

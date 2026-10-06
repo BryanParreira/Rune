@@ -90,7 +90,8 @@ final class SessionView: NSView {
             self?.remoteModel.kind = nil
             self?.session?.declineRemoteOffer()
         }
-        for view in [terminalContainer, welcomeHost, aiHost, remoteHost, inputArea] as [NSView] {
+        waterfallSpacer.isHidden = true
+        for view in [terminalContainer, welcomeHost, aiHost, remoteHost, inputArea, waterfallSpacer] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             stack.addArrangedSubview(view)
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
@@ -107,12 +108,14 @@ final class SessionView: NSView {
         inputArea.setContentHuggingPriority(.required, for: .vertical)
         remoteHost.setContentHuggingPriority(.required, for: .vertical)
         inputArea.setContentCompressionResistancePriority(.required, for: .vertical)
+        waterfallSpacer.setContentHuggingPriority(.init(1), for: .vertical)
+        waterfallSpacer.setContentCompressionResistancePriority(.init(1), for: .vertical)
+        waterfallHeight.priority = .init(999)
 
         addSubview(stack)
         // The AI card never takes more than ~45% of the tab; output always keeps room.
         let aiCap = aiHost.heightAnchor.constraint(lessThanOrEqualTo: heightAnchor, multiplier: 0.45)
         aiCap.priority = .required
-        let terminalFloor = terminalContainer.heightAnchor.constraint(greaterThanOrEqualToConstant: 90)
         terminalFloor.priority = .defaultHigh
         NSLayoutConstraint.activate([
             aiCap,
@@ -127,6 +130,37 @@ final class SessionView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")
+    }
+
+    // MARK: Waterfall input
+
+    /// Keeps output from shrinking away in the usual layout.
+    private lazy var terminalFloor = terminalContainer.heightAnchor.constraint(greaterThanOrEqualToConstant: 90)
+    /// "waterfall" input position: the output area is only as tall as the rows in use, so the
+    /// input sits right under the last output (moving down as it grows) with this empty space
+    /// below it. The terminal keeps its full size inside (no resize, no reflow).
+    private let waterfallSpacer = NSView()
+    private lazy var waterfallHeight = terminalContainer.heightAnchor.constraint(equalToConstant: 0)
+    private var waterfall = false
+
+    private func setWaterfall(_ on: Bool) {
+        guard on != waterfall else { return }
+        waterfall = on
+        updateWaterfall()
+    }
+
+    /// Sizes the output area to the rows in use, or gives it the whole pane (when the output
+    /// fills it, a full-screen program runs, or waterfall is off).
+    private func updateWaterfall() {
+        let rows = waterfall ? session?.usedScreenRows : nil
+        let shrink = rows != nil && bounds.height > 0
+        if waterfallSpacer.isHidden == shrink { waterfallSpacer.isHidden = !shrink }
+        if terminalFloor.isActive == shrink { terminalFloor.isActive = !shrink }
+        if waterfallHeight.isActive != shrink { waterfallHeight.isActive = shrink }
+        guard shrink, let rows, let session else { return }
+        let padding = terminalContainer.padding
+        let height = min(bounds.height, padding.top + padding.bottom + CGFloat(rows) * session.geometry.cellHeight)
+        if abs(waterfallHeight.constant - height) > 0.5 { waterfallHeight.constant = height }
     }
 
     #if DEBUG
@@ -190,6 +224,7 @@ final class SessionView: NSView {
         overlay.palette = palette
         finder.palette = palette
         overlay.font = snapshot.font
+        setWaterfall(config.inputPosition == "waterfall")
         rebuildAIPanel()
         updateVisibility()
         blocksDidChange()
@@ -220,6 +255,7 @@ final class SessionView: NSView {
             return
         }
         session?.updateBottomTrim()
+        updateWaterfall()
         overlay.needsDisplay = true
         overlay.refreshHover()
     }

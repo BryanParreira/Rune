@@ -45,10 +45,42 @@ public enum SecretRedactor {
         }
     }()
 
+    // The user's own patterns ("secretPatterns" in config), on top of the built-in ones.
+    // Read from Recall's queue as well as the main thread, so behind a lock.
+    private static let customLock = NSLock()
+    private static var custom: [(kind: String, regex: NSRegularExpression)] = []
+    private static var customSource: [String] = []
+    private static var _generation = 0
+
+    /// Changes whenever the custom patterns do (for caches of match results).
+    public static var generation: Int {
+        customLock.lock()
+        defer { customLock.unlock() }
+        return _generation
+    }
+
+    /// Sets the user's patterns; invalid ones are skipped (the config reader warns about them).
+    public static func setCustomPatterns(_ sources: [String]) {
+        customLock.lock()
+        defer { customLock.unlock() }
+        guard sources != customSource else { return }
+        customSource = sources
+        custom = sources.compactMap { source in (try? NSRegularExpression(pattern: source)).map { ("custom pattern", $0) } }
+        _generation += 1
+    }
+
+    private static var allPatterns: [(kind: String, regex: NSRegularExpression)] {
+        customLock.lock()
+        defer { customLock.unlock() }
+        return custom.isEmpty ? patterns : patterns + custom
+    }
+
     /// Every secret in `text`, in order, without overlaps.
     public static func matches(in text: String) -> [Match] {
         let full = NSRange(location: 0, length: (text as NSString).length)
-        guard full.length >= 16 else { return [] }
+        let patterns = allPatterns
+        // Built-in secrets are all 16+ characters; a custom pattern may be shorter.
+        guard full.length >= 16 || patterns.count > Self.patterns.count, full.length > 0 else { return [] }
         var found: [Match] = []
         for (kind, regex) in patterns {
             for result in regex.matches(in: text, range: full) {

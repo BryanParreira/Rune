@@ -446,7 +446,7 @@ final class BlockOverlayView: NSView {
                 utf16 += character.utf16.count
                 text.append(character)
             }
-            guard text.count >= 16 else { continue }
+            guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
             for match in secretMatches(in: text) {
                 let secret = (text as NSString).substring(with: match.range)
                 guard !revealedSecrets.contains(secret),
@@ -475,7 +475,14 @@ final class BlockOverlayView: NSView {
     /// all the secret patterns over each of them again made scrolling output stutter.
     private var secretMatchCache: [String: [SecretRedactor.Match]] = [:]
 
+    private var secretMatchGeneration = 0
+
     private func secretMatches(in text: String) -> [SecretRedactor.Match] {
+        let generation = SecretRedactor.generation
+        if generation != secretMatchGeneration {
+            secretMatchCache.removeAll()
+            secretMatchGeneration = generation
+        }
         if let cached = secretMatchCache[text] { return cached }
         if secretMatchCache.count >= 4_000 { secretMatchCache.removeAll(keepingCapacity: true) }
         let found = SecretRedactor.matches(in: text)

@@ -112,6 +112,8 @@ public struct RuneConfig: Equatable, Sendable {
     public var completionsWhileTyping: Bool = false
     /// Vim keys in the input editor (Esc for normal mode).
     public var vimMode: Bool = false
+    /// Vim's yank and put use the macOS clipboard instead of their own register.
+    public var vimSystemClipboard: Bool = false
     /// Where the input sits when the output doesn't fill the pane: "bottom" (pinned) or
     /// "waterfall" (right under the last output, moving down as output grows).
     public var inputPosition: String = "bottom"
@@ -141,7 +143,7 @@ public struct RuneConfig: Equatable, Sendable {
         "followSystemAppearance", "darkTheme", "fontWeight", "minimumContrast", "dimInactivePanes", "showDockIcon",
         "copyOnSelect", "rightClick", "scrollSpeed",
         "showHints", "syntaxHighlighting", "autosuggestions", "commandCorrections", "underlineUnknownCommands",
-        "autoCloseBrackets", "completionsWhileTyping", "vimMode", "inputPosition", "secretPatterns",
+        "autoCloseBrackets", "completionsWhileTyping", "vimMode", "vimSystemClipboard", "inputPosition", "secretPatterns",
     ]
 
     /// Written to ~/.config/rune/config.json on first launch.
@@ -261,6 +263,7 @@ extension RuneConfig {
         if let v = reader.bool("autoCloseBrackets") { autoCloseBrackets = v }
         if let v = reader.bool("completionsWhileTyping") { completionsWhileTyping = v }
         if let v = reader.bool("vimMode") { vimMode = v }
+        if let v = reader.bool("vimSystemClipboard") { vimSystemClipboard = v }
         if let v = reader.string("inputPosition") {
             if ["bottom", "waterfall"].contains(v) { inputPosition = v } else { reader.warnings.append("inputPosition \"\(v)\" is not one of bottom, waterfall; using bottom") }
         }

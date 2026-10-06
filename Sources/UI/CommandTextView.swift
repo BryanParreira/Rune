@@ -17,6 +17,8 @@ protocol CommandTextViewDelegate: AnyObject {
     func commandTextViewCanCopyWithoutSelection(_ view: CommandTextView) -> Bool
     /// Offered navigation keys first while the completion menu is open; true if handled.
     func commandTextView(_ view: CommandTextView, menuKey keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool
+    /// Vim mode switched between insert and normal.
+    func commandTextViewVimModeChanged(_ view: CommandTextView)
 }
 
 /// Native multi-line command editor: Enter runs, Shift-Enter inserts a newline,
@@ -118,15 +120,202 @@ final class CommandTextView: NSTextView {
 
     override var acceptsFirstResponder: Bool { true }
 
+    // MARK: Auto-close brackets
+
+    /// Typing ( [ { " ' or ` adds the closing one (the "autoCloseBrackets" setting).
+    var autoCloseBrackets = false
+    private static let pairs: [String: String] = ["(": ")", "[": "]", "{": "}", "\"": "\"", "'": "'", "`": "`"]
+    private static let closers: Set<String> = [")", "]", "}", "\"", "'", "`"]
+
+    override func insertText(_ insertString: Any, replacementRange: NSRange) {
+        guard autoCloseBrackets, !hasMarkedText(), let typed = insertString as? String, typed.count == 1,
+              handleBracket(typed, replacementRange: replacementRange) else {
+            super.insertText(insertString, replacementRange: replacementRange)
+            return
+        }
+    }
+
+    /// Returns true when the bracket was handled (paired, wrapped or typed over).
+    private func handleBracket(_ typed: String, replacementRange: NSRange) -> Bool {
+        let text = string as NSString
+        let selection = replacementRange.location == NSNotFound ? selectedRange() : replacementRange
+        guard NSMaxRange(selection) <= text.length else { return false }
+        let next = NSMaxRange(selection) < text.length ? text.substring(with: NSRange(location: NSMaxRange(selection), length: 1)) : ""
+        let previous = selection.location > 0 ? text.substring(with: NSRange(location: selection.location - 1, length: 1)) : ""
+
+        // Typing the closer that's already there just steps over it.
+        if selection.length == 0, Self.closers.contains(typed), next == typed {
+            setSelectedRange(NSRange(location: selection.location + 1, length: 0))
+            return true
+        }
+        guard let closer = Self.pairs[typed] else { return false }
+        // A selection gets wrapped.
+        if selection.length > 0 {
+            let inner = text.substring(with: selection)
+            super.insertText(typed + inner + closer, replacementRange: selection)
+            setSelectedRange(NSRange(location: selection.location + 1, length: (inner as NSString).length))
+            return true
+        }
+        // Only before a space, the end, or another closer; quotes not right after a word
+        // character or a backslash (don't, it's, \").
+        let nextAllows = next.isEmpty || next.trimmingCharacters(in: .whitespaces).isEmpty || Self.closers.contains(next)
+        let isQuote = typed == closer
+        let previousBlocksQuote = previous == "\\" || previous.rangeOfCharacter(from: .alphanumerics) != nil
+        guard nextAllows, !(isQuote && previousBlocksQuote) else { return false }
+        super.insertText(typed + closer, replacementRange: selection)
+        setSelectedRange(NSRange(location: selection.location + 1, length: 0))
+        return true
+    }
+
+    override func deleteBackward(_ sender: Any?) {
+        // Backspace between an empty pair removes both.
+        let selection = selectedRange()
+        let text = string as NSString
+        if autoCloseBrackets, selection.length == 0, selection.location > 0, selection.location < text.length,
+           let closer = Self.pairs[text.substring(with: NSRange(location: selection.location - 1, length: 1))],
+           text.substring(with: NSRange(location: selection.location, length: 1)) == closer {
+            insertText("", replacementRange: NSRange(location: selection.location - 1, length: 2))
+            return
+        }
+        super.deleteBackward(sender)
+    }
+
     override func didChangeText() {
         super.didChangeText()
         if string.isEmpty { fillingWorkflow = false }
+    }
+
+    // MARK: Vim
+
+    /// Vim keys (the "vimMode" setting): Esc for normal mode, i/a/A… back to insert.
+    var vimMode = false {
+        didSet {
+            guard vimMode != oldValue else { return }
+            vim.reset()
+            vimModeChanged()
+        }
+    }
+    /// Yank and put go through the macOS clipboard.
+    var vimSystemClipboard = false
+    private(set) var vim = VimEditor()
+    var isVimNormal: Bool { vimMode && vim.mode == .normal }
+    /// Vim's own undo history: the text before each change. A change that starts insert
+    /// mode (cw, S…) and the typing that follows undo together, as in Vim.
+    private var vimUndo: [(text: String, caret: Int)] = []
+    /// The text when the current insert session began.
+    private var insertStart: (text: String, caret: Int)?
+
+    /// Back to insert mode (a new prompt, text set from outside).
+    func resetVim() {
+        vimUndo.removeAll()
+        insertStart = nil
+        guard vim.mode != .insert else { return }
+        vim.reset()
+        vimModeChanged()
+    }
+
+    private func vimModeChanged() {
+        commandDelegate?.commandTextViewVimModeChanged(self)
+        needsDisplay = true
+        updateInsertionPointStateAndRestartTimer(true)
+    }
+
+    /// Returns true when Vim handled the key.
+    private func handleVimKey(_ event: NSEvent, mods: NSEvent.ModifierFlags) -> Bool {
+        guard vimMode, !hasMarkedText() else { return false }
+        let caret = selectedRange().location
+        if event.keyCode == 53 { // Esc
+            if vim.mode == .insert {
+                // What was typed in insert mode is one step for u.
+                breakUndoCoalescing()
+                let start = insertStart ?? (text: "", caret: 0)
+                if string != start.text { vimUndo.append(start) }
+                insertStart = nil
+                applyVim(vim.enterNormal(text: string, caret: caret))
+                vimModeChanged()
+                return true
+            }
+            // Nothing pending: the editor's usual Esc (close a panel, clear a block selection).
+            return vim.escapeInNormal(text: string, caret: caret).action != .cancel
+        }
+        guard vim.mode == .normal else { return false }
+        // Return runs, arrows move, ⌘/⌃ shortcuts work as usual.
+        if mods.contains(.command) || mods.contains(.control) || [36, 76, 48, 115, 116, 117, 119, 121, 123, 124, 125, 126].contains(event.keyCode) {
+            return false
+        }
+        guard let key = event.characters, key.count == 1 else { return true }
+        let before = vim.register
+        if vimSystemClipboard, key == "p" || key == "P", let clip = NSPasteboard.general.string(forType: .string) {
+            vim.register = clip
+        }
+        let wasNormal = vim.mode == .normal
+        let snapshot = (text: string, caret: caret)
+        guard let result = vim.handle(key: key, text: string, caret: caret) else { return true }
+        if wasNormal, vim.mode == .insert {
+            insertStart = snapshot
+        } else if result.text != snapshot.text {
+            vimUndo.append(snapshot)
+        }
+        if vimSystemClipboard, vim.register != before, key != "p", key != "P" {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(vim.register, forType: .string)
+        }
+        applyVim(result)
+        switch result.action {
+        case .undo:
+            if let last = vimUndo.popLast() {
+                let length = (last.text as NSString).length
+                applyVim(VimEditor.Result(text: last.text, caret: max(0, min(last.caret, length - 1))))
+            }
+        case .historyOlder: _ = commandDelegate?.commandTextView(self, historyOlder: string)
+        case .historyNewer: _ = commandDelegate?.commandTextViewHistoryNewer(self)
+        case .cancel, .none: break
+        }
+        if wasNormal != (vim.mode == .normal) { vimModeChanged() }
+        return true
+    }
+
+    private func applyVim(_ result: VimEditor.Result) {
+        if result.text != string {
+            breakUndoCoalescing()
+            // Through the text system, so ⌘Z / u can undo it.
+            let full = NSRange(location: 0, length: (string as NSString).length)
+            if shouldChangeText(in: full, replacementString: result.text) {
+                textStorage?.replaceCharacters(in: full, with: result.text)
+                didChangeText()
+            }
+        }
+        setSelectedRange(NSRange(location: min(result.caret, (string as NSString).length), length: 0))
+        scrollRangeToVisible(selectedRange())
+    }
+
+    /// Normal mode shows a block caret over the character, like Vim.
+    override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
+        guard isVimNormal else { return super.drawInsertionPoint(in: rect, color: color, turnedOn: flag) }
+        guard flag else { return }
+        var block = rect
+        block.size.width = vimCaretWidth
+        color.withAlphaComponent(0.45).setFill()
+        block.fill()
+    }
+
+    override func setNeedsDisplay(_ invalidRect: NSRect, avoidAdditionalLayout flag: Bool) {
+        // The block caret is wider than the line AppKit invalidates for it.
+        var rect = invalidRect
+        if isVimNormal { rect.size.width += vimCaretWidth }
+        super.setNeedsDisplay(rect, avoidAdditionalLayout: flag)
+    }
+
+    private var vimCaretWidth: CGFloat {
+        guard let font else { return 8 }
+        return font.advancement(forGlyph: font.glyph(withName: "W")).width
     }
 
     override func keyDown(with event: NSEvent) {
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let plain = mods.subtracting([.numericPad, .function, .capsLock]).isEmpty
         if commandDelegate?.commandTextView(self, menuKey: event.keyCode, modifiers: mods) == true { return }
+        if handleVimKey(event, mods: mods) { return }
         let key = event.charactersIgnoringModifiers?.lowercased()
         let cyclingLastArgument = lastArgument
         lastArgument = nil

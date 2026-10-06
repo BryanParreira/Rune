@@ -175,11 +175,14 @@ enum SettingsIndex {
                     "Dim inactive panes", "split", "Show in Dock", "menu bar", "Cmd-Tab"]
         case .terminal:
             return ["Shell", "Show shell prompt", "PS1", "Starship", "Scrollback", "Option key", "Meta", "Notifications", "Notify when done", "long commands", "Restore", "Reopen", "session", "tabs at launch", "Secrets", "API keys", "tokens", "redact", "Recall", "history", "output search", "Touch ID", "sudo", "fingerprint", "password",
-                    "Copy on select", "selection", "Right-click", "paste", "mouse", "Scroll speed", "trackpad"]
+                    "Copy on select", "selection", "Right-click", "paste", "mouse", "Scroll speed", "trackpad",
+                    "secret patterns", "regex", "regular expression"]
         case .workflows:
             return ["Workflows", "saved commands", "snippets", "command palette", "placeholders"]
         case .input:
-            return ["New session panel", "welcome", "editor", "history", "completion", "Type commands in", "zsh prompt", "autosuggestions", "syntax highlighting", "plugins"]
+            return ["New session panel", "welcome", "editor", "history", "completion", "Type commands in", "zsh prompt", "autosuggestions", "syntax highlighting", "plugins",
+                    "Suggestions from history", "Underline unknown commands", "Close brackets", "quotes", "auto-close", "Open completions while typing",
+                    "typos", "corrections", "Did you mean", "hints", "shortcut hints", "Vim", "vi mode", "normal mode", "keybindings", "clipboard", "Input position", "waterfall", "top", "bottom"]
         case .ai:
             return ["AI", "Ollama", "Model", "local", "LLM", "Endpoint", "context", "Explain"]
         case .keyboard:
@@ -808,6 +811,15 @@ struct TerminalPage: View {
                        detail: "Masks API keys, tokens and private keys (AWS, GitHub, OpenAI, Stripe, Slack…) on screen; click one to show it. Secrets are always removed before anything is sent to AI.") {
                 SwitchControl(isOn: model.binding("hideSecrets", { $0.hideSecrets }))
             }
+            SettingRow(model: model, title: "Your own secret patterns", key: "secretPatterns",
+                       detail: model.config.secretPatterns.isEmpty
+                        ? "Hide more: add regular expressions as \"secretPatterns\": [\"acme_[A-Za-z0-9]{32}\"] in the settings file."
+                        : "\(model.config.secretPatterns.count) pattern\(model.config.secretPatterns.count == 1 ? "" : "s") from the settings file, on top of the built-in ones.") {
+                Button("Open settings file") { NSApp.sendAction(#selector(AppDelegate.openConfig(_:)), to: nil, from: nil) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundColor(Color(nsColor: p.accent))
+            }
             SettingRow(model: model, title: "Reopen windows and tabs at launch", key: "restoreSession",
                        detail: "Brings back your windows, tabs, split panes and their folders after quitting or updating. Only folder and file paths are saved, on this Mac.") {
                 SwitchControl(isOn: model.binding("restoreSession", { $0.restoreSession }))
@@ -837,14 +849,57 @@ struct InputPage: View {
                               options: InputStyle.allCases,
                               label: { $0 == .editor ? "Rune editor" : "zsh prompt" }, palette: p, width: 180)
             }
+            SettingRow(model: model, title: "Input position", key: "inputPosition",
+                       detail: "Bottom: the input stays at the bottom and output grows up from it. Waterfall: the input sits right under the last output and moves down as output grows, like a classic terminal.") {
+                DropdownField(selection: model.binding("inputPosition", { $0.inputPosition }), options: ["bottom", "waterfall"],
+                              label: { $0 == "waterfall" ? "Waterfall" : "Pinned to bottom" }, palette: p, width: 180)
+            }
             SettingRow(model: model, title: "Show “New session” panel", key: "showWelcome", detail: "Shortcut tips above the input editor in new tabs.") {
                 SwitchControl(isOn: model.binding("showWelcome", { $0.showWelcome }))
             }
-            SettingRow(model: model, title: "Command history", detail: "Up/Down cycles through ~/.zsh_history plus commands run in Rune. Suggestions from history appear in grey as you type.") {
+            SettingRow(model: model, title: "Command history", detail: "Up/Down cycles through ~/.zsh_history plus commands run in Rune.") {
                 EmptyView()
             }
-            SettingRow(model: model, title: "Tab completion", detail: "Completes files and folders relative to the current directory.") {
-                EmptyView()
+
+            SectionHeader(text: "While you type", palette: p)
+            SettingRow(model: model, title: "Suggestions from history", key: "autosuggestions",
+                       detail: "A grey guess after the caret from commands you've run (→ accepts it, ⌥→ one word).") {
+                SwitchControl(isOn: model.binding("autosuggestions", { $0.autosuggestions }))
+            }
+            SettingRow(model: model, title: "Syntax highlighting", key: "syntaxHighlighting",
+                       detail: "Colors commands, flags, strings and variables; unknown commands show in red.") {
+                SwitchControl(isOn: model.binding("syntaxHighlighting", { $0.syntaxHighlighting }))
+            }
+            SettingRow(model: model, title: "Underline unknown commands", key: "underlineUnknownCommands",
+                       detail: "A dotted red line under a command that isn't installed.") {
+                SwitchControl(isOn: model.binding("underlineUnknownCommands", { $0.underlineUnknownCommands }))
+            }
+            SettingRow(model: model, title: "Close brackets and quotes", key: "autoCloseBrackets",
+                       detail: "Typing ( [ { \" ' or ` adds the closing one; typing it again steps over it.") {
+                SwitchControl(isOn: model.binding("autoCloseBrackets", { $0.autoCloseBrackets }))
+            }
+            SettingRow(model: model, title: "Open completions while typing", key: "completionsWhileTyping",
+                       detail: "The menu of subcommands, flags and files opens on its own for arguments, not only on ⇥.") {
+                SwitchControl(isOn: model.binding("completionsWhileTyping", { $0.completionsWhileTyping }))
+            }
+            SettingRow(model: model, title: "Suggest fixes for typos", key: "commandCorrections",
+                       detail: "After a command fails because of a typo (gti status), offers the fixed one; ⇥ puts it in the input.") {
+                SwitchControl(isOn: model.binding("commandCorrections", { $0.commandCorrections }))
+            }
+            SettingRow(model: model, title: "Show shortcut hints", key: "showHints", detail: "The line of shortcuts under the input.") {
+                SwitchControl(isOn: model.binding("showHints", { $0.showHints }))
+            }
+
+            SectionHeader(text: "Editing", palette: p)
+            SettingRow(model: model, title: "Vim keys", key: "vimMode",
+                       detail: "Esc for normal mode: h l w b e 0 $ to move, d c y with a motion (dw, ciw, d$), dd, x, r, p, u to undo, k j for history; i a A to type again.") {
+                SwitchControl(isOn: model.binding("vimMode", { $0.vimMode }))
+            }
+            if model.config.vimMode {
+                SettingRow(model: model, title: "Vim yank and put use the clipboard", key: "vimSystemClipboard",
+                           detail: "y and d copy to the macOS clipboard, and p pastes from it.") {
+                    SwitchControl(isOn: model.binding("vimSystemClipboard", { $0.vimSystemClipboard }))
+                }
             }
         }
     }

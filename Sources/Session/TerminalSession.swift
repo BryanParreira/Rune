@@ -1701,7 +1701,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
 
     /// A command failed because of a typo: offer the fixed command (Tab puts it in the input).
     private func suggestCorrection(for block: Block) {
-        guard block.isFailed || block.exitCode == 127 else { view.inputArea.showCorrection(nil); return }
+        guard config.commandCorrections, block.isFailed || block.exitCode == 127 else { view.inputArea.showCorrection(nil); return }
         let directories = isRemote ? [] : FileListing.entries(at: currentDirectory, showHidden: true).filter(\.isDirectory).map(\.name)
         let fix = CommandCorrection.suggest(command: commandText(of: block), exitCode: block.exitCode,
                                             output: outputText(of: block, maxRows: 40),
@@ -1848,6 +1848,27 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         view.terminalContainer.hiddenBottomRows = hidden
     }
 
+
+    /// Rows of the screen in use, from the first one with anything on it down to the last
+    /// one shown (for the "waterfall" input position). Nil when the output needs the whole
+    /// pane: it has scrolled past the screen, or a full-screen program or plain shell runs.
+    var usedScreenRows: Int? {
+        let terminal = terminalView.getTerminal()
+        guard integration == .active, !terminal.isCurrentBufferAlternate,
+              mode == .editor || mode == .runningCommand else { return nil }
+        let geometry = geometry
+        // The blank lines Rune pads the screen with scroll into the scrollback as prompts
+        // arrive; what counts is where the first line with anything on it is.
+        let bufferStart = geometry.linesTrimmed
+        let screenStart = bufferStart + geometry.screenTop
+        var first = bufferStart
+        while first < screenStart + terminal.rows,
+              terminal.getScrollInvariantLine(row: first)?.translateToString(trimRight: true).isEmpty ?? true {
+            first += 1
+        }
+        guard first >= screenStart else { return nil }
+        return max(0, terminal.rows - (first - screenStart) - view.terminalContainer.hiddenBottomRows)
+    }
 
     /// Keystrokes that reach the terminal view while the editor owns input are redirected
     /// to the editor (e.g. the user clicked the output to select text, then kept typing).
