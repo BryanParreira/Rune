@@ -69,7 +69,12 @@ targets:
           - Rune.entitlements
           - "ShellIntegration/**"
           - "Fonts/**"
+          - "Completions/**"
       - path: Resources/ShellIntegration
+        type: folder
+        buildPhase: resources
+      # Completion specs converted from Fig's (MIT), see scripts/import-fig-specs.mjs.
+      - path: Resources/Completions
         type: folder
         buildPhase: resources
       # Bundled fonts (SIL OFL), registered for the app by ATSApplicationFontsPath.

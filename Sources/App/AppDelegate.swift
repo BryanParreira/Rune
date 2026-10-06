@@ -18,6 +18,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ConfigStore.current = store
         AIService.shared.start(store: store)
         RecallService.shared.prune(keepingDays: store.snapshot.config.recallDays)
+        // Completions for hundreds of tools (about 1 MB compressed), off the main thread.
+        if let specs = Bundle.main.url(forResource: "fig-specs", withExtension: "deflate", subdirectory: "Completions") {
+            DispatchQueue.global(qos: .utility).async { CompletionLibrary.shared.load(contentsOf: specs) }
+        }
         Self.adoptNewDesignDefaults(store)
         CommandNotifier.shared.start()
         CommandNotifier.shared.onOpen = { [weak self] sessionID in

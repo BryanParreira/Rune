@@ -53,7 +53,7 @@ public enum CommandCompletion {
         let endsWithSpace = segment.last == " "
         let current = endsWithSpace ? "" : (words.last ?? "")
         let previous = endsWithSpace ? words : Array(words.dropLast())
-        guard let tool = previous.first, let spec = CommandSpecs.all[tool] else { return nil }
+        guard let tool = previous.first, let spec = CommandSpecs.spec(for: tool) else { return nil }
 
         // Walk into subcommands already typed (`git remote add`, `docker compose up`).
         var node = spec

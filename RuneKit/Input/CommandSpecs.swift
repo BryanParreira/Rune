@@ -29,6 +29,11 @@ private let scripts: @Sendable (CommandCompletion.Sources, String) -> [String] =
 private let targets: @Sendable (CommandCompletion.Sources, String) -> [String] = { $0.makeTargets($1) }
 
 public enum CommandSpecs {
+    /// Rune's own spec for `tool` (with live values like git branches), else the library's.
+    public static func spec(for tool: String) -> CommandSpec? {
+        all[tool] ?? CompletionLibrary.shared.spec(named: tool)
+    }
+
     public static let all: [String: CommandSpec] = {
         var table: [String: CommandSpec] = [:]
         for spec in [git, docker, npm, yarn, pnpm, brew, kubectl, cargo, swift, gh, pip, make] {

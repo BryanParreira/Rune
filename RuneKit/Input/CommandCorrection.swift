@@ -31,7 +31,7 @@ public enum CommandCorrection {
         }
 
         // Mistyped subcommand of a tool Rune knows (brew isntall, docker pss).
-        if words.count >= 2, let spec = CommandSpecs.all[first], !spec.subcommands.isEmpty,
+        if words.count >= 2, let spec = CommandSpecs.spec(for: first), !spec.subcommands.isEmpty,
            !spec.subcommands.contains(where: { $0.name == words[1] || $0.aliases.contains(words[1]) }),
            text.lowercased().contains("unknown") || text.lowercased().contains("not a") || text.lowercased().contains("invalid"),
            let best = closest(to: words[1], in: Set(spec.subcommands.map(\.name))) {
