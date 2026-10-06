@@ -61,7 +61,10 @@ struct BufferGeometry {
 
     /// Row under a point in `view`'s coordinates.
     func row(atY y: CGFloat) -> Int {
-        topVisibleRow + Int(floor((view.bounds.maxY - y) / cellHeight))
+        let offset = floor((view.bounds.maxY - y) / cellHeight)
+        // Before the first layout the cell height can be 0; Int(±inf) would trap.
+        guard offset.isFinite, abs(offset) < 1_000_000 else { return topVisibleRow }
+        return topVisibleRow + Int(offset)
     }
 
     /// Text of rows `range` (scroll-invariant), joining soft-wrapped lines.

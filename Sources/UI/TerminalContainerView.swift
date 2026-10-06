@@ -22,7 +22,13 @@ final class TerminalContainerView: NSView {
     /// last line of output sits right above the input editor instead of the blank rows that
     /// hold Rune's invisible prompt.
     var hiddenBottomRows = 0 {
-        didSet { if hiddenBottomRows != oldValue { layoutTerminal() } }
+        didSet {
+            guard hiddenBottomRows != oldValue else { return }
+            layoutTerminal()
+            // Moving the view moves its last drawing; text that changed since (the new prompt,
+            // the end of the output) is drawn in the same pass so nothing jumps for a frame.
+            terminalView.setNeedsDisplay(terminalView.bounds)
+        }
     }
 
     /// Height of the whole pane. The terminal is sized from it, not from the space left over

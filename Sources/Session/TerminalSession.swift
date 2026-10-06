@@ -31,6 +31,23 @@ final class RuneTerminalView: LocalProcessTerminalView {
     static var debugBytes = 0
     #endif
 
+    /// SwiftTerm is about to redraw text (its own throttled update, or right away after a
+    /// keystroke). Rune's block chrome is refreshed here so it lands in the same frame as the
+    /// text instead of a frame before or after it.
+    var onTextRedraw: (() -> Void)?
+    private var notifyingTextRedraw = false
+
+    override func setNeedsDisplay(_ invalidRect: NSRect) {
+        super.setNeedsDisplay(invalidRect)
+        guard !notifyingTextRedraw else { return }
+        notifyingTextRedraw = true
+        onTextRedraw?()
+        notifyingTextRedraw = false
+    }
+
+    /// True while the viewport follows new output (the scroll that comes with a chunk).
+    private(set) var isScrollingWithOutput = false
+
     /// Output read from the shell but not parsed yet.
     private var pendingOutput: [UInt8] = []
     private var flushScheduled = false
@@ -64,7 +81,9 @@ final class RuneTerminalView: LocalProcessTerminalView {
             feeding = false
             if scrolledWhileFeeding {
                 scrolledWhileFeeding = false
+                isScrollingWithOutput = true
                 super.scrolled(source: getTerminal(), yDisp: getTerminal().buffer.yDisp)
+                isScrollingWithOutput = false
             }
         }
         onDataReceived?()
@@ -178,6 +197,12 @@ final class RuneTerminalView: LocalProcessTerminalView {
     override func bufferActivated(source: Terminal) {
         super.bufferActivated(source: source)
         onBufferSwitched?()
+    }
+
+    override func bell(source: Terminal) {
+        // Scripted test runs print hostile output full of BEL characters; keep them silent.
+        guard !AppDelegate.isAutomatedRun else { return }
+        super.bell(source: source)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -316,6 +341,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         terminalView.processDelegate = self
         terminalView.getTerminal().semanticPromptClickBehavior = .disabled
         terminalView.onDataReceived = { [weak self] in self?.handleDataReceived() }
+        terminalView.onTextRedraw = { [weak self] in self?.view.refreshBlockChrome() }
         terminalView.onScrolled = { [weak self] position in self?.viewportDidScroll(to: position) }
         terminalView.onBufferSwitched = { [weak self] in self?.updateMode() }
         terminalView.inputInterceptor = { [weak self] data in self?.intercept(data) ?? false }
@@ -883,7 +909,9 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         var range = geometry.linesTrimmed..<(geometry.linesTrimmed + geometry.lineCount)
         if selectedBlockOnly, let block = selectedBlockID.flatMap(tracker.block(id:)) {
             let last = block.lastRow(currentRow: geometry.cursorPosition.row)
-            range = max(range.lowerBound, block.commandRow)..<min(range.upperBound, last + 1)
+            let lower = max(range.lowerBound, block.commandRow)
+            // A block that has scrolled out of the scrollback leaves nothing to search.
+            range = lower..<max(lower, min(range.upperBound, last + 1))
         }
         return range.compactMap { row in
             terminal.getScrollInvariantLine(row: row).map { (row, $0.translateToString(trimRight: true)) }
@@ -1660,7 +1688,13 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     private func viewportDidScroll(to position: Double) {
         // Any other scroll (new output, a jump, the keyboard) lands on a whole row.
         if !smoothScrolling { view.terminalContainer.smoothOffset = 0 }
-        view.viewportDidScroll()
+        // Output scrolling the view: the chrome follows when SwiftTerm redraws the new text
+        // (onTextRedraw); drawing it now would put it a frame ahead of the text.
+        if terminalView.isScrollingWithOutput {
+            view.blocksDidChange()
+        } else {
+            view.viewportDidScroll()
+        }
         if position < 0.999 { view.overlay.flashScrollIndicator() }
     }
 

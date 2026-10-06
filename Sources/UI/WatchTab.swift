@@ -172,9 +172,16 @@ final class WatchModel: ObservableObject {
             return
         }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            var data = pipe.fileHandleForReading.readDataToEndOfFile()
+            // Keep only the end while reading: a command that prints without stopping would
+            // otherwise grow memory until macOS kills Rune.
+            var data = Data()
+            let handle = pipe.fileHandleForReading
+            while case let chunk = handle.availableData, !chunk.isEmpty {
+                data.append(chunk)
+                if data.count > Self.maxBytes * 2 { data = Data(data.suffix(Self.maxBytes)) }
+            }
             process.waitUntilExit()
-            if data.count > Self.maxBytes { data = data.suffix(Self.maxBytes) }
+            if data.count > Self.maxBytes { data = Data(data.suffix(Self.maxBytes)) }
             let text = ANSIText.plain(String(decoding: data, as: UTF8.self))
             DispatchQueue.main.async {
                 self?.finish(output: text, status: process.terminationStatus, started: started)

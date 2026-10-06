@@ -210,7 +210,8 @@ final class SessionView: NSView {
         chromeLink?.isPaused = false
     }
 
-    fileprivate func refreshBlockChrome() {
+    /// Brings block chrome up to date now (also called when the terminal redraws its text).
+    func refreshBlockChrome() {
         chromeLink?.isPaused = true
         session?.updateBottomTrim()
         overlay.needsDisplay = true

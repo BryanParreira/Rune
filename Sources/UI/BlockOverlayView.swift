@@ -447,7 +447,7 @@ final class BlockOverlayView: NSView {
                 text.append(character)
             }
             guard text.count >= 16 else { continue }
-            for match in SecretRedactor.matches(in: text) {
+            for match in secretMatches(in: text) {
                 let secret = (text as NSString).substring(with: match.range)
                 guard !revealedSecrets.contains(secret),
                       let startCol = cellStarts.firstIndex(where: { $0 >= match.range.location }) else { continue }
@@ -468,6 +468,19 @@ final class BlockOverlayView: NSView {
                 secretMasks.append((rect, secret))
             }
         }
+    }
+
+    /// Secrets found per line of text. The overlay redraws with every frame of output and
+    /// every hover, but most visible lines haven't changed since the last pass, and running
+    /// all the secret patterns over each of them again made scrolling output stutter.
+    private var secretMatchCache: [String: [SecretRedactor.Match]] = [:]
+
+    private func secretMatches(in text: String) -> [SecretRedactor.Match] {
+        if let cached = secretMatchCache[text] { return cached }
+        if secretMatchCache.count >= 4_000 { secretMatchCache.removeAll(keepingCapacity: true) }
+        let found = SecretRedactor.matches(in: text)
+        secretMatchCache[text] = found
+        return found
     }
 
     // MARK: - Sticky header

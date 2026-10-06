@@ -121,11 +121,39 @@ final class InputAreaView: NSView, NSTextViewDelegate {
         if chipsModel.branch != branch { chipsModel.branch = branch }
     }
 
+    /// Shows the dimmed "Running…" state once a command has run this long: most commands
+    /// (`cd`, `ls`, `git status`) finish sooner, and dimming the input for a frame or two on
+    /// each of them reads as flicker.
+    private static let runningAppearanceDelay: TimeInterval = 0.15
+    private var runningAppearance: DispatchWorkItem?
+    /// The input currently looks like a command is running.
+    private var showsRunning = false
+
     func setRunning(_ running: Bool, command: String?) {
+        // Called on every layout pass; only a real change restarts the delay.
+        guard running != self.running else { return }
         self.running = running
+        // Keystrokes go to the program right away; only the look waits.
         editor.isEditable = !running
-        editor.alphaValue = running ? 0.45 : 1
-        editor.placeholder = running ? "Running \(command.map { "“\($0)”" } ?? "command")…"
+        runningAppearance?.cancel()
+        runningAppearance = nil
+        if running {
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, self.running else { return }
+                self.runningAppearance = nil
+                self.applyRunningAppearance(true, command: command)
+            }
+            runningAppearance = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.runningAppearanceDelay, execute: work)
+        } else {
+            applyRunningAppearance(false, command: nil)
+        }
+    }
+
+    private func applyRunningAppearance(_ shown: Bool, command: String?) {
+        showsRunning = shown
+        editor.alphaValue = shown ? 0.45 : 1
+        editor.placeholder = shown ? "Running \(command.map { "“\($0)”" } ?? "command")…"
             : (aiConversationOpen ? "Ask a follow-up (⌘↵) or type a command…" : CommandTextView.defaultPlaceholder)
         setHint(currentHint)
         editor.needsDisplay = true
@@ -173,7 +201,7 @@ final class InputAreaView: NSView, NSTextViewDelegate {
         didSet {
             guard oldValue != aiConversationOpen else { return }
             setHint(currentHint)
-            if !running {
+            if !showsRunning {
                 editor.placeholder = aiConversationOpen ? "Ask a follow-up (⌘↵) or type a command…" : CommandTextView.defaultPlaceholder
             }
         }
@@ -184,7 +212,7 @@ final class InputAreaView: NSView, NSTextViewDelegate {
     }
 
     private var currentHint: InputChromeModel.Hint {
-        if running { return .running }
+        if showsRunning { return .running }
         if completionMenu.isOpen { return .menu }
         if aiConversationOpen { return .aiOpen }
         return Self.hint(for: editor.string)
@@ -266,6 +294,7 @@ final class InputAreaView: NSView, NSTextViewDelegate {
         guard let layoutManager = editor.layoutManager, let container = editor.textContainer else { return }
         layoutManager.ensureLayout(for: container)
         let lineHeight = editor.lineHeight
+        guard lineHeight > 0 else { return }
         let used = layoutManager.usedRect(for: container).height
         let lines = max(1, min(Self.maxVisibleLines, Int((used / lineHeight).rounded(.up))))
         editorHeight?.constant = CGFloat(lines) * lineHeight
