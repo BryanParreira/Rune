@@ -8,12 +8,21 @@ import SwiftUI
 protocol TabContent: AnyObject {
     var id: UUID { get }
     var title: String { get }
+    /// Shown when hovering the tab (the title unless a tab says more).
+    var tooltip: String { get }
+    /// A command is running in the tab (it shows a small activity dot).
+    var isBusy: Bool { get }
     /// A program that would be killed by closing this tab, if any.
     var runningProgram: String? { get }
     var contentView: NSView { get }
     func focus()
     func apply(_ snapshot: ConfigSnapshot)
     func closeContent()
+}
+
+extension TabContent {
+    var tooltip: String { title }
+    var isBusy: Bool { false }
 }
 
 extension TerminalSession {
@@ -741,7 +750,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     private func refreshTabs() {
         tabsModel.tabs = tabs.map { tab in
             let terminal = tab as? TerminalTab
-            return TabItem(id: tab.id, title: tab.title, isPreview: (tab as? FilePreviewTab)?.isPinned == false,
+            return TabItem(id: tab.id, title: tab.title, tooltip: tab.tooltip, isBusy: tab.isBusy,
+                           isPreview: (tab as? FilePreviewTab)?.isPinned == false,
                            color: terminal?.style.color, customTitle: terminal.map { $0.style.title } ?? nil, canStyle: terminal != nil)
         }
         tabsModel.selectedID = selectedTab?.id

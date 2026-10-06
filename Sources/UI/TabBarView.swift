@@ -5,6 +5,10 @@ import SwiftUI
 struct TabItem: Identifiable, Equatable {
     let id: UUID
     var title: String
+    /// Shown on hover (the full place for a terminal tab).
+    var tooltip: String = ""
+    /// A command is running (a small pulsing dot).
+    var isBusy = false
     /// A file preview that the next clicked file will replace (shown in italics).
     var isPreview = false
     var color: TabColor?
@@ -249,6 +253,22 @@ private struct Divider: View {
     }
 }
 
+/// A dot that breathes while a command runs in the tab.
+private struct BusyDot: View {
+    let color: NSColor
+    @State private var dim = false
+
+    var body: some View {
+        Circle()
+            .fill(Color(nsColor: color))
+            .frame(width: 7, height: 7)
+            .opacity(dim ? 0.35 : 1)
+            .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: dim)
+            .onAppear { dim = true }
+            .help("Running")
+    }
+}
+
 /// Flat, full-height tab with a centered title; the close button appears on hover.
 /// Double-click renames a terminal tab; right-click has name, color and close actions.
 private struct TabSegment: View {
@@ -293,7 +313,9 @@ private struct TabSegment: View {
                     }
             } else {
                 HStack(spacing: 6) {
-                    if let tint {
+                    if tab.isBusy {
+                        BusyDot(color: tint ?? palette.accent)
+                    } else if let tint {
                         Circle().fill(Color(nsColor: tint)).frame(width: 7, height: 7)
                     }
                     Text(tab.title)
@@ -333,7 +355,7 @@ private struct TabSegment: View {
         .gesture(TapGesture().onEnded(onSelect))
         .simultaneousGesture(TapGesture(count: 2).onEnded(onStartRename))
         .onHover { hovering = $0 }
-        .help(tab.canStyle ? "\(tab.title) — double-click to rename" : tab.title)
+        .help(tab.canStyle ? "\(tab.tooltip.isEmpty ? tab.title : tab.tooltip) — double-click to rename" : tab.title)
         .contextMenu { menu }
     }
 

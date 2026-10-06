@@ -10,6 +10,10 @@ final class BlockOverlayView: NSView {
     var font: NSFont = .monospacedSystemFont(ofSize: 13, weight: .regular)
 
     private var hoveredBlockID: Int?
+    /// Where the terminal's visible area ends (the bottom padding below it shows nothing).
+    var visibleBottom: CGFloat = .greatestFiniteMagnitude {
+        didSet { if visibleBottom != oldValue { needsDisplay = true } }
+    }
     private var lastMouseLocation: NSPoint?
     private let actionBar = BlockActionBar()
     private let toast = CopyToast()
@@ -354,7 +358,9 @@ final class BlockOverlayView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let palette, let session = sessionView?.session else { return }
         // Only the part of the terminal on screen: its top rows may sit above this view.
-        let terminalFrame = session.terminalView.frame.intersection(bounds)
+        var visible = bounds
+        visible.size.height = min(bounds.height, visibleBottom)
+        let terminalFrame = session.terminalView.frame.intersection(visible)
         let clip = NSRect(x: 0, y: terminalFrame.minY, width: bounds.width, height: terminalFrame.height)
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: clip).addClip()

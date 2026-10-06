@@ -23,6 +23,8 @@ final class TerminalTab: TabContent {
     var style = TabStyle()
 
     var title: String { style.title ?? focusedSession?.title ?? "Terminal" }
+    var tooltip: String { focusedSession?.tooltip ?? title }
+    var isBusy: Bool { sessions.contains { $0.settledRunningCommand != nil } }
     var runningProgram: String? { sessions.lazy.compactMap(\.runningProgram).first }
     var contentView: NSView { root }
     var paneCount: Int { sessions.count }

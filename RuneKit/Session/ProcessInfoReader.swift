@@ -50,6 +50,22 @@ public enum TabTitle {
         "\(user)@\(host):\(abbreviate(path: path, home: home))"
     }
 
+    /// A tab's name for a folder: its last component ("Rune"), "~" for home, "/" for the root.
+    public static func folderName(path: String, home: String) -> String {
+        let short = abbreviate(path: path, home: home)
+        if short == "~" || short == "/" { return short }
+        let name = (short as NSString).lastPathComponent
+        return name.isEmpty ? short : name
+    }
+
+    /// A tab's name while a command runs: its first line, shortened.
+    public static func command(_ command: String, limit: Int = 32) -> String {
+        let line = command.trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: .newlines).first ?? ""
+        let collapsed = line.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        return collapsed.count > limit ? String(collapsed.prefix(limit - 1)) + "…" : collapsed
+    }
+
     /// Converts an OSC 7 payload ("file://host/path" or a bare path) into a path.
     public static func pathFromOSC7(_ value: String) -> String? {
         if value.hasPrefix("/") { return value }

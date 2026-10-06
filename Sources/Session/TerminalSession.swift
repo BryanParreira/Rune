@@ -402,6 +402,10 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     // during a build turns the next `pwd` into `lspwd`) and, at the next prompt, asks for it
     // so the keys reappear in the editor.
 
+    /// Lines in the buffer when the running command started: fewer when it ends means it
+    /// cleared the scrollback (`clear`), so the blocks above are gone too.
+    private var lineCountAtCommandStart = 0
+
     /// Keys reached the shell while a command ran.
     private var typedDuringCommand = false
     /// Asked the shell for its line at the prompt; its echo stays hidden until the answer.
@@ -481,8 +485,28 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         terminalView.subviews.compactMap { $0 as? NSScroller }.forEach { $0.isHidden = true }
     }
 
+    /// The tab's name: the command while one runs (after a moment, so `cd` doesn't flash it),
+    /// otherwise the folder.
     var title: String {
-        TabTitle.make(user: Self.userName, host: Self.displayHost, path: currentDirectory, home: NSHomeDirectory())
+        if let command = settledRunningCommand { return command }
+        if case .active(let host) = remote {
+            return host + ":" + TabTitle.folderName(path: remoteDirectory ?? "~", home: "~")
+        }
+        return TabTitle.folderName(path: currentDirectory, home: NSHomeDirectory())
+    }
+
+    /// Shown when hovering the tab: where this shell is.
+    var tooltip: String {
+        TabTitle.make(user: Self.userName, host: Self.displayHost, path: displayDirectory, home: NSHomeDirectory())
+    }
+
+    /// The running command's name for the tab, once it has run past the settle time.
+    var settledRunningCommand: String? {
+        guard tracker.isCommandRunning, !commandSettling, mode == .runningCommand,
+              let command = tracker.blocks.last?.command, !command.isEmpty else { return nil }
+        // Commands typed with a leading space stay out of history; show only the program.
+        if privateCommands.contains(command) { return command.split(separator: " ").first.map(String.init) }
+        return TabTitle.command(command)
     }
 
     var geometry: BufferGeometry {
@@ -571,6 +595,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             terminalView.feedNow(text: "\u{1b}[?25l")
             let timeout = DispatchWorkItem { [weak self] in
                 guard let self, self.integration == .pending else { return }
+                Log.session.notice("Shell integration didn't report within \(Int(Self.integrationGracePeriod)) s; using a plain terminal")
                 self.integration = .unavailable
                 self.terminalView.feedNow(text: "\u{1b}[?25h")
                 self.updateMode()
@@ -583,6 +608,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
 
         startedAt = Date()
         state = .running
+        Log.session.notice("Starting \(shell, privacy: .public) (\(String(describing: self.shellKind), privacy: .public), integration \(integrationDir == nil ? "none" : "bundled", privacy: .public))")
         lastColumns = terminalView.getTerminal().cols
         // Start at the bottom: output grows upward from the input, like a chat.
         padToBottom()
@@ -774,6 +800,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             self.setCaretSuppressed(false)
             self.updateBottomTrim()
             self.view.blocksDidChange()
+            // Still running: the tab shows the command now.
+            self.onChange?()
         }
         commandSettleWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.settleTime, execute: work)
@@ -1614,6 +1642,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             }
         case .outputStart:
             promptPendingFromRow = nil
+            lineCountAtCommandStart = geometry.lineCount
             beginSettling()
         case .commandFinished:
             // Keep the caret hidden until the prompt hides the cursor itself.
@@ -1638,6 +1667,16 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             notifyIfUnattended(block)
             recordInRecall(block)
             suggestCorrection(for: block)
+            // `clear` (or anything that wiped the scrollback): like ⌘K, no blocks are left,
+            // not even the clear itself, whose header would otherwise linger at the edge.
+            let program = block.command.trimmingCharacters(in: .whitespaces).split(separator: " ").first.map(String.init)
+            if geometry.lineCount < lineCountAtCommandStart || program == "clear" || program == "reset" {
+                tracker.removeAll()
+                anchorLines.removeAll()
+                bookmarkedBlockIDs.removeAll()
+                markedRow = nil
+                selectBlock(nil)
+            }
         }
 
         switch mark {
@@ -2127,6 +2166,14 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
 
         let exit = exitCode.map(ProcessExit.init(waitStatus:))
         state = .exited(exit)
+        let lived = Date().timeIntervalSince(startedAt)
+        let how: String
+        switch exit {
+        case .exited(let code)?: how = "exit \(code)"
+        case .signaled(let signal)?: how = "signal \(signal)"
+        case nil: how = "I/O error"
+        }
+        Log.session.notice("Shell \(self.shellExecutable, privacy: .public) ended after \(Int(lived)) s: \(how, privacy: .public)")
         if Date().timeIntervalSince(startedAt) >= Self.earlyExitWindow {
             onRequestClose?()
             return

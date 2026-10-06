@@ -22,6 +22,11 @@ enum ProblemReport {
             if let text = try? String(contentsOf: config.writableConfigFile, encoding: .utf8) {
                 try SecretRedactor.redact(text).write(to: folder.appendingPathComponent("config.json"), atomically: true, encoding: .utf8)
             }
+            // Rune's own log from the last hour (shell starts and exits, settings errors…).
+            let log = Log.recentEntries()
+            if !log.isEmpty {
+                try SecretRedactor.redact(log).write(to: folder.appendingPathComponent("rune-log.txt"), atomically: true, encoding: .utf8)
+            }
             for crash in recentCrashReports(limit: 3) {
                 try? fileManager.copyItem(at: crash, to: folder.appendingPathComponent(crash.lastPathComponent))
             }

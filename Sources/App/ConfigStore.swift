@@ -59,6 +59,9 @@ final class ConfigStore {
     func reload() {
         let (loaded, next, watched) = Self.load(loader)
         self.loaded = loaded
+        if !next.warnings.isEmpty, next.warnings != snapshot.warnings {
+            Log.config.notice("Settings loaded with \(next.warnings.count) warning(s)")
+        }
         watcher?.watch(watched)
         if next != snapshot {
             snapshot = next
@@ -83,6 +86,7 @@ final class ConfigStore {
             lastWriteError = nil
             reload()
         } catch {
+            Log.config.error("Couldn't write setting \(key, privacy: .public): \(error.localizedDescription, privacy: .public)")
             lastWriteError = error.localizedDescription
         }
     }

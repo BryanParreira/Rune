@@ -11,6 +11,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var didFinishLaunching = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        ProcessLimits.logUncaughtExceptions()
+        ProcessLimits.raiseOpenFileLimit()
+        let info = Bundle.main.infoDictionary ?? [:]
+        Log.app.notice("Rune \(info["CFBundleShortVersionString"] as? String ?? "?", privacy: .public) (\(info["CFBundleVersion"] as? String ?? "?", privacy: .public)) launched")
         NSApp.mainMenu = MainMenu.build()
         UpdateController.shared.start()
         let store = ConfigStore()
@@ -238,7 +242,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.activateFileViewerSelecting([folder])
         let alert = NSAlert()
         alert.messageText = "Your report is ready"
-        alert.informativeText = "It's in the folder that just opened: Rune's version, your Mac, settings (with secrets removed) and any recent crash reports. Nothing was sent anywhere. Look it over, then attach it to an issue if you'd like help."
+        alert.informativeText = "It's in the folder that just opened: Rune's version, your Mac, settings (with secrets removed), Rune's log from the last hour and any recent crash reports. Nothing was sent anywhere. Look it over, then attach it to an issue if you'd like help."
         alert.addButton(withTitle: "Open an Issue on GitHub")
         alert.addButton(withTitle: "Done")
         if alert.runModal() == .alertFirstButtonReturn, let url = ProblemReport.issueURL(summary: ProblemReport.summary(sessions: sessions)) {
@@ -443,6 +447,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         isTerminating = true
+        Log.app.notice("Rune quit")
     }
 
     private var onboardingController: OnboardingWindowController?

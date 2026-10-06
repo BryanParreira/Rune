@@ -538,7 +538,7 @@ enum DebugDriver {
                 session.debugSetUpRemote()
             case "@frame":
                 if let window = session.view.window {
-                    print("FRAME window=\(window.frame.size) content=\(window.contentView?.frame.size ?? .zero)")
+                    print("FRAME window=\(window.frame.size) content=\(window.contentView?.frame.size ?? .zero) id=\(window.windowNumber)")
                     fflush(stdout)
                 }
             case let typed where typed.hasPrefix("@termType:"):

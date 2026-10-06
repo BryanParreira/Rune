@@ -128,6 +128,9 @@ final class TerminalContainerView: NSView {
             overlay?.needsDisplay = true
         }
         overlay?.frame = bounds
+        // Rows pushed below the visible area (hidden blank rows, a command's echo) are clipped;
+        // their block chrome must stop at the same edge.
+        (overlay as? BlockOverlayView)?.visibleBottom = max(0, bounds.height - padding.bottom)
     }
 
     /// Clicks in the padding focus the terminal.
