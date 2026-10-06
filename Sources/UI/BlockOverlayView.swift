@@ -545,23 +545,33 @@ final class BlockOverlayView: NSView {
         let left = session.terminalView.frame.minX
         let right = bounds.width - session.terminalView.frame.minX
 
-        // Context: cwd (and host if remote later).
-        let context = TabTitle.abbreviate(path: block.cwd, home: NSHomeDirectory())
-        if !context.isEmpty, !session.config.honorPrompt, !session.typeInShell {
-            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: palette.hint]
-            let size = (context as NSString).size(withAttributes: attrs)
-            let origin = NSPoint(x: left, y: rect.midY - size.height / 2)
-            (context as NSString).draw(at: origin, withAttributes: attrs)
+        // Status on the right first, so the folder can be shortened to fit beside it.
+        var statusWidth: CGFloat = 0
+        if !reserveForActions {
+            var status = Self.format(duration: block.duration())
+            if block.isFailed, let code = block.exitCode { status = "exit \(code)  ·  " + status }
+            if block.state == .running { status = "running  ·  " + status }
+            let color = block.isFailed ? palette.error.withAlphaComponent(0.9) : palette.hint
+            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+            let size = (status as NSString).size(withAttributes: attrs)
+            statusWidth = size.width
+            (status as NSString).draw(at: NSPoint(x: right - size.width, y: rect.midY - size.height / 2), withAttributes: attrs)
+        } else {
+            // Room for the hover actions.
+            statusWidth = actionBar.isHidden ? 0 : actionBar.frame.width
         }
 
-        guard !reserveForActions else { return }
-        var status = Self.format(duration: block.duration())
-        if block.isFailed, let code = block.exitCode { status = "exit \(code)  ·  " + status }
-        if block.state == .running { status = "running  ·  " + status }
-        let color = block.isFailed ? palette.error.withAlphaComponent(0.9) : palette.hint
-        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
-        let size = (status as NSString).size(withAttributes: attrs)
-        (status as NSString).draw(at: NSPoint(x: right - size.width, y: rect.midY - size.height / 2), withAttributes: attrs)
+        // Context: the folder, shortened from the left ("…/chiptest/repo") when it's long.
+        let context = TabTitle.abbreviate(path: block.cwd, home: NSHomeDirectory())
+        if !context.isEmpty, !session.config.honorPrompt, !session.typeInShell {
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineBreakMode = .byTruncatingHead
+            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: palette.hint, .paragraphStyle: paragraph]
+            let height = (context as NSString).size(withAttributes: attrs).height
+            let width = max(0, right - statusWidth - 24 - left)
+            (context as NSString).draw(with: NSRect(x: left, y: rect.midY - height / 2, width: width, height: height),
+                                       options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attrs)
+        }
     }
 
     static func format(duration: TimeInterval) -> String {

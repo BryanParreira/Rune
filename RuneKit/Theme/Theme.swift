@@ -118,9 +118,11 @@ public struct Theme: Equatable, Sendable {
         ].compactMap(RGB.init(hex:))
     )
 
-    public static let builtIn: [String: Theme] = [
-        paper.name: paper, paperNight.name: paperNight, runeDark.name: runeDark,
-    ]
+    public static let builtIn: [String: Theme] = {
+        var themes: [String: Theme] = [paper.name: paper, paperNight.name: paperNight, runeDark.name: runeDark]
+        for theme in classics { themes[theme.name] = theme }
+        return themes
+    }()
 
     /// Relative luminance of the background (0 = black, 1 = white).
     public var backgroundLuminance: Double {
@@ -151,7 +153,7 @@ public struct Theme: Equatable, Sendable {
         case "paper": return "Paper (light)"
         case "paper-night": return "Paper Night (dark)"
         case "rune-dark": return "Rune Classic (dark)"
-        default: return name
+        default: return classicNames[name] ?? name
         }
     }
 }
