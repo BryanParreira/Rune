@@ -174,7 +174,8 @@ enum SettingsIndex {
                     "Match system appearance", "Dark Mode", "Light Mode", "Font weight", "bold", "Minimum contrast", "readability",
                     "Dim inactive panes", "split", "Show in Dock", "menu bar", "Cmd-Tab"]
         case .terminal:
-            return ["Shell", "Show shell prompt", "PS1", "Starship", "Scrollback", "Option key", "Meta", "Notifications", "Notify when done", "long commands", "Restore", "Reopen", "session", "tabs at launch", "Secrets", "API keys", "tokens", "redact", "Recall", "history", "output search", "Touch ID", "sudo", "fingerprint", "password"]
+            return ["Shell", "Show shell prompt", "PS1", "Starship", "Scrollback", "Option key", "Meta", "Notifications", "Notify when done", "long commands", "Restore", "Reopen", "session", "tabs at launch", "Secrets", "API keys", "tokens", "redact", "Recall", "history", "output search", "Touch ID", "sudo", "fingerprint", "password",
+                    "Copy on select", "selection", "Right-click", "paste", "mouse", "Scroll speed", "trackpad"]
         case .workflows:
             return ["Workflows", "saved commands", "snippets", "command palette", "placeholders"]
         case .input:
@@ -748,6 +749,19 @@ struct TerminalPage: View {
             }
             SettingRow(model: model, title: "Option key acts as Meta", key: "optionAsMeta", detail: "Turn off to type special characters with Option.") {
                 SwitchControl(isOn: model.binding("optionAsMeta", { $0.optionAsMeta }))
+            }
+            SettingRow(model: model, title: "Copy on select", key: "copyOnSelect",
+                       detail: "Selecting text in the output copies it (hidden secrets stay hidden).") {
+                SwitchControl(isOn: model.binding("copyOnSelect", { $0.copyOnSelect }))
+            }
+            SettingRow(model: model, title: "Right-click in the output", key: "rightClick",
+                       detail: "Programs that use the mouse (vim, htop…) still get the click.") {
+                DropdownField(selection: model.binding("rightClick", { $0.rightClick }), options: ["menu", "paste"],
+                              label: { $0 == "paste" ? "Pastes" : "Shows the menu" }, palette: p, width: 180)
+            }
+            SettingRow(model: model, title: "Scroll speed", key: "scrollSpeed") {
+                NumberField(value: model.binding("scrollSpeed", { $0.scrollSpeed }), range: 0.25...5, step: 0.25,
+                            format: { String(format: "%.2g×", $0) }, palette: p)
             }
             SettingRow(model: model, title: "Rune's input over SSH", key: "remoteInput",
                        detail: "When ssh, mosh, docker/kubectl exec, su or sudo -i reaches a shell (bash or zsh), Rune can keep its input box there: blocks, suggestions and ⌘↵ AI. It asks first; logins and passwords always go straight to the session.") {

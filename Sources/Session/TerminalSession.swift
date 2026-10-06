@@ -201,8 +201,23 @@ final class RuneTerminalView: LocalProcessTerminalView {
         super.mouseDown(with: event)
     }
 
+    /// Text the mouse just finished selecting (for copy on select).
+    var onSelectionMade: ((String) -> Void)?
+    /// Whether a right-click pastes instead of showing the menu.
+    var rightClickPastes: (() -> Bool)?
+
+    override func rightMouseDown(with event: NSEvent) {
+        // A program reading the mouse (vim, htop…) gets the click as usual.
+        if getTerminal().mouseMode == .off, rightClickPastes?() == true {
+            paste(self)
+            return
+        }
+        super.rightMouseDown(with: event)
+    }
+
     override func mouseUp(with event: NSEvent) {
         super.mouseUp(with: event)
+        if selection.active, let text = getSelection(), !text.isEmpty { onSelectionMade?(text) }
         defer { pressLocation = nil }
         guard event.clickCount == 1, let start = pressLocation, !event.modifierFlags.contains(.command),
               hypot(event.locationInWindow.x - start.x, event.locationInWindow.y - start.y) < 4,
@@ -440,6 +455,11 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         terminalView.copyHandler = { [weak self] selected in self?.copySelection(selected) ?? false }
         terminalView.onPlainClick = { [weak self] point, extend in self?.clickedOutput(atTerminalPoint: point, extend: extend) }
         terminalView.smoothScroll = { [weak self] event in self?.smoothScroll(event) ?? false }
+        terminalView.onSelectionMade = { [weak self] text in
+            guard let self, self.config.copyOnSelect else { return }
+            _ = self.copySelection(text)
+        }
+        terminalView.rightClickPastes = { [weak self] in self?.config.rightClick == "paste" }
         wireFinder()
         terminalView.canCopyWithoutSelection = { [weak self] in self?.canCopySelectedBlock ?? false }
         terminalView.outputFilter = { [weak self] slice in self?.filterOutput(slice) ?? slice }
@@ -478,6 +498,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         tv.selectedTextForegroundColor = theme.selectionForeground.nsColor
         tv.installColors(theme.ansi.map(\.terminalColor))
         tv.optionAsMetaKey = config.optionAsMeta
+        tv.scrollSensitivity = CGFloat(config.scrollSpeed)
         tv.getTerminal().setCursorStyle(config.cursorStyle.terminalStyle(blink: config.cursorBlink))
         if tv.isUsingMetalRenderer != config.gpuRendering {
             // Without a usable Metal device this throws and the terminal keeps CPU drawing.

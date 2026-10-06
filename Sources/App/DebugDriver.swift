@@ -540,6 +540,43 @@ enum DebugDriver {
             case let typed where typed.hasPrefix("@termType:"):
                 // Keys typed into the terminal itself (what reaches a running command).
                 session.terminalView.send(data: Array(typed.dropFirst(10).utf8)[...])
+            case "@dragSelect", "@rightClick":
+                // Real mouse events over the last block's first output row: a drag across it,
+                // or a right-click. Prints the clipboard after, then restores it.
+                guard let window = session.view.window, let block = session.tracker.blocks.last else { break }
+                let pasteboard = NSPasteboard.general
+                let saved = pasteboard.string(forType: .string)
+                pasteboard.clearContents()
+                pasteboard.setString("clipboard-before", forType: .string)
+                let tv = session.terminalView
+                let y = session.geometry.topY(ofRow: block.outputStartRow) - session.geometry.cellHeight / 2
+                func point(_ x: CGFloat) -> NSPoint { tv.convert(NSPoint(x: x, y: y), to: nil) }
+                func send(_ type: NSEvent.EventType, _ x: CGFloat) {
+                    guard let event = NSEvent.mouseEvent(with: type, location: point(x), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                         windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else { return }
+                    // Straight to the terminal, as AppKit does for a drag that started on it.
+                    switch type {
+                    case .leftMouseDown: tv.mouseDown(with: event)
+                    case .leftMouseDragged: tv.mouseDragged(with: event)
+                    case .leftMouseUp: tv.mouseUp(with: event)
+                    case .rightMouseDown: tv.rightMouseDown(with: event)
+                    default: window.sendEvent(event)
+                    }
+                }
+                if step == "@dragSelect" {
+                    send(.leftMouseDown, 2)
+                    for x in stride(from: 10, through: 200, by: 30) { send(.leftMouseDragged, CGFloat(x)) }
+                    send(.leftMouseUp, 200)
+                } else {
+                    send(.rightMouseDown, 20)
+                    send(.rightMouseUp, 20)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    print("MOUSE \(step) clipboard=<\(pasteboard.string(forType: .string) ?? "nil")> editor=<\(session.view.inputArea.editor.string)> selection=\(tv.selection.active) <\(tv.getSelection() ?? "")>")
+                    fflush(stdout)
+                    pasteboard.clearContents()
+                    if let saved { pasteboard.setString(saved, forType: .string) }
+                }
             case "@float":
                 // Keeps the test window above other apps so a screen recording sees it.
                 if let window = session.view.window {
