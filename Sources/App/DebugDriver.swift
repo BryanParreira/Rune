@@ -316,6 +316,10 @@ enum DebugDriver {
                 }
                 print("SCROLL top=\(session.terminalView.getTerminal().getTopVisibleRow()) offset=\(session.view.terminalContainer.smoothOffset) covered=\(session.view.terminalContainer.coveredTopRows)")
                 fflush(stdout)
+            case "@viewport":
+                let t = session.terminalView.getTerminal()
+                print("VIEWPORT top=\(t.getTopVisibleRow()) text=<\(t.getScrollInvariantLine(row: session.geometry.topVisibleRow)?.translateToString(trimRight: true) ?? "")>")
+                fflush(stdout)
             case let size where size.hasPrefix("@size:"):
                 let parts = size.dropFirst(6).split(separator: "x").compactMap { Double($0) }
                 if let window = session.view.window, parts.count == 2 {

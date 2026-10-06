@@ -172,11 +172,11 @@ enum SettingsIndex {
         case .appearance:
             return ["Theme", "Font", "Font size", "Line height", "Cursor", "Blinking cursor", "Padding", "Nerd Font", "icons", "colors",
                     "Match system appearance", "Dark Mode", "Light Mode", "Font weight", "bold", "Minimum contrast", "readability",
-                    "Dim inactive panes", "split", "Show in Dock", "menu bar", "Cmd-Tab"]
+                    "Dim inactive panes", "split", "Focus pane on hover", "Show in Dock", "menu bar", "Cmd-Tab"]
         case .terminal:
             return ["Shell", "Show shell prompt", "PS1", "Starship", "Scrollback", "Option key", "Meta", "Notifications", "Notify when done", "long commands", "Restore", "Reopen", "session", "tabs at launch", "Secrets", "API keys", "tokens", "redact", "Recall", "history", "output search", "Touch ID", "sudo", "fingerprint", "password",
                     "Copy on select", "selection", "Right-click", "paste", "mouse", "Scroll speed", "trackpad",
-                    "secret patterns", "regex", "regular expression"]
+                    "secret patterns", "regex", "regular expression", "Bell", "beep", "visual bell", "flash"]
         case .workflows:
             return ["Workflows", "saved commands", "snippets", "command palette", "placeholders"]
         case .input:
@@ -700,6 +700,9 @@ struct AppearancePage: View {
             SettingRow(model: model, title: "Dim inactive panes", key: "dimInactivePanes", detail: "In a split, fade the panes you're not typing in.") {
                 SwitchControl(isOn: model.binding("dimInactivePanes", { $0.dimInactivePanes }))
             }
+            SettingRow(model: model, title: "Focus pane on hover", key: "focusPaneOnHover", detail: "In a split, the pane under the pointer takes the keyboard.") {
+                SwitchControl(isOn: model.binding("focusPaneOnHover", { $0.focusPaneOnHover }))
+            }
             SettingRow(model: model, title: "Show in Dock", key: "showDockIcon",
                        detail: "Off: Rune leaves the Dock and ⌘-Tab and lives in the menu bar and behind the global hotkey.") {
                 SwitchControl(isOn: model.binding("showDockIcon", { $0.showDockIcon }))
@@ -752,6 +755,10 @@ struct TerminalPage: View {
             }
             SettingRow(model: model, title: "Option key acts as Meta", key: "optionAsMeta", detail: "Turn off to type special characters with Option.") {
                 SwitchControl(isOn: model.binding("optionAsMeta", { $0.optionAsMeta }))
+            }
+            SettingRow(model: model, title: "Bell", key: "bell", detail: "When a program rings the terminal bell.") {
+                DropdownField(selection: model.binding("bell", { $0.bell }), options: ["sound", "flash", "off"],
+                              label: { ["sound": "Play a sound", "flash": "Flash the pane", "off": "Do nothing"][$0] ?? $0 }, palette: p, width: 180)
             }
             SettingRow(model: model, title: "Copy on select", key: "copyOnSelect",
                        detail: "Selecting text in the output copies it (hidden secrets stay hidden).") {

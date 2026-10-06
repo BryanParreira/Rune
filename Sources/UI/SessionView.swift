@@ -132,6 +132,46 @@ final class SessionView: NSView {
         fatalError("init(coder:) is not supported")
     }
 
+    // MARK: Bell and hover
+
+    /// The "flash" bell: a quick wash of the accent color over the pane.
+    func flash() {
+        guard let layer, let palette = overlay.palette else { return }
+        let wash = CALayer()
+        wash.frame = layer.bounds
+        wash.backgroundColor = palette.accent.withAlphaComponent(0.12).cgColor
+        wash.opacity = 0
+        layer.addSublayer(wash)
+        let fade = CAKeyframeAnimation(keyPath: "opacity")
+        fade.values = [0, 1, 0]
+        fade.keyTimes = [0, 0.25, 1]
+        fade.duration = 0.25
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { wash.removeFromSuperlayer() }
+        wash.add(fade, forKey: "flash")
+        CATransaction.commit()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.filter { $0.owner === self }.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
+    }
+
+    /// "Focus pane on hover": the pane under the pointer takes the keyboard (splits only).
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        guard let session, session.config.focusPaneOnHover, let window,
+              superview is PaneSplitView || superview?.superview is PaneSplitView,
+              !isDescendantOfFirstResponder(in: window) else { return }
+        session.focus()
+    }
+
+    private func isDescendantOfFirstResponder(in window: NSWindow) -> Bool {
+        guard let responder = window.firstResponder as? NSView else { return false }
+        return responder.isDescendant(of: self)
+    }
+
     // MARK: Waterfall input
 
     /// Keeps output from shrinking away in the usual layout.

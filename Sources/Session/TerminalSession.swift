@@ -251,10 +251,20 @@ final class RuneTerminalView: LocalProcessTerminalView {
         onBufferSwitched?()
     }
 
+    /// The "bell" setting: "sound", "flash" or "off".
+    var bellSetting = "sound"
+    /// Blink the pane (the "flash" bell).
+    var onVisualBell: (() -> Void)?
+
     override func bell(source: Terminal) {
-        // Scripted test runs print hostile output full of BEL characters; keep them silent.
-        guard !AppDelegate.isAutomatedRun else { return }
-        super.bell(source: source)
+        switch bellSetting {
+        case "off": return
+        case "flash": onVisualBell?()
+        default:
+            // Scripted test runs print hostile output full of BEL characters; keep them silent.
+            guard !AppDelegate.isAutomatedRun else { return }
+            super.bell(source: source)
+        }
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -460,6 +470,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             _ = self.copySelection(text)
         }
         terminalView.rightClickPastes = { [weak self] in self?.config.rightClick == "paste" }
+        terminalView.onVisualBell = { [weak self] in self?.view.flash() }
         wireFinder()
         terminalView.canCopyWithoutSelection = { [weak self] in self?.canCopySelectedBlock ?? false }
         terminalView.outputFilter = { [weak self] slice in self?.filterOutput(slice) ?? slice }
@@ -499,6 +510,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         tv.installColors(theme.ansi.map(\.terminalColor))
         tv.optionAsMetaKey = config.optionAsMeta
         tv.scrollSensitivity = CGFloat(config.scrollSpeed)
+        tv.bellSetting = config.bell
         tv.getTerminal().setCursorStyle(config.cursorStyle.terminalStyle(blink: config.cursorBlink))
         if tv.isUsingMetalRenderer != config.gpuRendering {
             // Without a usable Metal device this throws and the terminal keeps CPU drawing.

@@ -84,6 +84,10 @@ public struct RuneConfig: Equatable, Sendable {
     public var minimumContrast: Bool = false
     /// Fade the panes of a split that don't have focus.
     public var dimInactivePanes: Bool = true
+    /// Moving the pointer over a pane of a split gives it the keyboard.
+    public var focusPaneOnHover: Bool = false
+    /// When a program rings the bell: "sound", "flash" (the pane blinks) or "off".
+    public var bell: String = "sound"
     /// Off: Rune lives in the menu bar and the global hotkey, not the Dock or ⌘-Tab.
     public var showDockIcon: Bool = true
 
@@ -140,7 +144,7 @@ public struct RuneConfig: Equatable, Sendable {
         "cursorBlink", "scrollback", "optionAsMeta", "showWelcome", "honorPrompt", "inputMode", "shell",
         "aiEnabled", "ollamaEndpoint", "aiModel", "aiIncludeBlockContext",
         "syncPath", "hosts", "workflows", "notifyWhenDone", "notifyAfterSeconds", "gpuRendering", "restoreSession", "hideSecrets", "recallEnabled", "recallDays", "globalHotkey", "keyboardShortcuts", "openFilesIn", "remoteInput",
-        "followSystemAppearance", "darkTheme", "fontWeight", "minimumContrast", "dimInactivePanes", "showDockIcon",
+        "followSystemAppearance", "darkTheme", "fontWeight", "minimumContrast", "dimInactivePanes", "focusPaneOnHover", "bell", "showDockIcon",
         "copyOnSelect", "rightClick", "scrollSpeed",
         "showHints", "syntaxHighlighting", "autosuggestions", "commandCorrections", "underlineUnknownCommands",
         "autoCloseBrackets", "completionsWhileTyping", "vimMode", "vimSystemClipboard", "inputPosition", "secretPatterns",
@@ -249,6 +253,10 @@ extension RuneConfig {
         }
         if let v = reader.bool("minimumContrast") { minimumContrast = v }
         if let v = reader.bool("dimInactivePanes") { dimInactivePanes = v }
+        if let v = reader.bool("focusPaneOnHover") { focusPaneOnHover = v }
+        if let v = reader.string("bell") {
+            if ["sound", "flash", "off"].contains(v) { bell = v } else { reader.warnings.append("bell \"\(v)\" is not one of sound, flash, off; using sound") }
+        }
         if let v = reader.bool("showDockIcon") { showDockIcon = v }
         if let v = reader.bool("copyOnSelect") { copyOnSelect = v }
         if let v = reader.string("rightClick") {
