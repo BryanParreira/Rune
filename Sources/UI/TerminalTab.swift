@@ -11,6 +11,7 @@ final class TerminalTab: TabContent {
     private(set) var sessions: [TerminalSession] = []
     private weak var focused: TerminalSession?
     private var dividerColor: NSColor
+    private var dimInactivePanes = true
 
     /// The pane that has (or last had) keyboard focus.
     var focusedSession: TerminalSession? {
@@ -88,6 +89,8 @@ final class TerminalTab: TabContent {
 
     func apply(_ snapshot: ConfigSnapshot) {
         dividerColor = ChromePalette(theme: snapshot.theme).outline
+        dimInactivePanes = snapshot.config.dimInactivePanes
+        updateDimming()
         sessions.forEach { $0.apply(snapshot) }
         for split in allSplits(in: root.child) {
             split.color = dividerColor
@@ -237,7 +240,7 @@ final class TerminalTab: TabContent {
 
     /// With several panes, the ones without focus are dimmed slightly.
     private func updateDimming() {
-        let dim = sessions.count > 1
+        let dim = dimInactivePanes && sessions.count > 1
         for session in sessions {
             session.view.alphaValue = dim && session !== focused ? 0.6 : 1
         }

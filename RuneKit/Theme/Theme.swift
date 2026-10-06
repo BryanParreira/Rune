@@ -21,6 +21,39 @@ public struct RGB: Equatable, Sendable {
     }
 
     public var hex: String { String(format: "#%02x%02x%02x", r, g, b) }
+
+    /// WCAG relative luminance (0 = black, 1 = white).
+    public var luminance: Double {
+        func channel(_ value: UInt8) -> Double {
+            let c = Double(value) / 255
+            return c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+    }
+
+    /// WCAG contrast ratio between two colors (1…21).
+    public static func contrast(_ a: RGB, _ b: RGB) -> Double {
+        let (hi, lo) = (max(a.luminance, b.luminance), min(a.luminance, b.luminance))
+        return (hi + 0.05) / (lo + 0.05)
+    }
+
+    /// This color moved toward black or white (whichever is away from `background`) just
+    /// far enough to reach `ratio` against it. Unchanged when it already does.
+    public func ensuringContrast(_ ratio: Double, against background: RGB) -> RGB {
+        guard Self.contrast(self, background) < ratio else { return self }
+        let target: Double = background.luminance > 0.4 ? 0 : 255
+        func mix(_ t: Double) -> RGB {
+            func c(_ v: UInt8) -> UInt8 { UInt8(max(0, min(255, (Double(v) + (target - Double(v)) * t).rounded()))) }
+            return RGB(c(r), c(g), c(b))
+        }
+        // Smallest step that's enough, so colors keep as much of their hue as possible.
+        var low = 0.0, high = 1.0
+        for _ in 0..<16 {
+            let mid = (low + high) / 2
+            if Self.contrast(mix(mid), background) >= ratio { high = mid } else { low = mid }
+        }
+        return mix(high)
+    }
 }
 
 /// Terminal color scheme.
@@ -99,6 +132,18 @@ public struct Theme: Equatable, Sendable {
     }
 
     public var isLight: Bool { backgroundLuminance > 0.4 }
+
+    /// Text colors that are hard to read on this background (dim greys, yellow on white…)
+    /// adjusted to at least `ratio` (4.5 is WCAG AA for body text). An ANSI color identical
+    /// to the background is left alone: themes use it for text meant to be invisible.
+    public func withMinimumContrast(_ ratio: Double = 4.5) -> Theme {
+        var copy = self
+        copy.foreground = foreground.ensuringContrast(ratio, against: background)
+        copy.ansi = ansi.map { color in
+            color == background ? color : color.ensuringContrast(ratio, against: background)
+        }
+        return copy
+    }
 
     /// Name shown in Settings.
     public static func displayName(_ name: String) -> String {

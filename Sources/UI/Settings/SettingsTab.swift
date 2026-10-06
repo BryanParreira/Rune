@@ -170,7 +170,9 @@ enum SettingsIndex {
     static func keywords(for page: SettingsModel.Page) -> [String] {
         switch page {
         case .appearance:
-            return ["Theme", "Font", "Font size", "Line height", "Cursor", "Blinking cursor", "Padding", "Nerd Font", "icons", "colors"]
+            return ["Theme", "Font", "Font size", "Line height", "Cursor", "Blinking cursor", "Padding", "Nerd Font", "icons", "colors",
+                    "Match system appearance", "Dark Mode", "Light Mode", "Font weight", "bold", "Minimum contrast", "readability",
+                    "Dim inactive panes", "split", "Show in Dock", "menu bar", "Cmd-Tab"]
         case .terminal:
             return ["Shell", "Show shell prompt", "PS1", "Starship", "Scrollback", "Option key", "Meta", "Notifications", "Notify when done", "long commands", "Restore", "Reopen", "session", "tabs at launch", "Secrets", "API keys", "tokens", "redact", "Recall", "history", "output search", "Touch ID", "sudo", "fingerprint", "password"]
         case .workflows:
@@ -631,8 +633,22 @@ struct AppearancePage: View {
             PageTitle(text: "Appearance", palette: p)
 
             SectionHeader(text: "Themes", palette: p)
-            SettingRow(model: model, title: "Theme", key: "theme", detail: "Add your own as themes/<name>.json in the config folder.") {
+            SettingRow(model: model, title: model.config.followSystemAppearance ? "Theme in Light Mode" : "Theme", key: "theme",
+                       detail: "Add your own as themes/<name>.json in the config folder.") {
                 DropdownField(selection: model.binding("theme", { $0.theme }), options: model.themes, label: { Theme.displayName($0) }, palette: p)
+            }
+            SettingRow(model: model, title: "Match system appearance", key: "followSystemAppearance",
+                       detail: "Switch themes when macOS switches between Light and Dark Mode.") {
+                SwitchControl(isOn: model.binding("followSystemAppearance", { $0.followSystemAppearance }))
+            }
+            if model.config.followSystemAppearance {
+                SettingRow(model: model, title: "Theme in Dark Mode", key: "darkTheme") {
+                    DropdownField(selection: model.binding("darkTheme", { $0.darkTheme }), options: model.themes, label: { Theme.displayName($0) }, palette: p)
+                }
+            }
+            SettingRow(model: model, title: "Minimum contrast", key: "minimumContrast",
+                       detail: "Raises hard-to-read text colors (dim grey, yellow on white…) until they're easy to read on the background.") {
+                SwitchControl(isOn: model.binding("minimumContrast", { $0.minimumContrast }))
             }
 
             SectionHeader(text: "Text", palette: p)
@@ -653,6 +669,10 @@ struct AppearancePage: View {
             SettingRow(model: model, title: "Font size", key: "fontSize") {
                 NumberField(value: model.binding("fontSize", { $0.fontSize }), range: 6...72, step: 1, format: { "\(Int($0)) pt" }, palette: p)
             }
+            SettingRow(model: model, title: "Font weight", key: "fontWeight", detail: "Uses the nearest weight the font has.") {
+                DropdownField(selection: model.binding("fontWeight", { $0.fontWeight }), options: RuneConfig.fontWeights,
+                              label: { $0.capitalized }, palette: p, width: 160)
+            }
             SettingRow(model: model, title: "Line height", key: "lineHeight") {
                 NumberField(value: model.binding("lineHeight", { $0.lineHeight }), range: 0.8...3, step: 0.05, format: { String(format: "%.2f", $0) }, palette: p)
             }
@@ -672,6 +692,13 @@ struct AppearancePage: View {
             }
             SettingRow(model: model, title: "Top padding", key: "paddingY") {
                 NumberField(value: model.binding("paddingY", { $0.paddingY }), range: 0...200, step: 2, format: { "\(Int($0)) pt" }, palette: p)
+            }
+            SettingRow(model: model, title: "Dim inactive panes", key: "dimInactivePanes", detail: "In a split, fade the panes you're not typing in.") {
+                SwitchControl(isOn: model.binding("dimInactivePanes", { $0.dimInactivePanes }))
+            }
+            SettingRow(model: model, title: "Show in Dock", key: "showDockIcon",
+                       detail: "Off: Rune leaves the Dock and ⌘-Tab and lives in the menu bar and behind the global hotkey.") {
+                SwitchControl(isOn: model.binding("showDockIcon", { $0.showDockIcon }))
             }
         }
     }

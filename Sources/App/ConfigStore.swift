@@ -19,6 +19,12 @@ final class ConfigStore {
     let paths: ConfigPaths
     private let loader: ConfigLoader
     private var watcher: DirectoryWatcher?
+    private var appearanceObservation: NSKeyValueObservation?
+
+    /// macOS is in Dark Mode (Rune's windows set their own appearance; the app's follows the system).
+    static var systemIsDark: Bool {
+        NSApp?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    }
     private(set) var loaded: LoadedConfig
 
     @Published private(set) var snapshot: ConfigSnapshot
@@ -44,6 +50,10 @@ final class ConfigStore {
         let watcher = DirectoryWatcher { [weak self] in self?.reload() }
         watcher.watch(watched)
         self.watcher = watcher
+        // macOS switching between Light and Dark Mode (for "Match system appearance").
+        appearanceObservation = NSApp?.observe(\.effectiveAppearance) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.reload() }
+        }
     }
 
     func reload() {
@@ -102,8 +112,10 @@ final class ConfigStore {
     private static func load(_ loader: ConfigLoader) -> (LoadedConfig, ConfigSnapshot, [URL]) {
         let loaded = loader.load()
         var warnings = loaded.warnings
-        let theme = ThemeLoader.load(named: loaded.config.theme, resourceDirectories: loaded.resourceDirectories, warnings: &warnings)
-        let font = FontResolver.font(family: loaded.config.fontFamily, size: loaded.config.fontSize, warnings: &warnings)
+        let config = loaded.config
+        var theme = ThemeLoader.load(named: config.themeName(systemIsDark: systemIsDark), resourceDirectories: loaded.resourceDirectories, warnings: &warnings)
+        if config.minimumContrast { theme = theme.withMinimumContrast() }
+        let font = FontResolver.font(family: config.fontFamily, size: config.fontSize, weight: config.fontWeight, warnings: &warnings)
         let themeDirs = loaded.resourceDirectories.map { $0.appendingPathComponent("themes", isDirectory: true) }
         let snapshot = ConfigSnapshot(config: loaded.config, theme: theme, font: font, warnings: warnings)
         return (loaded, snapshot, loaded.watchedDirectories + themeDirs)
@@ -114,16 +126,30 @@ enum FontResolver {
     /// Names that mean "the system monospaced font" (SF Mono on current macOS).
     private static let systemAliases: Set<String> = ["sf mono", "sfmono", "system", "monospace", "ui-monospace"]
 
-    static func font(family: String, size: Double, warnings: inout [String]) -> NSFont {
-        withIconFallback(baseFont(family: family, size: size, warnings: &warnings))
+    static func font(family: String, size: Double, weight: String = "regular", warnings: inout [String]) -> NSFont {
+        withIconFallback(baseFont(family: family, size: size, weight: weight, warnings: &warnings))
     }
 
-    private static func baseFont(family: String, size: Double, warnings: inout [String]) -> NSFont {
+    /// NSFontManager weights (0–15, 5 = regular) and system font weights for each setting.
+    private static func weights(_ name: String) -> (manager: Int, system: NSFont.Weight) {
+        switch name {
+        case "light": return (3, .light)
+        case "medium": return (6, .medium)
+        case "semibold": return (8, .semibold)
+        case "bold": return (9, .bold)
+        default: return (5, .regular)
+        }
+    }
+
+    private static func baseFont(family: String, size: Double, weight: String, warnings: inout [String]) -> NSFont {
         let pointSize = CGFloat(size)
-        let system = NSFont.monospacedSystemFont(ofSize: pointSize, weight: .regular)
+        let (managerWeight, systemWeight) = weights(weight)
+        let system = NSFont.monospacedSystemFont(ofSize: pointSize, weight: systemWeight)
         let trimmed = family.trimmingCharacters(in: .whitespaces)
 
-        if let byFamily = NSFontManager.shared.font(withFamily: trimmed, traits: [], weight: 5, size: pointSize) {
+        // The requested weight when the family has it, otherwise its regular face.
+        if let byFamily = NSFontManager.shared.font(withFamily: trimmed, traits: [], weight: managerWeight, size: pointSize)
+            ?? NSFontManager.shared.font(withFamily: trimmed, traits: [], weight: 5, size: pointSize) {
             return byFamily
         }
         if let byName = NSFont(name: trimmed, size: pointSize) {

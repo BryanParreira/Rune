@@ -74,9 +74,62 @@ public struct RuneConfig: Equatable, Sendable {
     /// How long a command must run before its completion is worth a notification.
     public var notifyAfterSeconds: Double = 10
 
+    // Appearance
+    /// Follow macOS: `theme` in Light Mode, `darkTheme` in Dark Mode.
+    public var followSystemAppearance: Bool = false
+    public var darkTheme: String = "paper-night"
+    /// light, regular, medium, semibold or bold.
+    public var fontWeight: String = "regular"
+    /// Raise hard-to-read text colors to WCAG AA contrast against the background.
+    public var minimumContrast: Bool = false
+    /// Fade the panes of a split that don't have focus.
+    public var dimInactivePanes: Bool = true
+    /// Off: Rune lives in the menu bar and the global hotkey, not the Dock or ⌘-Tab.
+    public var showDockIcon: Bool = true
+
+    // Mouse
+    /// Selecting text with the mouse copies it.
+    public var copyOnSelect: Bool = false
+    /// What a right-click in the output does: "menu" or "paste".
+    public var rightClick: String = "menu"
+    /// Trackpad and mouse-wheel scroll speed multiplier.
+    public var scrollSpeed: Double = 1
+
+    // Input
+    /// The hint line under the input editor.
+    public var showHints: Bool = true
+    /// Color commands, flags, strings… as you type.
+    public var syntaxHighlighting: Bool = true
+    /// Grey suggestions from history after the caret.
+    public var autosuggestions: Bool = true
+    /// Offer a fixed command after a typo (Tab to use it).
+    public var commandCorrections: Bool = true
+    /// Underline a command that isn't installed.
+    public var underlineUnknownCommands: Bool = false
+    /// Typing ( [ { " ' or ` adds the closing one.
+    public var autoCloseBrackets: Bool = false
+    /// Open the completion menu as you type, not only on Tab.
+    public var completionsWhileTyping: Bool = false
+    /// Vim keys in the input editor (Esc for normal mode).
+    public var vimMode: Bool = false
+    /// Where the input sits when the output doesn't fill the pane: "bottom" (pinned) or
+    /// "waterfall" (right under the last output, moving down as output grows).
+    public var inputPosition: String = "bottom"
+
+    // Privacy
+    /// Extra regular expressions for secrets to hide, on top of the built-in ones.
+    public var secretPatterns: [String] = []
+
     public init() {}
 
     public static let defaults = RuneConfig()
+
+    public static let fontWeights = ["light", "regular", "medium", "semibold", "bold"]
+
+    /// The theme in effect for the system's current appearance.
+    public func themeName(systemIsDark: Bool) -> String {
+        followSystemAppearance && systemIsDark ? darkTheme : theme
+    }
 
     /// Keys understood at the top level of config.json. Anything else produces a warning
     /// (keys starting with `_` or `$` are allowed for comments / schema hints).
@@ -85,6 +138,10 @@ public struct RuneConfig: Equatable, Sendable {
         "cursorBlink", "scrollback", "optionAsMeta", "showWelcome", "honorPrompt", "inputMode", "shell",
         "aiEnabled", "ollamaEndpoint", "aiModel", "aiIncludeBlockContext",
         "syncPath", "hosts", "workflows", "notifyWhenDone", "notifyAfterSeconds", "gpuRendering", "restoreSession", "hideSecrets", "recallEnabled", "recallDays", "globalHotkey", "keyboardShortcuts", "openFilesIn", "remoteInput",
+        "followSystemAppearance", "darkTheme", "fontWeight", "minimumContrast", "dimInactivePanes", "showDockIcon",
+        "copyOnSelect", "rightClick", "scrollSpeed",
+        "showHints", "syntaxHighlighting", "autosuggestions", "commandCorrections", "underlineUnknownCommands",
+        "autoCloseBrackets", "completionsWhileTyping", "vimMode", "inputPosition", "secretPatterns",
     ]
 
     /// Written to ~/.config/rune/config.json on first launch.
@@ -180,6 +237,44 @@ extension RuneConfig {
         }
         if let v = reader.number("recallDays", range: 1...3650) { recallDays = v }
         if let v = reader.number("notifyAfterSeconds", range: 1...3600) { notifyAfterSeconds = v }
+
+        if let v = reader.bool("followSystemAppearance") { followSystemAppearance = v }
+        if let v = reader.string("darkTheme"), !v.isEmpty { darkTheme = v }
+        if let v = reader.string("fontWeight") {
+            if Self.fontWeights.contains(v.lowercased()) { fontWeight = v.lowercased() } else {
+                reader.warnings.append("fontWeight \"\(v)\" is not one of \(Self.fontWeights.joined(separator: ", ")); using regular")
+            }
+        }
+        if let v = reader.bool("minimumContrast") { minimumContrast = v }
+        if let v = reader.bool("dimInactivePanes") { dimInactivePanes = v }
+        if let v = reader.bool("showDockIcon") { showDockIcon = v }
+        if let v = reader.bool("copyOnSelect") { copyOnSelect = v }
+        if let v = reader.string("rightClick") {
+            if ["menu", "paste"].contains(v) { rightClick = v } else { reader.warnings.append("rightClick \"\(v)\" is not one of menu, paste; using menu") }
+        }
+        if let v = reader.number("scrollSpeed", range: 0.25...5) { scrollSpeed = v }
+        if let v = reader.bool("showHints") { showHints = v }
+        if let v = reader.bool("syntaxHighlighting") { syntaxHighlighting = v }
+        if let v = reader.bool("autosuggestions") { autosuggestions = v }
+        if let v = reader.bool("commandCorrections") { commandCorrections = v }
+        if let v = reader.bool("underlineUnknownCommands") { underlineUnknownCommands = v }
+        if let v = reader.bool("autoCloseBrackets") { autoCloseBrackets = v }
+        if let v = reader.bool("completionsWhileTyping") { completionsWhileTyping = v }
+        if let v = reader.bool("vimMode") { vimMode = v }
+        if let v = reader.string("inputPosition") {
+            if ["bottom", "waterfall"].contains(v) { inputPosition = v } else { reader.warnings.append("inputPosition \"\(v)\" is not one of bottom, waterfall; using bottom") }
+        }
+        if let raw = dictionary["secretPatterns"], !(raw is NSNull) {
+            if let list = raw as? [String] {
+                for pattern in list {
+                    if (try? NSRegularExpression(pattern: pattern)) != nil { secretPatterns.append(pattern) } else {
+                        reader.warnings.append("secretPatterns: \"\(pattern)\" isn't a valid regular expression; skipped")
+                    }
+                }
+            } else {
+                reader.warnings.append("secretPatterns should be a list of regular expressions")
+            }
+        }
 
         for key in dictionary.keys.sorted() where !Self.knownKeys.contains(key) {
             if key.hasPrefix("_") || key.hasPrefix("$") { continue }

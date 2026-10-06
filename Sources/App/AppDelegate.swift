@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         didFinishLaunching = true
         setUpGlobalHotKey(store)
+        setUpDockIcon(store)
         NSApp.servicesProvider = self
 
         // Opened on a specific folder (Finder, `rune`, --cwd): open just that.
@@ -100,6 +101,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.hide(nil)
             return
         }
+        NSApp.unhide(nil)
+        if startupWindowsPending {
+            openStartupWindows(openedOnFolder: false)
+        } else if let window = frontController()?.window {
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            newWindow(nil)
+        }
+        NSApp.activate()
+    }
+
+    // MARK: - Dock icon
+
+    private var dockIconObserver: AnyCancellable?
+    private var statusItem: NSStatusItem?
+
+    private func setUpDockIcon(_ store: ConfigStore) {
+        guard !Self.isAutomatedRun else { return }
+        dockIconObserver = store.$snapshot
+            .map(\.config.showDockIcon)
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.applyDockIcon(shown: $0) }
+    }
+
+    /// Hidden: Rune leaves the Dock and ⌘-Tab and lives behind the global hotkey and a menu-bar
+    /// icon (so it's always reachable, even with the hotkey turned off).
+    private func applyDockIcon(shown: Bool) {
+        if shown {
+            if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
+            statusItem = nil
+            if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
+            return
+        }
+        if statusItem == nil {
+            let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+            item.button?.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: "Rune")
+            item.button?.image?.isTemplate = true
+            let menu = NSMenu()
+            menu.addItem(ClosureMenuItem(title: "Show Rune") { [weak self] in self?.showFromMenuBar() })
+            menu.addItem(ClosureMenuItem(title: "New Window") { [weak self] in
+                self?.newWindow(nil)
+                NSApp.activate()
+            })
+            menu.addItem(ClosureMenuItem(title: "Settings…") { [weak self] in self?.openSettings(nil) })
+            menu.addItem(.separator())
+            menu.addItem(NSMenuItem(title: "Quit Rune", action: #selector(NSApplication.terminate(_:)), keyEquivalent: ""))
+            item.menu = menu
+            statusItem = item
+        }
+        if NSApp.activationPolicy() != .accessory {
+            NSApp.setActivationPolicy(.accessory)
+            // Leaving the Dock deactivates the app; keep the window the user was in in front.
+            DispatchQueue.main.async { NSApp.activate() }
+        }
+    }
+
+    private func showFromMenuBar() {
         NSApp.unhide(nil)
         if startupWindowsPending {
             openStartupWindows(openedOnFolder: false)
