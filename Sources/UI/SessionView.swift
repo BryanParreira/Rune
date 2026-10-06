@@ -213,6 +213,12 @@ final class SessionView: NSView {
     /// Brings block chrome up to date now (also called when the terminal redraws its text).
     func refreshBlockChrome() {
         chromeLink?.isPaused = true
+        // Chrome for output the terminal hasn't drawn yet would show a frame before its text:
+        // redraw the text now; that calls back here (onTextRedraw) for the chrome.
+        if terminalView.hasUndrawnOutput {
+            terminalView.setNeedsDisplay(terminalView.bounds)
+            return
+        }
         session?.updateBottomTrim()
         overlay.needsDisplay = true
         overlay.refreshHover()
@@ -228,7 +234,8 @@ final class SessionView: NSView {
     func contextDidChange() {
         guard let session else { return }
         inputArea.updateContext(directory: session.displayDirectory, branch: session.isRemote ? nil : session.gitBranch)
-        overlay.needsDisplay = true
+        // Through the frame-synced path, so headers never change ahead of the text.
+        blocksDidChange()
     }
 
     func modeDidChange() {

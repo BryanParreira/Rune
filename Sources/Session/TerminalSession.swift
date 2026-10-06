@@ -37,8 +37,12 @@ final class RuneTerminalView: LocalProcessTerminalView {
     var onTextRedraw: (() -> Void)?
     private var notifyingTextRedraw = false
 
+    /// Output was parsed since the text was last redrawn.
+    private(set) var hasUndrawnOutput = false
+
     override func setNeedsDisplay(_ invalidRect: NSRect) {
         super.setNeedsDisplay(invalidRect)
+        hasUndrawnOutput = false
         guard !notifyingTextRedraw else { return }
         notifyingTextRedraw = true
         onTextRedraw?()
@@ -79,6 +83,7 @@ final class RuneTerminalView: LocalProcessTerminalView {
             feeding = true
             super.dataReceived(slice: shown)
             feeding = false
+            hasUndrawnOutput = true
             if scrolledWhileFeeding {
                 scrolledWhileFeeding = false
                 isScrollingWithOutput = true
@@ -142,14 +147,23 @@ final class RuneTerminalView: LocalProcessTerminalView {
         guard window != nil else { return }
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
             guard let self, let window = self.window, event.window === window, !self.isHiddenOrHasHiddenAncestor,
-                  let area = self.superview, area.bounds.contains(area.convert(event.locationInWindow, from: nil)),
+                  // The pane around the terminal, padding included.
+                  let area = self.paneArea,
+                  area.bounds.contains(area.convert(event.locationInWindow, from: nil)),
                   // Not when a panel over the output (Filter Output…) is under the pointer.
                   let hit = window.contentView?.hitTest(event.locationInWindow),
-                  hit === self || hit === area || hit is BlockOverlayView,
+                  hit === self || hit === area || hit === self.superview || hit is BlockOverlayView,
                   self.smoothScroll?(event) == true
             else { return event }
             return nil
         }
+    }
+
+    /// The pane around the terminal, padding included (the terminal sits in a clip view).
+    private var paneArea: NSView? {
+        var view = superview
+        while let current = view, !(current is TerminalContainerView) { view = current.superview }
+        return view ?? superview
     }
 
     /// A click that didn't select text or open a link: point in view coordinates, and whether
@@ -314,6 +328,27 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     /// Fixed per shell launch: the integration sets up the prompt for one style or the other.
     private(set) var typeInShell = false
 
+    // A command appears in one step: the shell echoes the typed line before the command
+    // starts, and a command shows the cursor while it runs. Shown as they happen, a quick
+    // `ls` drew the bare command at the bottom, then the block with a caret under it, then
+    // the block without one: a jump each time. These keep the in-between states hidden.
+
+    /// From Enter until the command's output starts (or the shell is back at a prompt).
+    private var commandPending = false
+    private var commandPendingTimeout: DispatchWorkItem?
+    /// Scroll-invariant row where the shell reads the command (the B mark).
+    private var commandInputRow: Int?
+    /// The command started less than `settleTime` ago: its cursor and the blank row it sits
+    /// on stay hidden, so commands that finish quickly never show them.
+    private var commandSettling = false
+    private var commandSettleWork: DispatchWorkItem?
+    private static let settleTime: TimeInterval = 0.15
+    /// The caret is drawn in the clear color while it should not show.
+    private var caretSuppressed = false
+    /// Between a command's end and the next prompt: the first row after its output, where
+    /// zsh draws its end-of-line mark (PROMPT_SP) before the prompt clears it again.
+    private var promptPendingFromRow: Int?
+
     private static let displayHost = HostIdentity.displayHostname()
     private static let userName = HostIdentity.userName()
     /// A shell that dies this quickly probably failed to start; keep its output visible.
@@ -383,7 +418,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         if abs(tv.lineSpacing - CGFloat(config.lineHeight)) > 0.001 { tv.lineSpacing = CGFloat(config.lineHeight) }
         tv.nativeBackgroundColor = theme.background.nsColor
         tv.nativeForegroundColor = theme.foreground.nsColor
-        tv.caretColor = theme.cursor.nsColor
+        tv.caretColor = caretSuppressed ? .clear : theme.cursor.nsColor
         tv.selectedTextBackgroundColor = theme.selectionBackground.nsColor
         tv.selectedTextForegroundColor = theme.selectionForeground.nsColor
         tv.installColors(theme.ansi.map(\.terminalColor))
@@ -618,7 +653,54 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             bytes += Array(trimmed.replacingOccurrences(of: "\n", with: " ").utf8)
         }
         bytes.append(13)
+        beginPendingCommand()
         terminalView.sendToShell(bytes)
+    }
+
+    /// The command line was sent: keep its echo out of sight until the block starts.
+    private func beginPendingCommand() {
+        commandPending = true
+        commandPendingTimeout?.cancel()
+        // A command that never starts (an unclosed quote waiting for more) shows after a moment.
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.commandPending else { return }
+            self.commandPending = false
+            self.updateBottomTrim()
+            self.view.blocksDidChange()
+        }
+        commandPendingTimeout = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
+    }
+
+    /// Output started: the block is shown, its cursor only once the command has run a moment.
+    private func beginSettling() {
+        commandPending = false
+        commandPendingTimeout?.cancel()
+        commandSettling = true
+        setCaretSuppressed(true)
+        commandSettleWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.commandSettling else { return }
+            self.commandSettling = false
+            self.setCaretSuppressed(false)
+            self.updateBottomTrim()
+            self.view.blocksDidChange()
+        }
+        commandSettleWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.settleTime, execute: work)
+    }
+
+    private func endCommandTransition() {
+        commandPending = false
+        commandPendingTimeout?.cancel()
+        commandSettling = false
+        commandSettleWork?.cancel()
+    }
+
+    private func setCaretSuppressed(_ suppressed: Bool) {
+        guard suppressed != caretSuppressed else { return }
+        caretSuppressed = suppressed
+        terminalView.caretColor = suppressed ? .clear : snapshot.theme.cursor.nsColor
     }
 
     func historyOlder(current: String) -> String? {
@@ -646,6 +728,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
 
     /// Cmd-K: clears output and blocks, then lets the shell redraw its prompt.
     func clearScreen() {
+        promptPendingFromRow = nil
         tracker.removeAll()
         anchorLines.removeAll()
         bookmarkedBlockIDs.removeAll()
@@ -1429,6 +1512,29 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             pendingStartCommand = nil
             runStartCommand(command)
         }
+        switch mark {
+        case .commandStart:
+            // At a prompt again (the shell hides the cursor in the same write).
+            commandInputRow = position.row
+            promptPendingFromRow = nil
+            endCommandTransition()
+            setCaretSuppressed(false)
+        case .outputStart:
+            promptPendingFromRow = nil
+            beginSettling()
+        case .commandFinished:
+            // Keep the caret hidden until the prompt hides the cursor itself.
+            commandSettling = false
+            commandSettleWork?.cancel()
+            if tracker.isCommandRunning {
+                promptPendingFromRow = position.column == 0 ? position.row : position.row + 1
+            }
+        case .promptStart:
+            commandPending = false
+            commandPendingTimeout?.cancel()
+        default:
+            break
+        }
         let wasRunning = tracker.isCommandRunning
         let changed = tracker.handle(mark, at: position)
         if case .outputStart = mark, config.remoteInput != "off", let block = tracker.blocks.last, block.state == .running,
@@ -1622,9 +1728,26 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         let terminal = terminalView.getTerminal()
         var hidden = 0
         if integration == .active, !terminal.isCurrentBufferAlternate, case .running = state {
-            let lowestHideable = promptIsInvisible ? 1 : terminal.getCursorLocation().y + 1
             let screenTop = geometry.linesTrimmed + geometry.screenTop
             var row = terminal.rows - 1
+            let ownPrompt = !typeInShell && !config.honorPrompt
+            // A new command (its echo, then its first output) whatever it contains: a quick
+            // command then appears once, finished, instead of growing over several frames.
+            // Not once it fills the screen: hiding all of it would blank the pane instead.
+            let transitionStart = (commandPending && promptIsInvisible) || (commandSettling && ownPrompt)
+                ? commandInputRow : (ownPrompt ? promptPendingFromRow : nil)
+            if let input = transitionStart, input - screenTop >= 2 {
+                let first = input - screenTop
+                if first <= row {
+                    hidden = row - first + 1
+                    row = first - 1
+                }
+            }
+            // Blank rows under a running command's output (where its cursor waits) stay hidden
+            // too, so the block doesn't grow a row and shrink back when the command ends. A row
+            // with anything on it (a password prompt, a REPL's >>>) still shows.
+            let quiet = promptIsInvisible || (ownPrompt && (commandSettling || mode == .runningCommand))
+            let lowestHideable = quiet ? 1 : terminal.getCursorLocation().y + 1
             while row >= max(1, lowestHideable),
                   let line = terminal.getScrollInvariantLine(row: screenTop + row),
                   line.translateToString(trimRight: true).isEmpty {
@@ -1898,6 +2021,9 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     }
 
     private func restartAfterExit() {
+        promptPendingFromRow = nil
+        endCommandTransition()
+        setCaretSuppressed(false)
         terminalView.getTerminal().resetToInitialState()
         tracker.removeAll()
         anchorLines.removeAll()

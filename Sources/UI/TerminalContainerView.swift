@@ -9,7 +9,7 @@ final class TerminalContainerView: NSView {
     var overlay: NSView? {
         didSet {
             oldValue?.removeFromSuperview()
-            if let overlay { addSubview(overlay, positioned: .above, relativeTo: terminalView) }
+            if let overlay { addSubview(overlay, positioned: .above, relativeTo: clipView) }
             needsLayout = true
         }
     }
@@ -54,13 +54,21 @@ final class TerminalContainerView: NSView {
         didSet { layer?.backgroundColor = background.cgColor }
     }
 
+    /// Clips the terminal at the bottom of the visible area: rows pushed below it (hidden
+    /// blank rows, a command's echo before it starts) must not show in the bottom padding,
+    /// where the top of a hidden row (the caret, say) used to peek out.
+    private let clipView = FlippedView()
+
     init(terminalView: TerminalView) {
         self.terminalView = terminalView
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = background.cgColor
         layer?.masksToBounds = true
-        addSubview(terminalView)
+        clipView.wantsLayer = true
+        clipView.layer?.masksToBounds = true
+        addSubview(clipView)
+        clipView.addSubview(terminalView)
     }
 
     @available(*, unavailable)
@@ -88,6 +96,9 @@ final class TerminalContainerView: NSView {
     }
 
     private func layoutTerminal() {
+        // Same coordinates as this view, so the terminal's frame means the same in both.
+        let clip = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - padding.bottom))
+        if clipView.frame != clip { clipView.frame = clip }
         let visibleHeight = max(0, bounds.height - padding.top - padding.bottom)
         let stableHeight = paneHeight - padding.top - padding.bottom
         let size = NSSize(
@@ -123,4 +134,9 @@ final class TerminalContainerView: NSView {
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(terminalView)
     }
+}
+
+/// A plain view with a top-left origin, like the container it sits in.
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
 }

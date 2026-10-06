@@ -517,6 +517,14 @@ enum DebugDriver {
                     print("FRAME window=\(window.frame.size) content=\(window.contentView?.frame.size ?? .zero)")
                     fflush(stdout)
                 }
+            case "@float":
+                // Keeps the test window above other apps so a screen recording sees it.
+                if let window = session.view.window {
+                    window.level = .floating
+                    window.orderFrontRegardless()
+                    print("FLOAT origin=\(window.frame.origin) size=\(window.frame.size) screen=\(window.screen?.frame.size ?? .zero)")
+                    fflush(stdout)
+                }
             case "@watch":
                 session.watchLatest()
             case "@compare":
