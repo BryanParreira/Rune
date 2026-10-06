@@ -114,6 +114,8 @@ public struct RuneConfig: Equatable, Sendable {
     public var autoCloseBrackets: Bool = false
     /// Open the completion menu as you type, not only on Tab.
     public var completionsWhileTyping: Bool = false
+    /// ↑ opens a list of past commands (typing filters it); off: ↑ steps through them.
+    public var historyMenu: Bool = true
     /// Vim keys in the input editor (Esc for normal mode).
     public var vimMode: Bool = false
     /// Vim's yank and put use the macOS clipboard instead of their own register.
@@ -147,7 +149,7 @@ public struct RuneConfig: Equatable, Sendable {
         "followSystemAppearance", "darkTheme", "fontWeight", "minimumContrast", "dimInactivePanes", "focusPaneOnHover", "bell", "showDockIcon",
         "copyOnSelect", "rightClick", "scrollSpeed",
         "showHints", "syntaxHighlighting", "autosuggestions", "commandCorrections", "underlineUnknownCommands",
-        "autoCloseBrackets", "completionsWhileTyping", "vimMode", "vimSystemClipboard", "inputPosition", "secretPatterns",
+        "autoCloseBrackets", "completionsWhileTyping", "historyMenu", "vimMode", "vimSystemClipboard", "inputPosition", "secretPatterns",
     ]
 
     /// Written to ~/.config/rune/config.json on first launch.
@@ -270,6 +272,7 @@ extension RuneConfig {
         if let v = reader.bool("underlineUnknownCommands") { underlineUnknownCommands = v }
         if let v = reader.bool("autoCloseBrackets") { autoCloseBrackets = v }
         if let v = reader.bool("completionsWhileTyping") { completionsWhileTyping = v }
+        if let v = reader.bool("historyMenu") { historyMenu = v }
         if let v = reader.bool("vimMode") { vimMode = v }
         if let v = reader.bool("vimSystemClipboard") { vimSystemClipboard = v }
         if let v = reader.string("inputPosition") {

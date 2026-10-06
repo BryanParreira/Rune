@@ -363,6 +363,7 @@ final class InputAreaView: NSView, NSTextViewDelegate {
 
     func closeCompletionMenu() {
         guard completionMenu.isOpen else { return }
+        historyMenuOpen = false
         completionMenu.items = []
         setHint(currentHint)
         sessionView?.layoutCompletionMenu()
@@ -387,8 +388,50 @@ final class InputAreaView: NSView, NSTextViewDelegate {
     }
 
     /// Typing while the menu is open narrows it; it closes when nothing matches any more.
+    // MARK: - History menu
+
+    /// The completion menu is showing past commands (↑), not completions.
+    private var historyMenuOpen = false
+    private static let historyMenuLimit = 300
+
+    /// Past commands containing what's typed (any case), oldest first so the newest sit
+    /// next to the input; nil when nothing matches.
+    private func historyItems(matching query: String) -> [CompletionMenuModel.Item]? {
+        let needle = query.trimmingCharacters(in: .whitespaces)
+        var seen = Set<String>()
+        var picked: [String] = []
+        for entry in HistoryStore.shared.history.entries.reversed() where picked.count < Self.historyMenuLimit {
+            guard needle.isEmpty || entry.localizedCaseInsensitiveContains(needle), seen.insert(entry).inserted else { continue }
+            picked.append(entry)
+        }
+        guard !picked.isEmpty else { return nil }
+        return picked.reversed().enumerated().map { index, command in
+            let line = command.components(separatedBy: .newlines).joined(separator: " ⏎ ")
+            return CompletionMenuModel.Item(id: index, name: line, detail: nil, insertion: command)
+        }
+    }
+
+    @discardableResult
+    private func openHistoryMenu() -> Bool {
+        guard let items = historyItems(matching: editor.string) else { return false }
+        historyMenuOpen = true
+        openCompletionMenu(range: NSRange(location: 0, length: (editor.string as NSString).length), items: items)
+        completionMenu.selected = items.count - 1
+        return true
+    }
+
+    /// Typing while the history list is open narrows it.
+    private func refreshHistoryMenu() {
+        guard let items = historyItems(matching: editor.string) else { return closeCompletionMenu() }
+        completionMenu.range = NSRange(location: 0, length: (editor.string as NSString).length)
+        completionMenu.items = items
+        completionMenu.selected = items.count - 1
+        sessionView?.layoutCompletionMenu()
+    }
+
     private func refreshCompletionMenu() {
         guard completionMenu.isOpen else { return }
+        if historyMenuOpen { return refreshHistoryMenu() }
         guard let fresh = completionCandidates(), !fresh.items.isEmpty else { return closeCompletionMenu() }
         let previous = completionMenu.items.indices.contains(completionMenu.selected) ? completionMenu.items[completionMenu.selected].name : nil
         completionMenu.range = fresh.range
@@ -418,6 +461,10 @@ extension InputAreaView: CommandTextViewDelegate {
     }
 
     func commandTextView(_ view: CommandTextView, historyOlder current: String) -> Bool {
+        // ↑ opens the history list (Vim's k still steps one at a time).
+        if config.historyMenu, !view.isVimNormal, !completionMenu.isOpen {
+            return openHistoryMenu()
+        }
         guard let session = sessionView?.session, let entry = session.historyOlder(current: current) else { return false }
         setEditorText(entry)
         return true
@@ -481,6 +528,17 @@ extension InputAreaView: CommandTextViewDelegate {
     func commandTextView(_ view: CommandTextView, menuKey keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
         guard completionMenu.isOpen else { return false }
         let plain = modifiers.subtracting([.numericPad, .function, .capsLock]).isEmpty
+        if historyMenuOpen, plain, keyCode == 126 || keyCode == 125 {
+            // No wrapping: ↓ past the newest command closes the list.
+            if keyCode == 126 {
+                completionMenu.selected = max(0, completionMenu.selected - 1)
+            } else if completionMenu.selected >= completionMenu.items.count - 1 {
+                closeCompletionMenu()
+            } else {
+                completionMenu.selected += 1
+            }
+            return true
+        }
         switch keyCode {
         case 126 where plain: completionMenu.move(-1)
         case 125 where plain: completionMenu.move(1)

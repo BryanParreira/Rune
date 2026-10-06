@@ -182,7 +182,7 @@ enum SettingsIndex {
         case .input:
             return ["New session panel", "welcome", "editor", "history", "completion", "Type commands in", "zsh prompt", "autosuggestions", "syntax highlighting", "plugins",
                     "Suggestions from history", "Underline unknown commands", "Close brackets", "quotes", "auto-close", "Open completions while typing",
-                    "typos", "corrections", "Did you mean", "hints", "shortcut hints", "Vim", "vi mode", "normal mode", "keybindings", "clipboard", "Input position", "waterfall", "top", "bottom"]
+                    "typos", "corrections", "Did you mean", "hints", "shortcut hints", "history list", "up arrow", "Vim", "vi mode", "normal mode", "keybindings", "clipboard", "Input position", "waterfall", "top", "bottom"]
         case .ai:
             return ["AI", "Ollama", "Model", "local", "LLM", "Endpoint", "context", "Explain"]
         case .keyboard:
@@ -864,8 +864,9 @@ struct InputPage: View {
             SettingRow(model: model, title: "Show “New session” panel", key: "showWelcome", detail: "Shortcut tips above the input editor in new tabs.") {
                 SwitchControl(isOn: model.binding("showWelcome", { $0.showWelcome }))
             }
-            SettingRow(model: model, title: "Command history", detail: "Up/Down cycles through ~/.zsh_history plus commands run in Rune.") {
-                EmptyView()
+            SettingRow(model: model, title: "↑ opens a history list", key: "historyMenu",
+                       detail: "↑ shows your past commands (~/.zsh_history plus Rune's) above the input; typing narrows it, ↵ or ⇥ puts one in the input. Off: ↑ and ↓ step through them one at a time.") {
+                SwitchControl(isOn: model.binding("historyMenu", { $0.historyMenu }))
             }
 
             SectionHeader(text: "While you type", palette: p)
