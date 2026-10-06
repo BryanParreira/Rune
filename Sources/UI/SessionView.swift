@@ -309,7 +309,10 @@ final class SessionView: NSView {
 
     func contextDidChange() {
         guard let session else { return }
-        inputArea.updateContext(directory: session.displayDirectory, branch: session.isRemote ? nil : session.gitBranch)
+        let local = !session.isRemote
+        inputArea.updateContext(directory: session.displayDirectory, branch: local ? session.gitBranch : nil,
+                                dirty: local && session.gitDirty, python: local ? session.pythonEnvironment : nil,
+                                node: local ? session.nodeVersion : nil)
         // Through the frame-synced path, so headers never change ahead of the text.
         blocksDidChange()
     }

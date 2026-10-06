@@ -29,6 +29,12 @@ function fish_prompt
         printf '\e]6973;mark=D\a'
     end
     __rune_osc cwd $PWD
+    # The active Python environment, for Rune's context chips (only when it changes).
+    set -l pyenv "$VIRTUAL_ENV|$CONDA_DEFAULT_ENV"
+    if not set -q __rune_last_pyenv; or test "$pyenv" != "$__rune_last_pyenv"
+        set -g __rune_last_pyenv $pyenv
+        __rune_osc pyenv $pyenv
+    end
     # Once the config has loaded: functions and abbreviations (colored as commands in Rune's
     # editor) and the PATH.
     if test "$__rune_names_sent" = 0

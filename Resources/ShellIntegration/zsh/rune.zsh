@@ -69,6 +69,14 @@ __rune_precmd_last() {
   # Every prompt: plugins (zsh-vi-mode…) may rebuild the keymaps after startup.
   __rune_bind_line_keys
 
+  # The active Python environment, for Rune's context chips (only when it changes).
+  local pyenv="${VIRTUAL_ENV:-}|${CONDA_DEFAULT_ENV:-}"
+  if [[ "$pyenv" != "${__rune_last_pyenv-unset}" ]]; then
+    typeset -g __rune_last_pyenv="$pyenv"
+    __rune_encode "$pyenv"
+    builtin printf '\e]6973;pyenv=%s\a' "$REPLY"
+  fi
+
   # Once the user's config has loaded, tell Rune which aliases and functions exist so its
   # editor can highlight them as valid commands.
   if (( ! __rune_reported_names )); then

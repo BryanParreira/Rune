@@ -316,6 +316,9 @@ enum DebugDriver {
                 }
                 print("SCROLL top=\(session.terminalView.getTerminal().getTopVisibleRow()) offset=\(session.view.terminalContainer.smoothOffset) covered=\(session.view.terminalContainer.coveredTopRows)")
                 fflush(stdout)
+            case "@chips":
+                print("CHIPS " + session.view.inputArea.debugChips)
+                fflush(stdout)
             case "@viewport":
                 let t = session.terminalView.getTerminal()
                 print("VIEWPORT top=\(t.getTopVisibleRow()) text=<\(t.getScrollInvariantLine(row: session.geometry.topVisibleRow)?.translateToString(trimRight: true) ?? "")>")

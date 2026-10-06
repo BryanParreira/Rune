@@ -29,6 +29,8 @@ public enum ShellMark: Equatable, Sendable {
     /// What was in the shell's line when Rune asked for it: keys typed while the last
     /// command ran, handed to Rune's editor (empty when nothing was typed).
     case typeahead(String)
+    /// The active Python environment: a virtualenv path and/or a conda env name.
+    case pythonEnvironment(virtualEnv: String?, conda: String?)
 }
 
 /// Keys Rune's integrations bind in the shell's line editor (integration version 2).
@@ -81,6 +83,11 @@ public enum ShellMarkParser {
         case "rcwd": return value.isEmpty ? nil : .remoteDirectory(value)
         case "remote-ready": return .remoteReady
         case "input": return .typeahead(value)
+        case "pyenv":
+            let parts = value.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            let venv = parts.first.flatMap { $0.isEmpty ? nil : $0 }
+            let conda = parts.count > 1 && !parts[1].isEmpty ? parts[1] : nil
+            return .pythonEnvironment(virtualEnv: venv, conda: conda)
         // fish reports prompt/command marks here instead of OSC 133 (see rune.fish).
         case "mark": return parse133(value)
         default: return nil

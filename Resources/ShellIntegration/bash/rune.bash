@@ -49,6 +49,14 @@ __rune_precmd() {
   __rune_encode "$PWD"
   builtin printf '\033]6973;cwd=%s\007' "$__rune_reply"
 
+  # The active Python environment, for Rune's context chips (only when it changes).
+  local pyenv="${VIRTUAL_ENV:-}|${CONDA_DEFAULT_ENV:-}"
+  if [ "$pyenv" != "${__rune_last_pyenv-unset}" ]; then
+    __rune_last_pyenv="$pyenv"
+    __rune_encode "$pyenv"
+    builtin printf '\033]6973;pyenv=%s\007' "$__rune_reply"
+  fi
+
   # Once the user's config has loaded: aliases and functions (so Rune's editor colors them
   # as commands) and the PATH (for its command list).
   if [ -z "$__rune_names_sent" ]; then

@@ -122,10 +122,22 @@ final class InputAreaView: NSView, NSTextViewDelegate {
         needsDisplay = true
     }
 
-    func updateContext(directory: String, branch: String?) {
+    #if DEBUG
+    var debugChips: String {
+        "dir=\(chipsModel.directory) branch=\(chipsModel.branch ?? "-") dirty=\(chipsModel.branchDirty) python=\(chipsModel.python ?? "-") node=\(chipsModel.node ?? "-")"
+    }
+    #endif
+
+    func updateContext(directory: String, branch: String?, dirty: Bool = false, python: String? = nil, node: String? = nil) {
         let display = TabTitle.abbreviate(path: directory, home: NSHomeDirectory())
         if chipsModel.directory != display { chipsModel.directory = display }
         if chipsModel.branch != branch { chipsModel.branch = branch }
+        if chipsModel.branchDirty != dirty { chipsModel.branchDirty = dirty }
+        if chipsModel.python != python { chipsModel.python = python }
+        if chipsModel.node != node { chipsModel.node = node }
+        if chipsModel.onBranchClick == nil {
+            chipsModel.onBranchClick = { [weak self] in self?.sessionView?.session?.showBranchMenu() }
+        }
     }
 
     /// Shows the dimmed "Running…" state once a command has run this long: most commands
@@ -639,6 +651,12 @@ final class InputChromeModel: ObservableObject {
 
     @Published var directory = "~"
     @Published var branch: String?
+    /// The branch has uncommitted changes (a dot after its name).
+    @Published var branchDirty = false
+    /// Active Python virtualenv/conda env, and Node's version in a Node project.
+    @Published var python: String?
+    @Published var node: String?
+    var onBranchClick: (() -> Void)?
     @Published var palette = ChromePalette(theme: .runeDark)
     @Published var monoFontSize: CGFloat = 13
     @Published var hint: Hint = .idle
@@ -660,8 +678,23 @@ struct ContextChipsRow: View {
             ContextChip(symbol: "folder", text: model.directory, palette: model.palette, size: model.monoFontSize - 1)
                 .layoutPriority(0)
             if let branch = model.branch {
-                ContextChip(symbol: "arrow.triangle.branch", text: branch, palette: model.palette, size: model.monoFontSize - 1)
-                    .layoutPriority(1)
+                Button(action: { model.onBranchClick?() }) {
+                    ContextChip(symbol: "arrow.triangle.branch", text: branch + (model.branchDirty ? " •" : ""),
+                                palette: model.palette, size: model.monoFontSize - 1)
+                }
+                .buttonStyle(.plain)
+                .layoutPriority(1)
+                .help(model.branchDirty ? "Uncommitted changes. Click to switch branches." : "Click to switch branches.")
+            }
+            if let python = model.python {
+                ContextChip(symbol: "shippingbox", text: python, palette: model.palette, size: model.monoFontSize - 1)
+                    .fixedSize()
+                    .help("Python environment")
+            }
+            if let node = model.node {
+                ContextChip(symbol: "hexagon", text: "node " + node, palette: model.palette, size: model.monoFontSize - 1)
+                    .fixedSize()
+                    .help("Node.js version in this project")
             }
             if let active = ai.activeModel {
                 Button(action: showModelMenu) {

@@ -1723,6 +1723,12 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
                 CommandCatalog.shared.loadExecutables(path: path)
                 DispatchQueue.main.async { self?.view.inputArea.refreshHighlighting() }
             }
+        case .pythonEnvironment(let virtualEnv, let conda):
+            let label = Self.pythonLabel(virtualEnv: virtualEnv, conda: conda)
+            if label != pythonEnvironment {
+                pythonEnvironment = label
+                view.contextDidChange()
+            }
         case .typeahead(let text):
             awaitingTypeahead = false
             typeaheadTimeout?.cancel()
@@ -1814,12 +1820,73 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
 
     private func refreshGitBranch() {
         let path = currentDirectory
+        let searchPath = [ProcessInfo.processInfo.environment["PATH"] ?? "", shellSearchPath ?? ""].joined(separator: ":")
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let branch = GitInfo.branch(at: path)
+            // Uncommitted changes to tracked files (untracked files would make big repos slow).
+            let dirty = branch != nil && (GitCommand.run(["status", "--porcelain", "--untracked-files=no", "--ignore-submodules"],
+                                                        in: path, searchPath: searchPath).map { $0.status == 0 && !$0.output.isEmpty } ?? false)
+            let node = NodeVersion.forProject(at: path, searchPath: searchPath)
             DispatchQueue.main.async {
-                guard let self, self.currentDirectory == path, self.gitBranch != branch else { return }
+                guard let self, self.currentDirectory == path,
+                      self.gitBranch != branch || self.gitDirty != dirty || self.nodeVersion != node else { return }
                 self.gitBranch = branch
+                self.gitDirty = dirty
+                self.nodeVersion = node
                 self.view.contextDidChange()
+            }
+        }
+    }
+
+    // MARK: - Context chips
+
+    /// The current branch has uncommitted changes to tracked files.
+    private(set) var gitDirty = false
+    /// Node's version, in a folder with a package.json (nil elsewhere).
+    private(set) var nodeVersion: String?
+    /// The active Python virtualenv or conda env, as the chip shows it.
+    private(set) var pythonEnvironment: String?
+
+    private static func pythonLabel(virtualEnv: String?, conda: String?) -> String? {
+        if let virtualEnv {
+            let name = (virtualEnv as NSString).lastPathComponent
+            // `.venv` says little; name it after its project folder.
+            if [".venv", "venv", "env", ".env"].contains(name) {
+                return ((virtualEnv as NSString).deletingLastPathComponent as NSString).lastPathComponent + "/" + name
+            }
+            return name
+        }
+        return conda
+    }
+
+    /// Click on the branch chip: recent branches to switch to (as a visible command), or a new one.
+    func showBranchMenu() {
+        guard !isRemote, let current = gitBranch else { return }
+        let path = currentDirectory
+        let searchPath = [ProcessInfo.processInfo.environment["PATH"] ?? "", shellSearchPath ?? ""].joined(separator: ":")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let output = GitCommand.run(["for-each-ref", "--sort=-committerdate", "--count=15", "--format=%(refname:short)", "refs/heads"],
+                                        in: path, searchPath: searchPath)
+            let branches = output.map { String(decoding: $0.output, as: UTF8.self).split(separator: "\n").map(String.init) } ?? []
+            DispatchQueue.main.async {
+                guard let self else { return }
+                let menu = NSMenu()
+                let canRun = self.mode == .editor
+                for branch in branches {
+                    let item = ClosureMenuItem(title: branch) { [weak self] in
+                        guard branch != current else { return }
+                        self?.submit("git switch " + FileListing.shellQuoted(branch))
+                    }
+                    item.state = branch == current ? .on : .off
+                    item.isEnabled = canRun
+                    menu.addItem(item)
+                }
+                if !branches.isEmpty { menu.addItem(.separator()) }
+                menu.addItem(ClosureMenuItem(title: "New Branch…") { [weak self] in
+                    self?.view.inputArea.setText("git switch -c ")
+                })
+                let location = NSEvent.mouseLocation
+                menu.popUp(positioning: nil, at: NSPoint(x: location.x - 10, y: location.y + 10), in: nil)
             }
         }
     }
