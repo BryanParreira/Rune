@@ -517,6 +517,9 @@ enum DebugDriver {
                     print("FRAME window=\(window.frame.size) content=\(window.contentView?.frame.size ?? .zero)")
                     fflush(stdout)
                 }
+            case let typed where typed.hasPrefix("@termType:"):
+                // Keys typed into the terminal itself (what reaches a running command).
+                session.terminalView.send(data: Array(typed.dropFirst(10).utf8)[...])
             case "@float":
                 // Keeps the test window above other apps so a screen recording sees it.
                 if let window = session.view.window {

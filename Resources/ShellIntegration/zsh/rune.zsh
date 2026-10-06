@@ -38,10 +38,36 @@ __rune_precmd_first() {
   fi
 }
 
+# Keys Rune sends around the commands it writes (never typed by a person):
+#   ESC[9972~  clear the line, so keys typed while the last command ran don't join the next
+#   ESC[9973~  hand the line to Rune's editor (input=…), then clear it
+__rune_clear_line() {
+  BUFFER=''
+  CURSOR=0
+  [[ $KEYMAP == vicmd ]] && zle -K viins
+  return 0
+}
+__rune_take_line() {
+  __rune_encode "$BUFFER"
+  builtin printf '\e]6973;input=%s\a' "$REPLY"
+  __rune_clear_line
+}
+zle -N __rune_clear_line
+zle -N __rune_take_line
+__rune_bind_line_keys() {
+  local keymap
+  for keymap in emacs viins vicmd; do
+    bindkey -M $keymap '\e[9972~' __rune_clear_line
+    bindkey -M $keymap '\e[9973~' __rune_take_line
+  done
+}
+
 # Last precmd hook: report the cwd and (re)install the prompt marks.
 __rune_precmd_last() {
   __rune_encode "$PWD"
   builtin printf '\e]6973;cwd=%s\a' "$REPLY"
+  # Every prompt: plugins (zsh-vi-mode…) may rebuild the keymaps after startup.
+  __rune_bind_line_keys
 
   # Once the user's config has loaded, tell Rune which aliases and functions exist so its
   # editor can highlight them as valid commands.
@@ -125,4 +151,5 @@ fi
 typeset -ga zle_highlight
 zle_highlight=(${zle_highlight:#paste:*} paste:none)
 
-builtin printf '\e]6973;hello=1\a'
+__rune_bind_line_keys
+builtin printf '\e]6973;hello=2\a'

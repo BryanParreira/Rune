@@ -112,5 +112,30 @@ trap '__rune_usr1' USR1
 # Commands from Rune arrive as bracketed pastes (bash 5.1+); don't render them highlighted.
 builtin bind 'set enable-active-region off' 2>/dev/null
 
-builtin printf '\033]6973;hello=1\007'
+# Keys Rune sends around the commands it writes (never typed by a person):
+#   ESC[9972~  clear the line, so keys typed while the last command ran don't join the next
+#   ESC[9973~  hand the line to Rune's editor (input=…), then clear it. Reading the line
+#              needs bash 4 (READLINE_LINE); bash 3.2 only clears it.
+__rune_take_line() {
+  __rune_encode "$READLINE_LINE"
+  builtin printf '\033]6973;input=%s\007' "$__rune_reply"
+  READLINE_LINE=''
+  READLINE_POINT=0
+}
+__rune_line_keys=1
+for __rune_keymap in emacs vi-insert vi-command; do
+  builtin bind -m "$__rune_keymap" '"\e[9972~": kill-whole-line' 2>/dev/null || __rune_line_keys=
+  if [ "${BASH_VERSINFO[0]}" -ge 4 ]; then
+    builtin bind -m "$__rune_keymap" -x '"\e[9973~": __rune_take_line' 2>/dev/null || __rune_line_keys=
+  else
+    builtin bind -m "$__rune_keymap" '"\e[9973~": kill-whole-line' 2>/dev/null || __rune_line_keys=
+  fi
+done
+unset __rune_keymap
+
+if [ -n "$__rune_line_keys" ]; then
+  builtin printf '\033]6973;hello=2\007'
+else
+  builtin printf '\033]6973;hello=1\007'
+fi
 fi

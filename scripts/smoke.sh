@@ -78,6 +78,17 @@ check menu "completion menu opens with choices" "MENU open=true .*checkout"
 run keys /bin/zsh 16 1.5 "@wait||@wait||@chord:ctrl+e||@type:git push origin main||@chord:ctrl+w||@chord:ctrl+u||@chord:ctrl+y"
 check keys "shell editing keys" "KEY ctrl\+w → <git push origin >" "KEY ctrl\+u → <>" "KEY ctrl\+y → <git push origin >"
 
+# Keys typed while a command runs come back in the editor and never join the next command.
+for shell in /bin/zsh /bin/bash; do
+  name=typeahead-${shell:t}
+  run $name $shell 22 1.2 "@wait||@wait||sleep 2||@termType:ls -la||@wait||@wait||@editor||echo after-typeahead||@dump"
+  if [[ ${shell:t} == zsh ]]; then
+    check $name "${shell:t}: keys typed during a command come back in the input" "EDITOR text=<ls -la>" "DUMP block echo after-typeahead exit=0"
+  else
+    check $name "${shell:t}: keys typed during a command don't join the next one" "DUMP block echo after-typeahead exit=0"
+  fi
+done
+
 run find /bin/zsh 14 1.2 "@wait||printf 'needle\\nhay\\nneedle\\n'||@find||@findQuery:needle"
 check find "find in output" "FIND open=true matches=[3-9]"
 

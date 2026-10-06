@@ -7,6 +7,7 @@ import Foundation
 ///
 /// Rune's private OSC 6973 carries metadata as `key=value` (value percent-encoded):
 /// - `hello=<version>` integration loaded, `cwd=<path>`, `cmd=<command text>`.
+///   Version 2 binds `ShellLineKeys` (clear the line, hand it to Rune).
 public enum ShellMark: Equatable, Sendable {
     case promptStart
     case commandStart
@@ -25,6 +26,24 @@ public enum ShellMark: Equatable, Sendable {
     case remoteDirectory(String)
     /// The remote setup script finished.
     case remoteReady
+    /// What was in the shell's line when Rune asked for it: keys typed while the last
+    /// command ran, handed to Rune's editor (empty when nothing was typed).
+    case typeahead(String)
+}
+
+/// Keys Rune's integrations bind in the shell's line editor (integration version 2).
+public enum ShellLineKeys {
+    /// Clears the line: sent before each command Rune writes, so keys typed while the last
+    /// command ran can't end up in front of it.
+    public static let clear: [UInt8] = Array("\u{1b}[9972~".utf8)
+    /// Reports the line (`input=`) and clears it: sent at the prompt after keys were typed
+    /// into a running command, so they reappear in Rune's editor.
+    public static let take: [UInt8] = Array("\u{1b}[9973~".utf8)
+    public static let minimumVersion = 2
+
+    public static func supported(integrationVersion: String?) -> Bool {
+        (integrationVersion.flatMap { Int($0) } ?? 0) >= minimumVersion
+    }
 }
 
 public enum ShellMarkParser {
@@ -61,6 +80,7 @@ public enum ShellMarkParser {
         case "remote": return value.isEmpty ? nil : .remoteHost(value)
         case "rcwd": return value.isEmpty ? nil : .remoteDirectory(value)
         case "remote-ready": return .remoteReady
+        case "input": return .typeahead(value)
         // fish reports prompt/command marks here instead of OSC 133 (see rune.fish).
         case "mark": return parse133(value)
         default: return nil

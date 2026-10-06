@@ -72,4 +72,21 @@ function __rune_usr1 --on-signal SIGUSR1
     commandline -f repaint
 end
 
-printf '\e]6973;hello=1\a'
+# Keys Rune sends around the commands it writes (never typed by a person):
+#   ESC[9972~  clear the line, so keys typed while the last command ran don't join the next
+#   ESC[9973~  hand the line to Rune's editor (input=…), then clear it
+function __rune_take_line
+    __rune_osc input (string join \n -- (commandline))
+    commandline -r ''
+end
+set -l __rune_line_keys 1
+for mode in default insert
+    bind -M $mode \e\[9972~ 'commandline -r ""' 2>/dev/null; or set __rune_line_keys 0
+    bind -M $mode \e\[9973~ __rune_take_line 2>/dev/null; or set __rune_line_keys 0
+end
+
+if test "$__rune_line_keys" = 1
+    printf '\e]6973;hello=2\a'
+else
+    printf '\e]6973;hello=1\a'
+end

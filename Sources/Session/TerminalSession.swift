@@ -349,6 +349,38 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     /// zsh draws its end-of-line mark (PROMPT_SP) before the prompt clears it again.
     private var promptPendingFromRow: Int?
 
+    // Keys typed while a command runs go to the shell, which keeps any it doesn't read in its
+    // own line. Rune clears that line before each command it writes (otherwise `ls` typed
+    // during a build turns the next `pwd` into `lspwd`) and, at the next prompt, asks for it
+    // so the keys reappear in the editor.
+
+    /// Keys reached the shell while a command ran.
+    private var typedDuringCommand = false
+    /// Asked the shell for its line at the prompt; its echo stays hidden until the answer.
+    private var awaitingTypeahead = false
+    private var typeaheadTimeout: DispatchWorkItem?
+
+    /// The shell binds Rune's line keys (local shells with integration version 2, edited in
+    /// Rune's editor).
+    private var lineKeysSupported: Bool {
+        !isRemote && !typeInShell && ShellLineKeys.supported(integrationVersion: tracker.integrationVersion)
+    }
+
+    private func requestTypeahead() {
+        awaitingTypeahead = true
+        typeaheadTimeout?.cancel()
+        // bash 3.2 can only clear the line, and never answers.
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.awaitingTypeahead else { return }
+            self.awaitingTypeahead = false
+            self.updateBottomTrim()
+            self.view.blocksDidChange()
+        }
+        typeaheadTimeout = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
+        terminalView.sendToShell(ShellLineKeys.take)
+    }
+
     private static let displayHost = HostIdentity.displayHostname()
     private static let userName = HostIdentity.userName()
     /// A shell that dies this quickly probably failed to start; keep its output visible.
@@ -645,7 +677,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         // Make room for the output; the conversation stays available for follow-ups.
         view.conversation.collapse()
 
-        var bytes: [UInt8] = []
+        var bytes: [UInt8] = lineKeysSupported ? ShellLineKeys.clear : []
+        awaitingTypeahead = false
         if terminalView.getTerminal().bracketedPasteMode {
             // Paste mode keeps multi-line commands intact until the final Return.
             bytes += Array("\u{1b}[200~".utf8) + Array(trimmed.utf8) + Array("\u{1b}[201~".utf8)
@@ -1519,6 +1552,10 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             promptPendingFromRow = nil
             endCommandTransition()
             setCaretSuppressed(false)
+            if typedDuringCommand {
+                typedDuringCommand = false
+                if lineKeysSupported { requestTypeahead() }
+            }
         case .outputStart:
             promptPendingFromRow = nil
             beginSettling()
@@ -1590,6 +1627,13 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 CommandCatalog.shared.loadExecutables(path: path)
                 DispatchQueue.main.async { self?.view.inputArea.refreshHighlighting() }
+            }
+        case .typeahead(let text):
+            awaitingTypeahead = false
+            typeaheadTimeout?.cancel()
+            // Only into an empty editor: never over something typed there since.
+            if !text.isEmpty, view.inputArea.editor.string.isEmpty {
+                view.inputArea.setText(text)
             }
         case .commandText, .integrationReady:
             break
@@ -1734,7 +1778,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             // A new command (its echo, then its first output) whatever it contains: a quick
             // command then appears once, finished, instead of growing over several frames.
             // Not once it fills the screen: hiding all of it would blank the pane instead.
-            let transitionStart = (commandPending && promptIsInvisible) || (commandSettling && ownPrompt)
+            let transitionStart = ((commandPending || awaitingTypeahead) && promptIsInvisible) || (commandSettling && ownPrompt)
                 ? commandInputRow : (ownPrompt ? promptPendingFromRow : nil)
             if let input = transitionStart, input - screenTop >= 2 {
                 let first = input - screenTop
@@ -1768,7 +1812,10 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             if data.contains(13) { restartAfterExit() }
             return true
         }
-        guard mode == .editor else { return false }
+        guard mode == .editor else {
+            if mode == .runningCommand { typedDuringCommand = true }
+            return false
+        }
         view.redirectToEditor(data)
         return true
     }

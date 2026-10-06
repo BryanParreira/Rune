@@ -98,7 +98,7 @@ public final class BlockTracker {
             pendingCommandText = text
             return false
 
-        case .shellNames, .shellPath, .remoteHost, .remoteDirectory, .remoteReady:
+        case .shellNames, .shellPath, .remoteHost, .remoteDirectory, .remoteReady, .typeahead:
             return false
 
         case .promptStart:
