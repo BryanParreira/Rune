@@ -52,9 +52,16 @@ final class RuneTerminalView: LocalProcessTerminalView {
     /// True while the viewport follows new output (the scroll that comes with a chunk).
     private(set) var isScrollingWithOutput = false
 
-    /// Output read from the shell but not parsed yet.
+    /// Output read from the shell but not parsed yet (from `pendingStart` on).
     private var pendingOutput: [UInt8] = []
+    private var pendingStart = 0
     private var flushScheduled = false
+
+    /// Most output parsed in one pass of the main thread. A flood (a big build log, `cat` of
+    /// a large file) is parsed a slice at a time with typing, scrolling and drawing in
+    /// between, instead of freezing them for as long as the whole backlog takes (half a
+    /// second and more). Warp's reader yields at the same size.
+    private static let maxBytesPerPass = 64 * 1024
 
     /// A program writing line by line (`seq`, a build log) arrives a few bytes at a time:
     /// hundreds of thousands of reads a second. Parsing each one separately costs more than
@@ -66,19 +73,33 @@ final class RuneTerminalView: LocalProcessTerminalView {
         Self.debugBytes += slice.count
         #endif
         pendingOutput.append(contentsOf: slice)
-        guard !flushScheduled else { return }
-        flushScheduled = true
-        DispatchQueue.main.async { [weak self] in self?.flushOutput() }
+        scheduleFlush()
     }
 
-    /// Parses the output waiting to be shown. Called before Rune writes into the terminal
-    /// itself, so nothing lands out of order.
-    func flushOutput() {
+    private func scheduleFlush() {
+        guard !flushScheduled else { return }
+        flushScheduled = true
+        DispatchQueue.main.async { [weak self] in self?.flushOutput(all: false) }
+    }
+
+    /// Parses output waiting to be shown: everything (`all`, before Rune writes into the
+    /// terminal itself, so nothing lands out of order), or one slice.
+    func flushOutput(all: Bool = true) {
         flushScheduled = false
-        guard !pendingOutput.isEmpty else { return }
-        let bytes = pendingOutput
-        pendingOutput.removeAll(keepingCapacity: true)
-        let shown = outputFilter?(bytes[...]) ?? bytes[...]
+        let available = pendingOutput.count - pendingStart
+        guard available > 0 else { return }
+        let count = all ? available : min(available, Self.maxBytesPerPass)
+        let bytes = pendingOutput[pendingStart..<(pendingStart + count)]
+        pendingStart += count
+        if pendingStart == pendingOutput.count {
+            pendingOutput.removeAll(keepingCapacity: true)
+            pendingStart = 0
+        } else if pendingStart >= 1 << 20 {
+            // Drop what's been parsed now and then, not on every slice.
+            pendingOutput.removeFirst(pendingStart)
+            pendingStart = 0
+        }
+        let shown = outputFilter?(bytes) ?? bytes
         if !shown.isEmpty {
             feeding = true
             super.dataReceived(slice: shown)
@@ -92,6 +113,8 @@ final class RuneTerminalView: LocalProcessTerminalView {
             }
         }
         onDataReceived?()
+        // The rest on a later pass, after whatever else is waiting (keys, drawing).
+        if pendingStart < pendingOutput.count { scheduleFlush() }
     }
 
     /// Writes into the terminal after any output still waiting to be parsed.

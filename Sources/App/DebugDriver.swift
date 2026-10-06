@@ -421,6 +421,26 @@ enum DebugDriver {
                 print(String(format: "TYPING keys=%d avg=%.2fms p95=%.2fms max=%.2fms", times.count,
                              times.reduce(0, +) / Double(max(1, times.count)), sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))], sorted.last ?? 0))
                 fflush(stdout)
+            case let watch where watch.hasPrefix("@stallWatch:"):
+                // For N seconds, how late a 10 ms main-thread timer fires: the worst pause typing
+                // or scrolling would hit while output pours in.
+                guard let seconds = Double(watch.dropFirst(12)) else { break }
+                var gaps: [Double] = []
+                var last = DispatchTime.now().uptimeNanoseconds
+                let end = last + UInt64(seconds * 1e9)
+                let timer = Timer(timeInterval: 0.01, repeats: true) { timer in
+                    let now = DispatchTime.now().uptimeNanoseconds
+                    gaps.append(Double(now - last) / 1e6)
+                    last = now
+                    guard now >= end else { return }
+                    timer.invalidate()
+                    let sorted = gaps.sorted()
+                    print(String(format: "STALL ticks=%d p50=%.1fms p95=%.1fms p99=%.1fms max=%.1fms", sorted.count,
+                                 sorted[sorted.count / 2], sorted[Int(Double(sorted.count) * 0.95)],
+                                 sorted[Int(Double(sorted.count) * 0.99)], sorted.last ?? 0))
+                    fflush(stdout)
+                }
+                RunLoop.main.add(timer, forMode: .common)
             case "@echoLatency":
                 // Inside `cat` (raw echo): time from sending a key to it being parsed on screen.
                 let terminal = session.terminalView.getTerminal()
