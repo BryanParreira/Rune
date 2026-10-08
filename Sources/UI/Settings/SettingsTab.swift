@@ -1018,6 +1018,7 @@ struct AIPage: View {
 
 struct KeyboardPage: View {
     @ObservedObject var model: SettingsModel
+    @State private var recordingHotkey = false
 
     var body: some View {
         let p = model.palette
@@ -1025,9 +1026,9 @@ struct KeyboardPage: View {
             PageTitle(text: "Keyboard shortcuts", palette: p)
             SettingRow(model: model, title: "Show or hide Rune from anywhere", key: "globalHotkey",
                        detail: hotkeyDetail) {
-                DropdownField(selection: model.binding("globalHotkey", { $0.globalHotkey }),
-                              options: Self.hotkeyChoices(current: model.config.globalHotkey),
-                              label: { $0 == "off" ? "Off" : GlobalHotKey.display($0) }, palette: p, width: 140)
+                HotkeyRecorder(spec: model.config.globalHotkey, palette: p, isRecording: $recordingHotkey) {
+                    model.set("globalHotkey", $0)
+                }
             }
             SettingRow(model: model, title: "Open Rune at login",
                        detail: "Starts quietly in the background, so the shortcut above works right after you log in.") {
@@ -1057,17 +1058,89 @@ struct KeyboardPage: View {
 }
 
 extension KeyboardPage {
-    static func hotkeyChoices(current: String) -> [String] {
-        let presets = ["ctrl+`", "option+`", "option+space", "ctrl+option+t", "off"]
-        return presets.contains(current) ? presets : [current] + presets
-    }
-
     var hotkeyDetail: String {
         let spec = model.config.globalHotkey
-        if spec == "off" { return "Off. Choose a shortcut to bring Rune forward from any app." }
-        if GlobalHotKey.parse(spec) == nil { return "“\(spec)” isn't a shortcut Rune understands (try \"ctrl+`\" or \"option+space\")." }
-        if GlobalHotKey.shared.current != spec { return "Another app is already using \(GlobalHotKey.display(spec)). Pick a different one." }
-        return "Press \(GlobalHotKey.display(spec)) in any app to bring Rune forward; press it again to hide it."
+        if recordingHotkey { return "Press the keys you want, with ⌃, ⌥ or ⌘ (F-keys work alone). ⌫ turns it off, esc cancels." }
+        if spec == "off" { return "Off. Click it and press the keys you want to bring Rune forward from any app." }
+        if GlobalHotKey.parse(spec) == nil { return "“\(spec)” isn't a shortcut Rune understands. Click it and press a new one." }
+        if GlobalHotKey.shared.taken == spec { return "Another app is already using \(GlobalHotKey.display(spec)). Click it and press a different one." }
+        return "Press \(GlobalHotKey.display(spec)) in any app to bring Rune forward; press it again to hide it. Click to change."
+    }
+}
+
+/// The face of a shortcut recorder: outlined like a key so it reads as something to click.
+struct RecorderChip: View {
+    let title: String
+    let recording: Bool
+    let palette: ChromePalette
+    @State private var hovering = false
+
+    var body: some View {
+        let p = palette
+        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        Text(recording ? "Press keys…" : title)
+            // The system font draws ⌃ ⌥ ⌘ as proper key symbols (a monospaced ⌃ reads as "^").
+            .font(.system(size: recording ? 12 : 13, weight: .medium))
+            .tracking(recording ? 0 : 1.5)
+            .foregroundColor(Color(nsColor: recording ? p.accent : p.text))
+            .frame(minWidth: 96)
+            .padding(.vertical, 4)
+            .background(shape.fill(Color(nsColor: recording ? p.highlight : p.surface2)))
+            .overlay(shape.stroke(Color(nsColor: recording ? p.accent : p.foreground.withAlphaComponent(hovering ? 0.3 : 0.15)), lineWidth: 1))
+            .contentShape(shape)
+            .onHover { hovering = $0 }
+            .help(recording ? "Press the new shortcut, or esc to cancel" : "Click to record a new shortcut")
+    }
+}
+
+/// Click, then press the keys: records the global shortcut that shows Rune. The current
+/// shortcut is paused while recording, so pressing it again records it instead of hiding Rune.
+struct HotkeyRecorder: View {
+    let spec: String
+    let palette: ChromePalette
+    @Binding var isRecording: Bool
+    /// Called with the new spec ("ctrl+option+t", or "off"), already registered.
+    let onChange: (String) -> Void
+    @State private var monitor: Any?
+
+    var body: some View {
+        let p = palette
+        Button {
+            isRecording ? stop(nil) : start()
+        } label: {
+            RecorderChip(title: spec == "off" ? "Off" : GlobalHotKey.display(spec), recording: isRecording, palette: p)
+        }
+        .buttonStyle(.plain)
+        .onDisappear { stop(nil) }
+    }
+
+    private func start() {
+        GlobalHotKey.shared.unregister()
+        isRecording = true
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let plain = event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty
+            if event.keyCode == 53, plain {
+                stop(nil)
+            } else if event.keyCode == 51, plain {
+                stop("off")
+            } else if let recorded = GlobalHotKey.spec(from: event) {
+                stop(recorded)
+            } else {
+                NSSound.beep()
+            }
+            return nil
+        }
+    }
+
+    /// Ends recording; `recorded` nil keeps the shortcut it had.
+    private func stop(_ recorded: String?) {
+        guard isRecording || monitor != nil else { return }
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        // Register before saving so the row can tell at once whether another app has it.
+        GlobalHotKey.shared.register(recorded ?? spec)
+        isRecording = false
+        if let recorded, recorded != spec { onChange(recorded) }
     }
 }
 
@@ -1461,13 +1534,7 @@ struct MenuShortcutsSection: View {
             Button {
                 recording == title ? stopRecording() : startRecording(title)
             } label: {
-                Text(recording == title ? "Press keys…" : shown)
-                    .font(.system(size: 12, weight: .medium, design: recording == title ? .default : .monospaced))
-                    .foregroundColor(Color(nsColor: recording == title ? p.accent : p.text))
-                    .frame(minWidth: 96)
-                    .padding(.vertical, 4)
-                    .background(RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(Color(nsColor: recording == title ? p.highlight : p.surface2)))
+                RecorderChip(title: shown, recording: recording == title, palette: p)
             }
             .buttonStyle(.plain)
         }

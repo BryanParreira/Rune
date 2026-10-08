@@ -36,6 +36,9 @@ typing speed in the input.
 - [ ] Sleep the Mac with a command running, wake it: the tab still works.
 
 **Mac**
+- [ ] Settings → Keyboard shortcuts: click the global shortcut, press a new one; it works from another app. Pressing the old one while recording records it instead of hiding Rune.
+- [ ] Welcome Guide → Always ready: turn on background, log out and in. No window and no Dock icon; the menu-bar icon is there, and the shortcut opens a ready prompt at once.
+- [ ] Rune hidden in the background for an hour: Activity Monitor shows ~0% CPU and memory under 100 MB.
 - [ ] Shortcuts app shows Rune's actions; Get Last Output works.
 - [ ] `open "rune://open?dir=/tmp&command=ls"` opens a tab with `ls` typed, not run.
 - [ ] ⌘Y Quick Looks a path in the output.

@@ -30,7 +30,17 @@ final class SessionPool {
         }
     }
 
-    private init() {}
+    /// When the Mac runs short of memory the spare goes; the next new tab starts its shell
+    /// as usual and refills it.
+    private let memoryPressure = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
+
+    private init() {
+        memoryPressure.setEventHandler { [weak self] in
+            self?.refill?.cancel()
+            self?.discard()
+        }
+        memoryPressure.activate()
+    }
 
     /// A ready shell for `directory`, or nil (the caller starts one as usual).
     func take(snapshot: ConfigSnapshot, directory: String) -> TerminalSession? {

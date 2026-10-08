@@ -23,7 +23,9 @@ struct MarginNote: View {
     var angle: Double = -2.5
 
     var body: some View {
-        Text(text)
+        // Caveat leans right, so a last tall letter (the "l" of "optional") reaches past the
+        // text's width and was cut off; a thin space gives it room.
+        Text(text + "\u{2009}")
             .font(.hand(size))
             .foregroundColor(Color(nsColor: color))
             .rotationEffect(.degrees(angle))

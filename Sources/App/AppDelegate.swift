@@ -40,8 +40,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let openedOnFolder = !pendingDirectories.isEmpty || CommandLine.arguments.contains("--cwd")
         if pendingDirectories.isEmpty { pendingDirectories = [Self.launchDirectory()] }
         if Self.launchedAsLoginItem, !openedOnFolder, !OnboardingWindowController.needsOnboarding {
-            // Started at login: stay in the background until the hotkey (or the Dock) asks.
+            // Started at login: stay in the background until the hotkey (or the Dock) asks,
+            // with a shell already started so the first press opens a ready prompt.
             startupWindowsPending = true
+            SessionPool.shared.scheduleRefill(snapshot: store.snapshot)
             return
         }
         openStartupWindows(openedOnFolder: openedOnFolder)

@@ -1,10 +1,11 @@
 import AppKit
 import Combine
 import RuneKit
+import ServiceManagement
 import SwiftUI
 
 /// First-launch guide: asks for the macOS permissions a terminal needs (folder access, optional
-/// Full Disk Access), sets up AI and a few preferences. Shown once per Mac, before the first
+/// Full Disk Access), sets up AI, a few preferences and the global shortcut. Shown once per Mac, before the first
 /// terminal window; reopen it from Rune → Welcome Guide…
 final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     static let completedKey = "RuneOnboardingCompletedVersion"
@@ -14,9 +15,10 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         UserDefaults.standard.integer(forKey: completedKey) < currentVersion
     }
 
-    static let size = NSSize(width: 780, height: 520)
+    static let size = NSSize(width: 780, height: 560)
 
     private let model: OnboardingModel
+    private var themeObserver: AnyCancellable?
     /// Called once when the guide closes (finished, skipped, or closed with the red button).
     var onClose: (() -> Void)?
 
@@ -42,6 +44,11 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         let host = NSHostingView(rootView: OnboardingView(model: model) { [weak self] in self?.finish() })
         host.safeAreaRegions = []
         window.contentView = host
+        // Picking a look in the guide restyles the guide itself, controls included.
+        themeObserver = store.$snapshot
+            .map(\.theme.isLight)
+            .removeDuplicates()
+            .sink { [weak window] in window?.appearance = NSAppearance(named: $0 ? .aqua : .darkAqua) }
     }
 
     @available(*, unavailable)
@@ -71,7 +78,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
 final class OnboardingModel: ObservableObject {
     enum Step: Int, CaseIterable {
-        case welcome, permissions, setup
+        case welcome, permissions, setup, background
     }
 
     enum Access: Equatable { case unknown, granted, denied, missing }
@@ -106,6 +113,8 @@ final class OnboardingModel: ObservableObject {
         direction = 1
         step = next
     }
+
+    var isLastStep: Bool { Step(rawValue: step.rawValue + 1) == nil }
 
     func back() {
         guard let previous = Step(rawValue: step.rawValue - 1) else { return }
@@ -209,6 +218,7 @@ extension OnboardingModel.Step {
         case .welcome: return "Welcome"
         case .permissions: return "Access"
         case .setup: return "Setup"
+        case .background: return "Always ready"
         }
     }
 
@@ -217,6 +227,7 @@ extension OnboardingModel.Step {
         case .welcome: return "What Rune does"
         case .permissions: return "Folders & disk"
         case .setup: return "Input & private AI"
+        case .background: return "Shortcut & login"
         }
     }
 }
@@ -264,6 +275,7 @@ struct OnboardingView: View {
         case .welcome: WelcomeStep(model: model)
         case .permissions: PermissionsStep(model: model)
         case .setup: SetupStep(model: model)
+        case .background: BackgroundStep(model: model)
         }
     }
 
@@ -279,7 +291,7 @@ struct OnboardingView: View {
                 .foregroundColor(Color(nsColor: p.secondary))
             }
             Spacer()
-            if model.step != .setup {
+            if !model.isLastStep {
                 Button("Skip") { onFinish() }
                     .buttonStyle(.plain)
                     .font(.system(size: 13, weight: .medium))
@@ -287,11 +299,11 @@ struct OnboardingView: View {
                     .help("Skip setup. You can reopen this from Rune → Welcome Guide.")
             }
             Button {
-                model.step == .setup ? onFinish() : model.next()
+                model.isLastStep ? onFinish() : model.next()
             } label: {
                 HStack(spacing: 8) {
                     Text(primaryTitle)
-                    Image(systemName: model.step == .setup ? "arrow.right" : "chevron.right")
+                    Image(systemName: model.isLastStep ? "arrow.right" : "chevron.right")
                         .font(.system(size: 11, weight: .bold))
                 }
                 .font(.system(size: 13.5, weight: .semibold))
@@ -315,13 +327,13 @@ struct OnboardingView: View {
     private var primaryTitle: String {
         switch model.step {
         case .welcome: return "Get Started"
-        case .permissions: return "Continue"
-        case .setup: return "Start Using Rune"
+        case .permissions, .setup: return "Continue"
+        case .background: return "Start Using Rune"
         }
     }
 }
 
-/// Left column: the app, the three steps with progress, and the privacy promise.
+/// Left column: the app, the steps with progress, and the privacy promise.
 private struct StepRail: View {
     @ObservedObject var model: OnboardingModel
 
@@ -621,9 +633,19 @@ private struct SetupStep: View {
         let p = model.palette
         VStack(alignment: .leading, spacing: 26) {
             Heading(step: .setup, title: "Make it yours", highlight: "yours",
-                    subtitle: "Choose how you type commands and set up private AI. Both can be changed later in Settings.",
+                    subtitle: "Choose how Rune looks and how you type commands, and set up private AI. All of it can be changed later in Settings.",
                     note: "all of it stays on your Mac", palette: p)
             Card(palette: p) {
+                Row(symbol: "paintpalette", tint: p.ansiMagenta, title: "Look", detail: lookDetail, palette: p) {
+                    Picker("", selection: Binding(get: { look }, set: setLook)) {
+                        Text("Light").tag(Look.light)
+                        Text("Dark").tag(Look.dark)
+                        Text("Auto").tag(Look.auto)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 170)
+                }
                 Row(symbol: "keyboard", tint: p.accent, title: "Type commands in",
                     detail: model.config.inputMode == .editor ? "Rune's editor: suggestions, highlighting, completion." : "Your zsh prompt: every zsh plugin works as usual.",
                     palette: p) {
@@ -640,17 +662,37 @@ private struct SetupStep: View {
                     aiAction
                 }
             }
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Good to know")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(Color(nsColor: p.hint))
-                HStack(spacing: 16) {
-                    Shortcut(keys: "⌘↵", label: "Ask AI", palette: p)
-                    Shortcut(keys: "⌘T", label: "New tab", palette: p)
-                    Shortcut(keys: "⌘B", label: "Files", palette: p)
-                    Shortcut(keys: "⌘,", label: "Settings", palette: p)
-                }
-            }
+        }
+    }
+
+    private enum Look { case light, dark, auto }
+
+    private var look: Look {
+        if model.config.followSystemAppearance { return .auto }
+        return model.store.snapshot.theme.isLight ? .light : .dark
+    }
+
+    private var lookDetail: String {
+        let config = model.config
+        switch look {
+        case .auto: return "Follows macOS Light and Dark Mode. More themes in Settings."
+        case .light, .dark: return "\(Theme.displayName(config.theme)). More themes in Settings."
+        }
+    }
+
+    /// Light and Dark use Rune's warm paper themes; Auto follows macOS between the two.
+    private func setLook(_ look: Look) {
+        switch look {
+        case .light:
+            model.set("followSystemAppearance", false)
+            model.set("theme", "paper")
+        case .dark:
+            model.set("followSystemAppearance", false)
+            model.set("theme", "paper-night")
+        case .auto:
+            model.set("theme", "paper")
+            model.set("darkTheme", "paper-night")
+            model.set("followSystemAppearance", true)
         }
     }
 
@@ -681,6 +723,68 @@ private struct SetupStep: View {
         default:
             SmallButton(title: "Check Again", palette: p) { ai.refresh() }
         }
+    }
+}
+
+private struct BackgroundStep: View {
+    @ObservedObject var model: OnboardingModel
+    @State private var recording = false
+    @State private var inBackground = false
+
+    var body: some View {
+        let p = model.palette
+        VStack(alignment: .leading, spacing: 26) {
+            Heading(step: .background, title: "One key away", highlight: "One key",
+                    subtitle: "Rune can start when you log in and wait out of sight, so your terminal is a keypress away from any app.",
+                    note: "optional", palette: p)
+            Card(palette: p) {
+                Row(symbol: "command", tint: p.accent, title: "Shortcut to open Rune",
+                    detail: recording ? "Press the keys you want. ⌫ turns it off, esc cancels." : hotkeyDetail,
+                    palette: p) {
+                    HotkeyRecorder(spec: model.config.globalHotkey, palette: p, isRecording: $recording) {
+                        model.set("globalHotkey", $0)
+                    }
+                }
+                Row(symbol: "menubar.rectangle", tint: p.success, title: "Keep Rune running in the background",
+                    detail: "Opens at login and waits in the menu bar, not the Dock or ⌘-Tab.",
+                    palette: p, divider: false) {
+                    Toggle("", isOn: Binding(get: { inBackground }, set: setBackground))
+                        .labelsHidden().toggleStyle(.switch).controlSize(.small)
+                }
+            }
+            Label("Both can be changed later in Settings → Keyboard shortcuts and Appearance.", systemImage: "info.circle")
+                .font(.system(size: 11.5))
+                .foregroundColor(Color(nsColor: p.hint))
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Good to know once you start")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(Color(nsColor: p.hint))
+                HStack(spacing: 16) {
+                    Shortcut(keys: "⌘↵", label: "Ask AI", palette: p)
+                    Shortcut(keys: "⌘T", label: "New tab", palette: p)
+                    Shortcut(keys: "⌘B", label: "Files", palette: p)
+                    Shortcut(keys: "⌘,", label: "Settings", palette: p)
+                }
+            }
+        }
+        .onAppear { inBackground = SMAppService.mainApp.status == .enabled && !model.config.showDockIcon }
+    }
+
+    private var hotkeyDetail: String {
+        let spec = model.config.globalHotkey
+        if spec == "off" { return "Off. Click and press the keys you want." }
+        if GlobalHotKey.shared.taken == spec { return "Another app is already using \(GlobalHotKey.display(spec)). Click to pick another." }
+        return "Press it in any app to show Rune, again to hide it. Click to change."
+    }
+
+    private func setBackground(_ on: Bool) {
+        do {
+            if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+        } catch {
+            NSSound.beep()
+        }
+        model.set("showDockIcon", !on)
+        inBackground = on && SMAppService.mainApp.status == .enabled
     }
 }
 
