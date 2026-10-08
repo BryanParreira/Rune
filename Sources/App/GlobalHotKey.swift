@@ -68,8 +68,13 @@ final class GlobalHotKey {
             default: return nil
             }
         }
+        let isFunctionKey = functionKeys.values.contains(keyCode)
         // A bare key would swallow ordinary typing everywhere; function keys are the exception.
-        guard modifiers != 0 || functionKeys.values.contains(keyCode) else { return nil }
+        guard modifiers != 0 || isFunctionKey else { return nil }
+        // ⌘ or ⇧⌘ with a letter, digit or symbol is some app's command (⌘Q, ⌘C, ⇧⌘T…); taken
+        // system-wide it would stop working in every app.
+        let commandOnly = modifiers & UInt32(cmdKey) != 0 && modifiers & ~UInt32(cmdKey | shiftKey) == 0
+        guard !commandOnly || isFunctionKey || keyName == "space" else { return nil }
         return (UInt32(keyCode), modifiers)
     }
 

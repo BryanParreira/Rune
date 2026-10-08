@@ -1060,7 +1060,7 @@ struct KeyboardPage: View {
 extension KeyboardPage {
     var hotkeyDetail: String {
         let spec = model.config.globalHotkey
-        if recordingHotkey { return "Press the keys you want, with ⌃, ⌥ or ⌘ (F-keys work alone). ⌫ turns it off, esc cancels." }
+        if recordingHotkey { return "Press the keys you want, with ⌃ or ⌥ (⌘ alone is left to your apps; F-keys work alone). ⌫ turns it off, esc cancels." }
         if spec == "off" { return "Off. Click it and press the keys you want to bring Rune forward from any app." }
         if GlobalHotKey.parse(spec) == nil { return "“\(spec)” isn't a shortcut Rune understands. Click it and press a new one." }
         if GlobalHotKey.shared.taken == spec { return "Another app is already using \(GlobalHotKey.display(spec)). Click it and press a different one." }
