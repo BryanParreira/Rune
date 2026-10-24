@@ -1,0 +1,31 @@
+Rune
+Copyright (c) 2026 Bryan Bernardo Parreira. All rights reserved.
+
+Rune is proprietary software. The source code, design, and other materials in this
+repository are confidential and may not be copied, modified, published, distributed,
+sublicensed, or sold, in whole or in part, without prior written permission from the
+copyright holder.
+
+Use of the Rune application
+
+You may download and use the compiled Rune application, as distributed by the copyright
+holder, free of charge on any number of Macs you own or control. You may not:
+
+  - redistribute, sell, rent, or sublicense the application;
+  - modify, decompile, disassemble, or reverse engineer the application, except to the
+    extent that applicable law expressly permits it despite this limitation;
+  - remove or alter any copyright, trademark, or proprietary notices.
+
+Third-party components
+
+Rune includes open-source components that remain under their own licenses. Their notices
+are listed in Resources/Acknowledgements.txt and inside the application
+(Rune → Settings → About → Acknowledgements).
+
+Disclaimer
+
+THE APPLICATION IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM, OUT OF, OR IN CONNECTION WITH THE
+APPLICATION OR ITS USE.
